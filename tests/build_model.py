@@ -93,42 +93,29 @@ def get_network_model(wrk):
                 print('Process group: ', dl, gwrk[k])
                 #Will check a group of predeceptors
                 dummy_srcs = [] #A dummy work list
-                #finished = []     #Finished predeceptors
                 #Unfinished predeceptor subgroups
-                sg_srcs = [] #List of tart events
-                sg_works = []  #List of work lists
+                sg_srcs = [] #List of start events
+                straight_works = [] #Works woth no dummy successors
                 for i in dl: #O(n^3)
                     if wrk.dst.at[i] > 0:
                         #Check finished predeceptors
                         if wrk.straight.at[i]:
                             if wrk.dst.at[i] not in dummy_srcs: #O(n^4)
                                 dummy_srcs.append(wrk.dst.at[i])
-                        #finished.append(i)
-                        #wrk.ndep.at[i] = 0
+
                     elif wrk.src.at[i] not in sg_srcs: #O(n^4)
+                        #Start some subgroup
                         sg_srcs.append(wrk.src.at[i])
-                        sg_works.append([i])
+                        straight_works.append(i)
                     else:
-                        sg_works[sg_srcs.index(wrk.src.at[i])].append(i)
-                print('Dummy srcs 1: ', dummy_srcs)
+                        #Continue some bubgroup
+                        wrk.straight.at[i] = False
+                        wrk.dst.at[i] = evt_id
+                        dummy_srcs.append(evt_id)
+                        evt_id += 1
 
-                #Sort subgroups by src event
-                subgroups = list(zip(sg_srcs, sg_works))
-                subgroups.sort()#O(n*log(n))
-                print('Subgroups: ', subgroups)
+                print('Dummy srcs: ', dummy_srcs)
 
-                #iterate over subgroups
-                straight_works = [] #Works woth no dummy successors
-                for sgs, sgw in subgroups:#O(n^3)
-                    straight_works.append(sgw[0])
-                    if len(sgw) > 1:
-                        for i in sgw[1:]: #O(n^4)
-                            wrk.straight.at[i] = False
-                            wrk.dst.at[i] = evt_id
-                            dummy_srcs.append(evt_id)
-                            evt_id += 1
-
-                print('Dummy srcs 2: ', dummy_srcs)
                 #Finalize a group list processing
                 for i in gwrk[k]: #O(n^3)
                     wrk.src.at[i] = evt_id
