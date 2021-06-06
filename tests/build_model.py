@@ -1,9 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sun Oct 11 18:41:01 2020
+/**************************************************************************
+    CrazyCPM
+    Copyright (C) 2021 anonimous
 
-@author: anon
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    Please contact with me by E-mail: shkolnick.kun@gmail.com
+**************************************************************************/
 """
 #import numpy as np
 import pandas as pd
@@ -42,9 +58,11 @@ def get_network_model(wrk):
     wrk['rem_dep']  = wrk.ndep.copy() #Number of unprocessed depdstencies
     wrk['dep_map']  = wrk.dep.apply(lambda x: [False] +
                                     [(lambda y: True if y in x else False)(i)
-                                     for i in wrk.index])
+                                    for i in wrk.index])
+    #wrk['dep_map']  = wrk.dep.apply(lambda x: [(lambda y: True if y in x else False)(i) for i in wrk.index])
+
     wrk['started']  = [False] * n  #Work was started
-    wrk['straight'] = [True]*n     #Staight work
+    wrk['no_dummy'] = [True]*n     #Staight work
     #step 6 sort
     # There is an error in the source article!
     # We must sort the data first to ensure that any detected grpup of works
@@ -80,8 +98,8 @@ def get_network_model(wrk):
             if wrk.dep_map.at[i][chk_wrk[j]]: #O(n^2)
                 wrk.rem_dep.at[i] -= 1
 
-            if wrk.rem_dep.at[i] == 0:
-                if wrk.dep.at[i] not in gpred: #O(n^3)
+            if wrk.rem_dep.at[i] == 0: #This work gets started!
+                if wrk.dep.at[i] not in gpred: #O(n^3) as for every work this code gets visited once!
                     gpred.append(wrk.dep.at[i])
                     gwrk.append([i])
                 else:
@@ -100,11 +118,11 @@ def get_network_model(wrk):
                 #Unfinished predeceptor subgroups
                 sg_srcs = [] #List of start events
                 sg_map = [False]*2*n #sg_map map, max len() is 2*n
-                straight_works = [] #Works woth no dummy successors
+                no_dummy_works = [] #Works woth no dummy successors
                 for i in dl: #O(n^3)
                     if wrk.dst.at[i] > 0:
                         #Check finished predeceptors
-                        if wrk.straight.at[i]:
+                        if wrk.no_dummy.at[i]:
                             if not dummy_map[wrk.dst.at[i]]: #O(n^3) Fuck yeah!!!
                                 dummy_map[wrk.dst.at[i]] = True
                                 dummy_srcs.append(wrk.dst.at[i])
@@ -113,10 +131,10 @@ def get_network_model(wrk):
                         #Start some subgroup
                         sg_map[wrk.src.at[i]] = True
                         sg_srcs.append(wrk.src.at[i])
-                        straight_works.append(i)
+                        no_dummy_works.append(i)
                     else:
                         #Continue some subgroup
-                        wrk.straight.at[i] = False
+                        wrk.no_dummy.at[i] = False
                         wrk.dst.at[i] = evt_id
                         dummy_srcs.append(evt_id)
                         evt_id += 1
@@ -128,7 +146,7 @@ def get_network_model(wrk):
                     wrk.src.at[i] = evt_id
                     wrk.started.at[i]  = True
 
-                for i in straight_works: #O(n^3)
+                for i in no_dummy_works: #O(n^3)
                     wrk.dst.at[i] = evt_id
 
                 dummys += list(zip(dummy_srcs, [evt_id]*len(dummy_srcs)))
@@ -150,7 +168,7 @@ def get_network_model(wrk):
             return -2,None,None
 
     wrk.loc[wrk.dst== -1, 'dst'] = evt_id
-    wrk.drop(labels=['ndep', 'rem_dep', 'started', 'straight', 'dep_map'],
+    wrk.drop(labels=['ndep', 'rem_dep', 'started', 'no_dummy', 'dep_map'],
              axis=1, inplace=True)
     wrk.sort_values(by='dst', inplace=True)
     wrk.sort_values(by='src', inplace=True)
@@ -271,7 +289,7 @@ if __name__ == '__main__':
     #top = nx.bipartite.sets(G)[0]
     #Использовать multipartite_layout и адгоритм разбиения на слои с помощью висячих вершин
 
-    pos = nx.layout.spiral_layout(G)
+    pos = nx.layout.kamada_kawai_layout(G)
 
     nodes = nx.draw_networkx_nodes(G, pos, node_color="pink")#, node_size=500)
     edges = nx.draw_networkx_edges(G, pos,
