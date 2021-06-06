@@ -93,22 +93,26 @@ def get_network_model(wrk):
                 print('Process group: ', dl, gwrk[k])
                 #Will check a group of predeceptors
                 dummy_srcs = [] #A dummy work list
+                dummy_map = [False]*2*n #dummy_srcs map, max len() is 2*n
                 #Unfinished predeceptor subgroups
                 sg_srcs = [] #List of start events
+                sg_map = [False]*2*n #sg_map map, max len() is 2*n
                 straight_works = [] #Works woth no dummy successors
                 for i in dl: #O(n^3)
                     if wrk.dst.at[i] > 0:
                         #Check finished predeceptors
                         if wrk.straight.at[i]:
-                            if wrk.dst.at[i] not in dummy_srcs: #O(n^4)
+                            if not dummy_map[wrk.dst.at[i]]: #O(n^3) Fuck yeah!!!
+                                dummy_map[wrk.dst.at[i]] = True
                                 dummy_srcs.append(wrk.dst.at[i])
 
-                    elif wrk.src.at[i] not in sg_srcs: #O(n^4)
+                    elif not sg_map[wrk.src.at[i]]: #O(n^3) Fuck yeah!!!
                         #Start some subgroup
+                        sg_map[wrk.src.at[i]] = True
                         sg_srcs.append(wrk.src.at[i])
                         straight_works.append(i)
                     else:
-                        #Continue some bubgroup
+                        #Continue some subgroup
                         wrk.straight.at[i] = False
                         wrk.dst.at[i] = evt_id
                         dummy_srcs.append(evt_id)
