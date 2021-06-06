@@ -1,0 +1,96 @@
+# Setup tools outputs #
+#######################
+src/yaflpy/yaflpy.c
+*.egg-*
+
+# Compiled Object files #
+#########################
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers #
+#######################
+*.gch
+*.pch
+
+# Compiled Dynamic libraries #
+##############################
+*.so
+*.dylib
+*.dll
+
+# Fortran module files #
+########################
+*.mod
+
+# Compiled Static libraries #
+#############################
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables #
+###############
+*.exe
+*.out
+*.app
+*.elf
+*.hex
+
+# IDE/Toolchain generated #
+###########################
+*.save
+*.map
+*.lss
+*.d
+*.depend
+*.layout
+*.elay
+*.cscope_file_list
+*.[Tt]mp
+*.[Tt]emp
+*.ebTemp
+obj/
+dist/
+build/
+*-bak/
+*bin*
+Debug/
+Release/
+*.log
+.metadata/
+__pycache__/
+.ipynb_checkpoints/
+
+# Something else #
+##################
+*.py[ocd]
+*.rej
+
+# Backup files #
+################
+*~
+*.orig
+*.swp
+*.7z
+
+# Data files #
+*.h5
+
+# Directory files #
+###################
+*directory
+
+# Docs #
+########
+doc/doxygen/html/**
+
+# Specific files #
+##################
+
+# Makefiles #
+#############
+Makefile
