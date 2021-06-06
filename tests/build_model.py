@@ -36,10 +36,13 @@ def get_network_model(wrk):
     #
     n = len(wrk)
     #Real works src and dst events
-    wrk['src'] = [-1]*n           #src event
-    wrk['dst']   = wrk.src.copy() #dst event
-    wrk['ndep']  = wrk.dep.apply(lambda x: len(x)) #Number depdstencies on src
-    wrk['rem_dep']   = wrk.ndep.copy() #Number of unprocessed depdstencies
+    wrk['src']      = [-1]*n           #src event
+    wrk['dst']      = wrk.src.copy() #dst event
+    wrk['ndep']     = wrk.dep.apply(lambda x: len(x)) #Number depdstencies on src
+    wrk['rem_dep']  = wrk.ndep.copy() #Number of unprocessed depdstencies
+    wrk['dep_map']  = wrk.dep.apply(lambda x: [False] +
+                                    [(lambda y: True if y in x else False)(i)
+                                     for i in wrk.index])
     wrk['started']  = [False] * n  #Work was started
     wrk['straight'] = [True]*n     #Staight work
     #step 6 sort
@@ -74,7 +77,7 @@ def get_network_model(wrk):
             if wrk.started.at[i]:
                 continue
 
-            if chk_wrk[j] in wrk.dep.at[i]: #O(n^3)
+            if wrk.dep_map.at[i][chk_wrk[j]]: #O(n^2)
                 wrk.rem_dep.at[i] -= 1
 
             if wrk.rem_dep.at[i] == 0:
@@ -147,7 +150,8 @@ def get_network_model(wrk):
             return -2,None,None
 
     wrk.loc[wrk.dst== -1, 'dst'] = evt_id
-    wrk.drop(labels=['ndep', 'rem_dep', 'started', 'straight'], axis=1, inplace=True)
+    wrk.drop(labels=['ndep', 'rem_dep', 'started', 'straight', 'dep_map'],
+             axis=1, inplace=True)
     wrk.sort_values(by='dst', inplace=True)
     wrk.sort_values(by='src', inplace=True)
 
@@ -160,18 +164,18 @@ def get_network_model(wrk):
 
     dummys['to_drop'] = [False]*len(dummys)
 
-    for k,j in enumerate(dummys.index): #O(n^2)
+    for k,j in enumerate(dummys.index): #O(n)
         if dummys.to_drop.at[j]:
             continue
 
         src = dummys.src.at[j]
         pivot = dummys.dst.at[j]
-        for i in dummys.index[k+1:]: #O(n^3)
+        for i in dummys.index[k+1:]: #O(n^2)
             if dummys.src.at[i] != src:
                 break
 
             current = dummys.dst.at[i]
-            if len(dummys[(dummys.src == pivot) & (dummys.dst == current)]): #O(n^4)
+            if len(dummys[(dummys.src == pivot) & (dummys.dst == current)]): #O(n^3)
                 dummys.to_drop.at[i] = True
 
     dummys.drop(labels=dummys[dummys.to_drop == True].index, axis=0, inplace=True)
@@ -184,7 +188,6 @@ def get_network_model(wrk):
     return 0,wrk.copy(),dummys
 
 if __name__ == '__main__':
-    #Матрица связности работ, в каждой строке замаскированы предшествующие работы
     _wrk = pd.DataFrame(data = {'dep':[
         [5,19],
         [1,4,16,17,10,12,14],
@@ -205,7 +208,7 @@ if __name__ == '__main__':
         [5,19],
         [1,4,16,17,10,12,14],
         [],
-        [5,19,11,13,15], #[5,19,11,15] #УУУУПС!!!
+        [5,19,11,13,15],
         [3,8,9],
         ]}, index = list(range(1,22)))
 
@@ -219,6 +222,7 @@ if __name__ == '__main__':
     #     [4,5],
     #     [6],
     #     [7,8]
+    #     ]}, index = list(range(1,10))) #Too much dummty works!!!
 
     # _wrk = pd.DataFrame(data = {'dep':[
     #     [],
@@ -242,9 +246,13 @@ if __name__ == '__main__':
     #     [1,2,3],
     #     [1,2,3,4],
     #     [5,6,7,8],
-    #     ]}, index = list(range(1,10))) #Too much dummty works!!!
+    #     ]}, index = list(range(1,10))) #Loop!!!
 
     er,w,f = get_network_model(_wrk)
+
+    print(er)
+    print(w)
+    print(f)
 
     gdf = w[['src','dst']].copy()
     gdf['width'] = 1.0
@@ -279,7 +287,3 @@ if __name__ == '__main__':
     ax = plt.gca()
     ax.set_axis_off()
     plt.show()
-
-    print(er)
-    print(w)
-    print(f)
