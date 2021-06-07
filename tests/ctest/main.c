@@ -22,8 +22,7 @@
 
 #include "ccmp.h"
 
-#define N 22
-
+/*===========================================================================*/
 #define WBS              \
 X(0                     )\
 X(1,  5,19              )\
@@ -48,17 +47,45 @@ X(19                    )\
 X(20, 5,19,11,13,15     )\
 X(21, 3,8,9             )
 
-#define X CCPM_DEP_BUF
-WBS
-#undef X
-
-ccpmWorkSt wrk_pool[N*2] =
-{
-#   define X CCPM_WRK_INITIALIZER
+/*===========================================================================*/
+/*Work index*/
+uint16_t wrk_index[] = {
+#   define X(id, ...) id,
     WBS
 #   undef X
 };
 
+/*===========================================================================*/
+/*Compile time calculation of CCPM_WRK_NUM and work_pool size*/
+typedef enum
+{
+#   define X(id, ...) CCPM_WRK_##id,
+    WBS
+#   undef X
+    CCPM_WRK_NUM /*Number of works*/
+}ccpmWrkEn;
+
+/*===========================================================================*/
+/*AoN links will be initialized with these info*/
+#define X CCPM_DEP_BUF
+WBS
+#undef X
+
+
+static const uint16_t * link_initializer[] = {
+#   define X(id, ...) _ccpm_dep_buf##id,
+    WBS
+#   undef X
+};
+
+/*===========================================================================*/
+/*Pool of works*/
+/*Number of works + number of links*/
+#define X(id, ...) +CCPM_ARRAY_SZ(_ccpm_dep_buf##id)
+ccpmWorkSt wrk_pool[CCPM_WRK_NUM WBS];
+#undef X
+
+/*===========================================================================*/
 
 int num[10] =
 {
@@ -75,7 +102,7 @@ int main(void)
 {
     int i;
 
-    printf("%d\n", sizeof(wrk_pool)/sizeof(wrk_pool[0]));
+    printf("%ld\n", CCPM_ARRAY_SZ(link_initializer));
     printf("Original array: ");
     for (i=0; i<10; i++) printf("%d ",num[i]);
     printf ("\n");

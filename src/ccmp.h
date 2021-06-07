@@ -25,26 +25,14 @@
 #include <stdbool.h>
 
 /*===========================================================================*/
+#define CCPM_ARRAY_SZ(a) (sizeof(a) / sizeof(*a))
+
+/*===========================================================================*/
 typedef enum {
     CCMP_OK = 0,
     CCMP_EINVAL,
     CCMP_EAPPEND
 }ccpmResultEn;
-
-/*===========================================================================*/
-typedef struct {
-    uint16_t src;
-    uint16_t dst;
-}ccpmBasicWorkSt;
-
-/*===========================================================================*/
-typedef struct {
-    ccpmBasicWorkSt base;
-    uint16_t ndep;    /*Number of dependencies*/
-    uint16_t rem_dep; /*Number of remaining dependencies*/
-    bool started;     /*The work was started*/
-    bool no_dummy;    /*No dummy next to it*/
-} ccpmAoAWorkSt;
 
 /*===========================================================================*/
 typedef struct {
@@ -54,33 +42,16 @@ typedef struct {
 
 /*===========================================================================*/
 typedef struct {
-    ccpmBasicWorkSt base;
+    uint16_t src;
+    uint16_t dst;
     ccmpDatesSt     early;
     ccmpDatesSt     late;
     uint64_t        duration;
     uint64_t        reserve;
-} ccpmCPMWorkSt;
-
-/*===========================================================================*/
-typedef union {
-    ccpmBasicWorkSt base;
-    ccpmAoAWorkSt   aoa;
-    ccpmCPMWorkSt   cpm;
 } ccpmWorkSt;
 
 #define CCPM_DEP_BUF(id, ...) \
 static const uint16_t _ccpm_dep_buf##id[] = {__VA_ARGS__};
-
-
-#define CCPM_WRK_INITIALIZER(id, ...)                           \
-[id] = {                                                        \
-        .aoa = {                                                \
-        .ndep     = sizeof(_ccpm_dep_buf##id)/sizeof(uint16_t), \
-        .rem_dep  = sizeof(_ccpm_dep_buf##id)/sizeof(uint16_t), \
-        .started  = false,                                      \
-        .no_dummy = true                                        \
-        }                                                       \
-    },
 
 /*===========================================================================*/
 typedef struct {
