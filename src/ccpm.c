@@ -25,14 +25,14 @@ Merge sort based on:
     https://github.com/abranhe/mergesort.c/blob/master/mergesort.c
 =========================================================================*/
 
-// Merge the two half into a sorted data.
-static inline void merge(int * m, int * l, int nl, int * r, int nr, int * val)
+// Merge the two half uint16_to a sorted data.
+static inline void _merge(uint16_t * m, uint16_t * l, uint16_t nl, uint16_t * r, uint16_t nr, uint16_t * val)
 {
-    int i = 0;
-    int j = 0;
-    int k = 0;
+    uint16_t i = 0;
+    uint16_t j = 0;
+    uint16_t k = 0;
 
-    while (i < nl && j < nr)
+    while ((i < nl) && (j < nr))
     {
         if (val[l[i]] <= val[r[j]])
         {
@@ -60,23 +60,36 @@ static inline void merge(int * m, int * l, int nl, int * r, int nr, int * val)
 
 // l is for left index and r is right index of the
 // sub-array of arr to be sorted
-
-int * merge_sort(int * arr, int * tmp, int n, int * val)
+static inline uint16_t * _merge_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n)
 {
-    if (1 >= n)
+    if (1 == n)
     {
-        return arr;
+        return key;
     }
 
-    // Same as (l+r)/2, but avoids overflow for large l and h
-    int m = n/2;
+    uint16_t nl = n/2;
+    uint16_t nr = n - nl;
     // Sort first and second halves
-    int * l = merge_sort(arr     ,tmp     ,m     ,val); /*Will return arr or tmp*/
-    int * r = merge_sort(arr + m ,tmp + m ,n - m ,val);
+    uint16_t * l = _merge_sort(tmp      ,key      ,val ,nl); /*Will return arr or tmp*/
+    uint16_t * r = _merge_sort(tmp + nl ,key + nl ,val ,nr);
 
-    int * ret = (l != arr) ? arr : tmp;
+    uint16_t * ret = (l != key) ? key : tmp;
 
-    merge(ret, l, m, r, n - m, val);
+    _merge(ret, l, nl, r, nr, val);
 
     return ret;
 }
+
+void ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n)
+{
+    uint16_t * ms = _merge_sort(tmp, key, val, n);
+    if (ms != key)
+    {
+        for (uint16_t i = 0; i < n; i++)
+        {
+            key[i] = tmp[i];
+        }
+    }
+}
+
+/*===========================================================================*/

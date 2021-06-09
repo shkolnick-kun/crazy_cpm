@@ -87,13 +87,6 @@ static inline ccpmResultEn ccpm_idx_append(ccpmIdxSt * self, uint16_t i)
 }
 
 /*===========================================================================*/
-typedef struct {
-    ccpmWorkSt *wrk;         /* Real and dummy work memory pool */
-    ccpmIdxSt  *wrk_grp;     /* Work groups with common dependencies */
-    ccpmIdxSt  *wrk_grp_dep; /* Dependencies of above mentioned work groups */
-    ccpmIdxSt  wrk_idx;      /* Real work index */
-    ccpmIdxSt  dummys;       /* Dummy work index */
-    ccpmIdxSt  chk_idx;      /* Work check list */
-} ccpmAoACtorSt;
+void ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n);
 
 #endif // CCMP_H

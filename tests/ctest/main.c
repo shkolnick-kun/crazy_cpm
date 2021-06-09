@@ -87,20 +87,18 @@ ccpmWorkSt wrk_pool[CCPM_WRK_NUM WBS];
 
 /*===========================================================================*/
 
-int idx[11] =
+uint16_t idx[11] =
 {
     0,1,2,3,4,5,6,7,8,9,10
 };
 
 
-int num[11] =
+uint16_t num[11] =
 {
-    1,3,6,5,8,7,9,6,2,0,15
+    15,14,31,26,16,8,7,9,6,2,0
 };
 
-int tmp[11];
-
-extern int * merge_sort(int * arr, int * tmp, int n, int * val);
+uint16_t tmp[11] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
 
 int main(void)
 {
@@ -108,12 +106,18 @@ int main(void)
 
     printf("%ld\n", CCPM_ARRAY_SZ(link_initializer));
     printf("Original array: ");
-    for (i=0; i<11; i++) printf("%d ",num[idx[i]]);
+    for (i=0; i<11; i++)
+    {
+        printf("%d ",num[idx[i]]);
+    }
     printf ("\n");
 
-    int * s = merge_sort(idx, tmp, 11, num);
+    ccpm_sort(tmp, idx, num, 11);
 
-    printf("Sorted array: %x %x %x \n", s, idx, tmp);
-    for(i = 0; i <11; i++ ) printf("%d ", num[s[i]]);
+    printf("Sorted array:\n");
+    for (i = 0; i <11; i++ )
+    {
+            printf("%d ", num[idx[i]]);
+    }
     return 0;
 }
