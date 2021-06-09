@@ -17,8 +17,10 @@
 
     Please contact with me by E-mail: shkolnick.kun@gmail.com
 **************************************************************************/
-#include "ccmp.h"
+#include <malloc.h>
 #include <stdio.h>
+
+#include "ccmp.h"
 
 /*=========================================================================
 Merge sort based on:
@@ -93,3 +95,97 @@ void ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n)
 }
 
 /*===========================================================================*/
+typedef struct _ccpmMemStackSt ccpmMemStackSt;
+
+struct _ccpmMemStackSt {
+    ccpmMemStackSt * next;
+    void * data;
+};
+
+void * _ccpm_mem_alloc(ccpmMemStackSt * item, ccpmMemStackSt ** stack, size_t sz)
+{
+    if ((!item) || (!stack))
+    {
+        return 0;
+    }
+
+    void * _data = malloc(sz);
+    if (!_data)
+    {
+        return 0;
+    }
+
+    item->data = _data;
+    item->next = *stack;
+    *stack = item;
+    return _data;
+}
+
+void _ccpm_mem_free(ccpmMemStackSt ** stack)
+{
+    while (*stack)
+    {
+        free((*stack)->data);
+        *stack = (*stack)->next;
+    }
+}
+
+#define CCPM_MEM_INIT() ccpmMemStackSt * mem_stack = 0
+
+#define _CCPM_MEM_ALLOC(type, var, n, l)                                                     \
+    ccpmMemStackSt CCPM_CAT(_item_,l);                                                       \
+    type * var = (type *)_ccpm_mem_alloc(&CCPM_CAT(_item_,l), &mem_stack, n * sizeof(type)); \
+    if (!var)                                                                                \
+    {                                                                                        \
+        printf("Not enough memory at %s, %d", __FILE__, l);                                  \
+        _ccpm_mem_free(&mem_stack);                                                          \
+        return CCMP_ENOMEM;                                                                  \
+    }                                                                                        \
+    (void)mem_stack
+
+#define CCMP_MEM_ALLOC(type, var, n) _CCPM_MEM_ALLOC(type, var, n, __LINE__)
+#define CCMP_MEM_FREE_ALL() _ccpm_mem_free(&mem_stack)
+
+/*===========================================================================*/
+
+ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
+{
+    ccpmResultEn ret = CCMP_OK;
+    CCPM_MEM_INIT();
+    CCMP_MEM_ALLOC(uint16_t * ,wrk_dep           ,n_wrk        ); /*Array of dependencies*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_dep_data      ,n_wrk * n_wrk); /*Array of dependencies*/
+    /*---------------------------------------------------------------------------------*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_ndep          ,n_wrk        ); /*Number of dependencies*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_rem_dep       ,n_wrk        ); /*Number of remaining dependencies*/
+    /*---------------------------------------------------------------------------------*/
+    CCMP_MEM_ALLOC(bool *     ,wrk_dep_map       ,n_wrk        ); /*Work dependency map*/
+    CCMP_MEM_ALLOC(bool       ,wrk_dep_map_data  ,n_wrk * n_wrk); /*Work dependency map*/
+    /*---------------------------------------------------------------------------------*/
+    CCMP_MEM_ALLOC(bool       ,wrk_started       ,n_wrk        ); /*Work started flag*/
+    CCMP_MEM_ALLOC(bool       ,wrk_no_dummy      ,n_wrk        ); /*Work does not have dummy successor*/
+
+    CCMP_MEM_ALLOC(uint16_t   ,chk_wrk           ,n_wrk        ); /*Work check list (array)*/
+    /*-------------------------------------------------------------------------*/
+    CCMP_MEM_ALLOC(uint16_t * ,wrk_grp           ,n_wrk        ); /*Work groups*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_grp_data      ,n_wrk * n_wrk); /*Work groups*/
+    /*--------------------------------------------------------------------------------------*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_grp_pred      ,n_wrk        ); /*Work groups dependencies (indexes of first works with specific dependency lists)*/
+    /*--------------------------------------------------------------------------------------*/
+    CCMP_MEM_ALLOC(uint16_t   ,no_dummy_works    ,n_wrk        ); /*Array of works with no dummies successors*/
+    CCMP_MEM_ALLOC(uint16_t   ,dummy_idx         ,n_lnk        ); /*Dummy work index*/
+    CCMP_MEM_ALLOC(bool       ,dummy_map         ,n_lnk        ); /*Dummy work map*/
+    CCMP_MEM_ALLOC(bool       ,subgroup_map      ,n_lnk        ); /*Work subgroup map*/
+
+    /*Temporary array for sortings*/
+    CCMP_MEM_ALLOC(uint16_t   ,tmp  ,((n_wrk > n_lnk) ? n_wrk : n_lnk));
+
+    for (uint16_t i = 0; i < n_wrk; i++)
+    {
+        wrk_src[i] = 0;
+        wrk_dst[i] = 0;
+    }
+
+end:
+    CCMP_MEM_FREE_ALL();
+    return ret;
+}

@@ -17,8 +17,10 @@
 
     Please contact with me by E-mail: shkolnick.kun@gmail.com
 **************************************************************************/
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 
 #include "ccmp.h"
 
@@ -78,46 +80,34 @@ static const uint16_t * link_initializer[] = {
 #   undef X
 };
 
+static const uint16_t link_num[] = {
+#   define X(id, ...) CCPM_ARRAY_SZ(_ccpm_dep_buf##id),
+    WBS
+#   undef X
+};
+
 /*===========================================================================*/
 /*Pool of works*/
 /*Number of works + number of links*/
 #define X(id, ...) +CCPM_ARRAY_SZ(_ccpm_dep_buf##id)
-ccpmWorkSt wrk_pool[CCPM_WRK_NUM WBS];
+uint16_t link_src[0 WBS];
+uint16_t link_dst[0 WBS];
 #undef X
 
 /*===========================================================================*/
-
-uint16_t idx[11] =
-{
-    0,1,2,3,4,5,6,7,8,9,10
-};
-
-
-uint16_t num[11] =
-{
-    15,14,31,26,16,8,7,9,6,2,0
-};
-
-uint16_t tmp[11] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
-
 int main(void)
 {
-    int i;
-
-    printf("%ld\n", CCPM_ARRAY_SZ(link_initializer));
-    printf("Original array: ");
-    for (i=0; i<11; i++)
+    printf("Link num: %lud\n", CCPM_ARRAY_SZ(link_src));
+    uint16_t l = CCPM_ARRAY_SZ(link_src) - 1;
+    for (uint16_t s = 0; s < CCPM_WRK_NUM; s++)
     {
-        printf("%d ",num[idx[i]]);
-    }
-    printf ("\n");
-
-    ccpm_sort(tmp, idx, num, 11);
-
-    printf("Sorted array:\n");
-    for (i = 0; i <11; i++ )
-    {
-            printf("%d ", num[idx[i]]);
+        for (uint16_t d = 0; d < link_num[s]; d++)
+        {
+            link_src[l] = link_initializer[s][d];
+            link_dst[l] = s;
+            printf("Link[%d] = (%d, %d)\n", l, link_src[l], link_dst[l]);
+            l--;
+        }
     }
     return 0;
 }

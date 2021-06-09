@@ -25,13 +25,16 @@
 #include <stdbool.h>
 
 /*===========================================================================*/
+#define CCPM_CAT(a,b) a##b
+#define CCPM_CAT2(a,b) CCPM_CAT(a,b)
 #define CCPM_ARRAY_SZ(a) (sizeof(a) / sizeof(*a))
 
 /*===========================================================================*/
 typedef enum {
     CCMP_OK = 0,
     CCMP_EINVAL,
-    CCMP_EAPPEND
+    CCMP_EAPPEND,
+    CCMP_ENOMEM
 }ccpmResultEn;
 
 /*===========================================================================*/
@@ -88,5 +91,8 @@ static inline ccpmResultEn ccpm_idx_append(ccpmIdxSt * self, uint16_t i)
 
 /*===========================================================================*/
 void ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n);
+
+/*===========================================================================*/
+ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk);
 
 #endif // CCMP_H

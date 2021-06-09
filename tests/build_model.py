@@ -116,7 +116,7 @@ def get_network_model(wrk):
                 dummy_srcs = [] #A dummy work list
                 dummy_map = [False]*2*n #dummy_srcs map, max len() is 2*n
                 #Unfinished predeceptor subgroups
-                sg_srcs = [] #List of start events
+                #sg_srcs = [] #List of start events
                 sg_map = [False]*2*n #sg_map map, max len() is 2*n
                 no_dummy_works = [] #Works woth no dummy successors
                 for i in dl: #O(n^3)
@@ -130,7 +130,7 @@ def get_network_model(wrk):
                     elif not sg_map[wrk.src.at[i]]: #O(n^3) Fuck yeah!!!
                         #Start some subgroup
                         sg_map[wrk.src.at[i]] = True
-                        sg_srcs.append(wrk.src.at[i])
+                        #sg_srcs.append(wrk.src.at[i])
                         no_dummy_works.append(i)
                     else:
                         #Continue some subgroup
