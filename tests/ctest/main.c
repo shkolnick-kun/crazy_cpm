@@ -67,6 +67,9 @@ typedef enum
     CCPM_WRK_NUM /*Number of works*/
 }ccpmWrkEn;
 
+uint16_t wrk_src[CCPM_WRK_NUM];
+uint16_t wrk_dst[CCPM_WRK_NUM];
+
 /*===========================================================================*/
 /*AoN links will be initialized with these info*/
 #define X CCPM_DEP_BUF
@@ -109,5 +112,11 @@ int main(void)
             l--;
         }
     }
+
+    uint16_t n_wrk = CCPM_WRK_NUM;
+    uint16_t n_lnk = CCPM_ARRAY_SZ(link_src);
+
+    ccpm_make_aoa(wrk_index, wrk_src, wrk_dst, &n_wrk, link_src, link_dst, &n_lnk);
+
     return 0;
 }
