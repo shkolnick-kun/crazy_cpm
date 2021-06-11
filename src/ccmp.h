@@ -33,8 +33,8 @@
 typedef enum {
     CCMP_OK = 0,
     CCMP_EINVAL,
-    CCMP_EAPPEND,
-    CCMP_ENOMEM
+    CCMP_ENOMEM,
+    CCMP_ELOOP
 }ccpmResultEn;
 
 /*===========================================================================*/
@@ -57,42 +57,42 @@ typedef struct {
 static const uint16_t _ccpm_dep_buf##id[] = {__VA_ARGS__};
 
 /*===========================================================================*/
-typedef struct {
-    uint16_t *id;
-    uint16_t n;
-    uint16_t nmax;
-} ccpmIdxSt;
-
-static inline ccpmResultEn ccpm_idx_init(ccpmIdxSt * self, uint16_t * mem, uint16_t lim)
-{
-    if (!self)
-    {
-        return CCMP_EINVAL;
-    }
-
-    if (!mem)
-    {
-        return CCMP_EINVAL;
-    }
-    self->id   = mem;
-    self->n    = 0;
-    self->nmax = lim;
-}
-
-static inline ccpmResultEn ccpm_idx_append(ccpmIdxSt * self, uint16_t i)
-{
-    if (self->n >= self->nmax)
-    {
-        return CCMP_EAPPEND;
-    }
-    self->id[self->n++] = i;
-    return CCMP_OK;
-}
+//typedef struct {
+//    uint16_t *id;
+//    uint16_t n;
+//    uint16_t nmax;
+//} ccpmIdxSt;
+//
+//static inline ccpmResultEn ccpm_idx_init(ccpmIdxSt * self, uint16_t * mem, uint16_t lim)
+//{
+//    if (!self)
+//    {
+//        return CCMP_EINVAL;
+//    }
+//
+//    if (!mem)
+//    {
+//        return CCMP_EINVAL;
+//    }
+//    self->id   = mem;
+//    self->n    = 0;
+//    self->nmax = lim;
+//}
+//
+//static inline ccpmResultEn ccpm_idx_append(ccpmIdxSt * self, uint16_t i)
+//{
+//    if (self->n >= self->nmax)
+//    {
+//        return CCMP_EAPPEND;
+//    }
+//    self->id[self->n++] = i;
+//    return CCMP_OK;
+//}
 
 /*===========================================================================*/
 void ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n);
 
 /*===========================================================================*/
-ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t *n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t *n_lnk);
+ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t *n_lnk);
 
 #endif // CCMP_H

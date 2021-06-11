@@ -100,7 +100,7 @@ uint16_t link_dst[0 WBS];
 /*===========================================================================*/
 int main(void)
 {
-    printf("Link num: %lud\n", CCPM_ARRAY_SZ(link_src));
+    printf("Link num: %d\n", (int)CCPM_ARRAY_SZ(link_src));
     uint16_t l = CCPM_ARRAY_SZ(link_src) - 1;
     for (uint16_t s = 0; s < CCPM_WRK_NUM; s++)
     {
@@ -113,10 +113,9 @@ int main(void)
         }
     }
 
-    uint16_t n_wrk = CCPM_WRK_NUM;
     uint16_t n_lnk = CCPM_ARRAY_SZ(link_src);
 
-    ccpm_make_aoa(wrk_index, wrk_src, wrk_dst, &n_wrk, link_src, link_dst, &n_lnk);
+    ccpm_make_aoa(wrk_index, wrk_src, wrk_dst, CCPM_WRK_NUM, link_src, link_dst, &n_lnk);
 
     return 0;
 }
