@@ -362,7 +362,11 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
             {
                 /*
                 Some work gets started.
-                Later we will do <wrk_started[i] = true;> so we will never repeat next steps:
+
+                Later we will do <wrk_started[i] = true;> as a result, this block of code
+                will be executed exactly once for each started work.
+
+                So overal time complexity of ccpm_make_aoa is O(n^3).
                 */
                 /*Check if a work has common dependencies with some group of started works*/
                 bool is_in_pred = false;

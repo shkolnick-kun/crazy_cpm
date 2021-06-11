@@ -26,7 +26,6 @@
 
 /*===========================================================================*/
 #define WBS              \
-X(0                     )\
 X(1,  5,19              )\
 X(2,  1,4,16,17,10,12,14)\
 X(3,  2,18,6,7,20       )\
@@ -56,7 +55,6 @@ uint16_t wrk_index[] = {
     WBS
 #   undef X
 };
-
 /*===========================================================================*/
 /*Compile time calculation of CCPM_WRK_NUM and work_pool size*/
 typedef enum
@@ -69,7 +67,8 @@ typedef enum
 
 uint16_t wrk_src[CCPM_WRK_NUM];
 uint16_t wrk_dst[CCPM_WRK_NUM];
-
+uint16_t wrk_pos[CCPM_WRK_NUM];
+uint16_t tmp[CCPM_WRK_NUM];
 /*===========================================================================*/
 /*AoN links will be initialized with these info*/
 #define X CCPM_DEP_BUF
@@ -107,7 +106,7 @@ int main(void)
         for (uint16_t d = 0; d < link_num[s]; d++)
         {
             link_src[l] = link_initializer[s][d];
-            link_dst[l] = s;
+            link_dst[l] = wrk_index[s];
             printf("Link[%d] = (%d, %d)\n", l, link_src[l], link_dst[l]);
             l--;
         }
@@ -116,6 +115,26 @@ int main(void)
     uint16_t n_lnk = CCPM_ARRAY_SZ(link_src);
 
     ccpm_make_aoa(wrk_index, wrk_src, wrk_dst, CCPM_WRK_NUM, link_src, link_dst, &n_lnk);
+
+    for (uint16_t i = 0; i < CCPM_WRK_NUM; i++)
+    {
+        wrk_pos[i] = i;
+    }
+
+    ccpm_sort(tmp, wrk_pos, wrk_dst, CCPM_WRK_NUM);
+    ccpm_sort(tmp, wrk_pos, wrk_src, CCPM_WRK_NUM);
+
+    printf("Scheduled works: \n");
+    for (uint16_t i = 0; i < CCPM_WRK_NUM; i++)
+    {
+        printf("%5d: %5d %5d\n", wrk_index[wrk_pos[i]], wrk_src[wrk_pos[i]], wrk_dst[wrk_pos[i]]);
+    }
+
+    printf("Scheduled dummy works: \n");
+    for (uint16_t i = 0; i < n_lnk; i++)
+    {
+        printf("%5d: %5d %5d\n", i + 1, link_src[i], link_dst[i]);
+    }
 
     return 0;
 }
