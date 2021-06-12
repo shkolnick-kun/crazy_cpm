@@ -154,31 +154,32 @@ static int _qs_comp (const uint16_t *i, const uint16_t *j)
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t *n_lnk)
+ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t *n_lnk)
 {
-    if ((!wrk_index) || (!wrk_src) || (!wrk_dst) || \
+    if ((!wrk_id) || (!wrk_src) || (!wrk_dst) || \
         (!n_wrk) || (!lnk_src) || (!lnk_dst) || (!n_lnk))
     {
+        printf("ERROR: Incorrect input parameters.");
         return CCMP_EINVAL;
     }
 
     ccpmResultEn ret = CCMP_OK;
     uint16_t _n_lnk = *n_lnk;
     uint16_t i;
-    uint16_t ii;
     uint16_t j;
     uint16_t k;
     uint16_t l;
     uint16_t m;
+    uint16_t p;
 
     /*Check work index*/
     for (i = 0; i < n_wrk; i++)
     {
         for (j = i + 1; j < n_wrk; j++)
         {
-            if (wrk_index[i] == wrk_index[j])
+            if (wrk_id[i] == wrk_id[j])
             {
-                printf("Work indexes are not unique: %d, %d", i, j);
+                printf("ERROR: Work ids are not unique: %d, %d", i, j);
                 return CCMP_EINVAL;
             }
         }
@@ -191,34 +192,34 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
         {
             if ((lnk_src[i] == lnk_src[j]) && (lnk_dst[i] == lnk_dst[j]))
             {
-                printf("Links are not unique: %d, %d", i, j);
+                printf("ERROR: Links are not unique: %d, %d", i, j);
                 return CCMP_EINVAL;
             }
         }
     }
 
     CCPM_MEM_INIT();
-    CCMP_MEM_ALLOC(uint16_t   ,wrk_pos           ,n_wrk         ); /*Works positions in sorted lists*/
-    CCMP_MEM_ALLOC(uint16_t   ,wrk_ndep          ,n_wrk         ); /*Number of dependencies*/
-    CCMP_MEM_ALLOC(uint16_t * ,wrk_dep           ,n_wrk         ); /*Array of dependencies*/
-    CCMP_MEM_ALLOC(uint16_t   ,wrk_dep_data      ,_n_lnk         ); /*Array of dependencies*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_pos        ,n_wrk        ); /*Works positions in sorted lists*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_ndep       ,n_wrk        ); /*Number of dependencies*/
+    CCMP_MEM_ALLOC(uint16_t * ,wrk_dep        ,n_wrk        ); /*Array of dependencies*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_dep_data   ,_n_lnk       ); /*Array of dependencies*/
     /*---------------------------------------------------------------------------------*/
-    CCMP_MEM_ALLOC(bool       ,wrk_dep_map_data  ,n_wrk * n_wrk); /*Work dependency map*/
+    CCMP_MEM_ALLOC(bool       ,wrk_dep_map    ,n_wrk * n_wrk); /*Work dependency map*/
     /*---------------------------------------------------------------------------------*/
-    CCMP_MEM_ALLOC(uint16_t   ,wrk_rem_dep       ,n_wrk         ); /*Number of remaining dependencies*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_rem_dep    ,n_wrk        ); /*Number of remaining dependencies*/
     /*---------------------------------------------------------------------------------*/
-    CCMP_MEM_ALLOC(bool       ,wrk_started       ,n_wrk         ); /*Work started flag*/
-    CCMP_MEM_ALLOC(bool       ,wrk_no_dummy      ,n_wrk         ); /*Work does not have dummy successor*/
+    CCMP_MEM_ALLOC(bool       ,wrk_started    ,n_wrk        ); /*Work started flag*/
+    CCMP_MEM_ALLOC(bool       ,wrk_no_dummy   ,n_wrk        ); /*Work does not have dummy successor*/
 
-    CCMP_MEM_ALLOC(uint16_t   ,chk_wrk           ,n_wrk         ); /*Work check list (array)*/
+    CCMP_MEM_ALLOC(uint16_t   ,chk_wrk        ,n_wrk        ); /*Work check list (array)*/
     /*-------------------------------------------------------------------------*/
-    CCMP_MEM_ALLOC(uint16_t   ,grp_sz            ,n_wrk         ); /*Work group sizes*/
-    CCMP_MEM_ALLOC(uint16_t   ,grp_data          ,n_wrk * n_wrk ); /*Work groups (first member of the group has dependency list for the group)*/
+    CCMP_MEM_ALLOC(uint16_t   ,grp_sz         ,n_wrk        ); /*Work group sizes*/
+    CCMP_MEM_ALLOC(uint16_t   ,grp_data       ,n_wrk * n_wrk); /*Work groups (first member of the group has dependency list for the group)*/
     /*--------------------------------------------------------------------------------------*/
-    CCMP_MEM_ALLOC(uint16_t   ,no_dummy_works    ,n_wrk         ); /*Array of works with no dummies successors*/
-    CCMP_MEM_ALLOC(uint16_t   ,dummy_idx         ,_n_lnk        ); /*Dummy work index*/
-    CCMP_MEM_ALLOC(bool       ,dummy_map         ,n_wrk * 2     ); /*Dummy work map*/
-    CCMP_MEM_ALLOC(bool       ,subgroup_map      ,n_wrk * 2     ); /*Work subgroup map*/
+    CCMP_MEM_ALLOC(uint16_t   ,no_dummy_works ,n_wrk        ); /*Array of works with no dummies successors*/
+    CCMP_MEM_ALLOC(uint16_t   ,dummy_pos      ,_n_lnk       ); /*Dummy work index*/
+    CCMP_MEM_ALLOC(bool       ,dummy_map      ,n_wrk * 2    ); /*Dummy work map*/
+    CCMP_MEM_ALLOC(bool       ,subgroup_map   ,n_wrk * 2    ); /*Work subgroup map*/
 
     /*Temporary array for sortings*/
     CCMP_MEM_ALLOC(uint16_t   ,tmp  ,((n_wrk > _n_lnk) ? n_wrk : _n_lnk));
@@ -228,27 +229,36 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
         wrk_src[i]  = 0;
         wrk_dst[i]  = 0;
 
-        wrk_dep[i]  = 0;
+        wrk_dep [i] = 0;
         wrk_ndep[i] = 0;
         for (j = 0; j < n_wrk; j++)
         {
-            wrk_dep_map_data[n_wrk * i + j] = false;
+            wrk_dep_map[n_wrk * i + j] = false;
         }
     }
 
     printf("Translate work indexes to work array positions...\n");
-    for (l = 0; l < _n_lnk; l++)
+    for (i = 0; i < _n_lnk; i++)
     {
-        for (i = 0; i < n_wrk; i++)
+        bool found_id = false;
+        for (j = 0; j < n_wrk; j++)
         {
-            if (lnk_src[l] == wrk_index[i])
+            if (lnk_src[i] == wrk_id[j])
             {
-                lnk_src[l] = i;
+                lnk_src[i] = j;
+                found_id = true;
             }
-            if (lnk_dst[l] == wrk_index[i])
+            if (lnk_dst[i] == wrk_id[j])
             {
-                lnk_dst[l] = i;
+                lnk_dst[i] = j;
+                found_id = true;
             }
+        }
+        if (!found_id)
+        {
+            printf("ERROR: Invalid work id for L[%d] = (%d, %d)", i, lnk_src[i], lnk_dst[i]);
+            ret = CCMP_EINVAL;
+            goto end;
         }
     }
 
@@ -256,19 +266,19 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
     printf("Sort links by dst...\n");
     for (i = 0; i < _n_lnk; i++)
     {
-        dummy_idx[i] = i;
+        dummy_pos[i] = i;
     }
-    ccpm_sort(tmp, dummy_idx, lnk_dst, _n_lnk);
+    ccpm_sort(tmp, dummy_pos, lnk_dst, _n_lnk);
 
     printf("Populate dependencies data...\n");
     for (l = 0; l < _n_lnk; l++)
     {
         /*Populate depenency data*/
-        i = lnk_src[dummy_idx[l]];
+        i = lnk_src[dummy_pos[l]];
         wrk_dep_data[l] = i;
 
         /*Populate dependency arrays*/
-        j = lnk_dst[dummy_idx[l]];
+        j = lnk_dst[dummy_pos[l]];
         if (!wrk_dep[j])
         {
             wrk_dep[j] = wrk_dep_data + l;
@@ -278,17 +288,17 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
         wrk_ndep[j]++;
 
         /*Populate dependency maps*/
-        wrk_dep_map_data[n_wrk * j + i] = true;
-        printf("link[%d] = [%d, %d]\n", l, wrk_index[i], wrk_index[j]);
+        wrk_dep_map[n_wrk * j + i] = true;
+        printf("link[%d] = [%d, %d]\n", l, wrk_id[i], wrk_id[j]);
     }
 
     printf("Dependency map:\n");
     for (i = 0; i < n_wrk; i++)
     {
-        printf("%5d: ", wrk_index[i]);
+        printf("%5d: ", wrk_id[i]);
         for (j = 0; j < n_wrk; j++)
         {
-            printf("%d  ", wrk_dep_map_data[n_wrk * i + j]);
+            printf("%d  ", wrk_dep_map[n_wrk * i + j]);
         }
         printf("\n");
     }
@@ -298,12 +308,12 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
     {
         k = wrk_ndep[i];
         /*Process dependency data*/
-        printf("%5d: n=%d dep=[", wrk_index[i], k);
+        printf("%5d: n=%d dep=[", wrk_id[i], k);
 
         qsort(wrk_dep[i], k, sizeof(uint16_t), (int(*) (const void *, const void *)) _qs_comp);
         for (j = 0; j < k; j++)
         {
-            printf("%5d", wrk_index[wrk_dep[i][j]]);
+            printf("%5d", wrk_id[wrk_dep[i][j]]);
         }
         printf(" ]\n");
 
@@ -325,9 +335,9 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
     uint16_t n_chk_wrk = 0;
     uint16_t n_dummys = 0;
 
-    for (ii = 0; ii < n_wrk; ii++)
+    for (p = 0; p < n_wrk; p++)
     {
-        i = wrk_pos[ii];
+        i = wrk_pos[p];
 
         if (wrk_rem_dep[i])
         {
@@ -337,7 +347,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
         wrk_started[i] = true;
         wrk_src[i] = evt_id;
         chk_wrk[n_chk_wrk++] = i; /*Append work to chk_wrk*/
-        printf("%5d",  wrk_index[i]);
+        printf("%5d",  wrk_id[i]);
     }
     evt_id++;
 
@@ -345,15 +355,15 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
     for (j = 0; j < n_chk_wrk; j++)
     {
         uint16_t n_grp = 0;
-        for (ii = 0; ii < n_wrk; ii++)
+        for (p = 0; p < n_wrk; p++)
         {
-            i = wrk_pos[ii];
+            i = wrk_pos[p];
             if (wrk_started[i])
             {
                 continue;
             }
 
-            if (wrk_dep_map_data[n_wrk * i + chk_wrk[j]])
+            if (wrk_dep_map[n_wrk * i + chk_wrk[j]])
             {
                  wrk_rem_dep[i]--;
             }
@@ -366,7 +376,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
                 Later we will do <wrk_started[i] = true;> as a result, this block of code
                 will be executed exactly once for each started work.
 
-                So overal time complexity of ccpm_make_aoa is O(n^3).
+                So overall time complexity of ccpm_make_aoa is O(n^3).
                 */
                 /*Check if a work has common dependencies with some group of started works*/
                 bool is_in_pred = false;
@@ -410,7 +420,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
                 }
             }
         }
-        printf("%5d: Current work is: %d. Found %d gpoups of started works...\n", j, wrk_index[chk_wrk[j]], n_grp);
+        printf("%5d: Current work is: %d. Found %d groups of started works...\n", j, wrk_id[chk_wrk[j]], n_grp);
         if (!n_grp)
         {
             continue;
@@ -425,20 +435,20 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
 
             for (l = 0; l < n_wrk * 2; l++)
             {
-                dummy_map[l]    = false;
+                dummy_map   [l] = false;
                 subgroup_map[l] = false;
             }
 
             /*Process groups dependency list(array)*/
             uint16_t pred = grp_data[n_wrk * k];
             uint16_t ndep = wrk_ndep[pred];
-            uint16_t *dep = wrk_dep[pred];
+            uint16_t *dep = wrk_dep [pred];
 
             printf("Dependencies:\n");
             for (l = 0; l < ndep; l++)
             {
                 i = dep[l];
-                printf("%5d: %5d %5d %d\n", wrk_index[i], wrk_src[i], wrk_dst[i], wrk_no_dummy[i]);
+                printf("%5d: %5d %5d %d\n", wrk_id[i], wrk_src[i], wrk_dst[i], wrk_no_dummy[i]);
                 if (wrk_dst[i])
                 {
                     if (wrk_no_dummy[i])
@@ -475,7 +485,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
                 i = grp_data[n_wrk * k + l];
                 wrk_src[i]     = evt_id;
                 wrk_started[i] = true;
-                printf("%5d", wrk_index[i]);
+                printf("%5d", wrk_id[i]);
 
                 /*Add this work to work check list(array)*/
                 chk_wrk[n_chk_wrk++] = i;
@@ -495,7 +505,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
             for (l = 0; l < n_no_dummys; l++)
             {
                 i = no_dummy_works[l];
-                printf("%5d", wrk_index[i]);
+                printf("%5d", wrk_id[i]);
                 wrk_dst[i] = evt_id;
             }
             printf("\n");
@@ -509,6 +519,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
         /*Loop detection*/
         if (!wrk_started[i])
         {
+            printf("ERROR: Found a loop, check work: %5d", wrk_id[i]);
             ret = CCMP_ELOOP;
             goto end;
         }
@@ -521,12 +532,12 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
     }
 
     printf("Removing redundant dummies...\n");
-    /*Sort dummys*/
+    /*Sort dummies*/
     for (l = 0; l < n_dummys; l++)
     {
-        dummy_idx[l] = l;
+        dummy_pos[l] = l;
     }
-    ccpm_sort(tmp, dummy_idx, lnk_src, n_dummys);
+    ccpm_sort(tmp, dummy_pos, lnk_src, n_dummys);
 
     /*Mark redundant dummies*/
     for (l = 0; l < n_dummys; l++)
@@ -535,12 +546,12 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
     }
     for (k = 0; k < n_dummys; k++)
     {
-        i = dummy_idx[k];
+        i = dummy_pos[k];
         uint16_t src = lnk_src[i];
         uint16_t pvt = lnk_dst[i];
         for (l = k + 1; l < n_dummys; l++)
         {
-            j = dummy_idx[l];
+            j = dummy_pos[l];
             if (lnk_src[j] != src)
             {
                 break;
@@ -548,8 +559,8 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
             uint16_t cur = lnk_dst[j];
             for (m = l + 1; m < n_dummys; m++)
             {
-                ii = dummy_idx[m];
-                if ((lnk_src[ii] == pvt) && (lnk_dst[ii] == cur))
+                p = dummy_pos[m];
+                if ((lnk_src[p] == pvt) && (lnk_dst[p] == cur))
                 {
                     tmp[j] = 0; /*Must drop this dummy*/
                     break;
@@ -565,7 +576,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
         if (tmp[l])
         {
             wrk_dep_data[_n_lnk  ] = lnk_src[l];
-            dummy_idx   [_n_lnk++] = lnk_dst[l];
+            dummy_pos   [_n_lnk++] = lnk_dst[l];
         }
     }
 
@@ -573,7 +584,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * 
     for (l = 0; l < _n_lnk; l++)
     {
         lnk_src[l] = wrk_dep_data[l];
-        lnk_dst[l] = dummy_idx   [l];
+        lnk_dst[l] = dummy_pos   [l];
         printf("%d %d\n", lnk_src[l], lnk_dst[l]);
     }
     *n_lnk = _n_lnk;
