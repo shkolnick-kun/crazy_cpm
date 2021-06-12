@@ -159,7 +159,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     if ((!wrk_id) || (!wrk_src) || (!wrk_dst) || \
         (!n_wrk) || (!lnk_src) || (!lnk_dst) || (!n_lnk))
     {
-        printf("ERROR: Incorrect input parameters.");
+        printf("ERROR: Incorrect input parameters.\n");
         return CCMP_EINVAL;
     }
 
@@ -179,7 +179,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         {
             if (wrk_id[i] == wrk_id[j])
             {
-                printf("ERROR: Work ids are not unique: %d, %d", i, j);
+                printf("ERROR: Work ids are not unique: %d, %d\n", i, j);
                 return CCMP_EINVAL;
             }
         }
@@ -192,7 +192,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         {
             if ((lnk_src[i] == lnk_src[j]) && (lnk_dst[i] == lnk_dst[j]))
             {
-                printf("ERROR: Links are not unique: %d, %d", i, j);
+                printf("ERROR: Links are not unique: %d, %d\n", i, j);
                 return CCMP_EINVAL;
             }
         }
@@ -240,23 +240,28 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     printf("Translate work indexes to work array positions...\n");
     for (i = 0; i < _n_lnk; i++)
     {
-        bool found_id = false;
+        bool found_src = false;
+        bool found_dst = false;
         for (j = 0; j < n_wrk; j++)
         {
             if (lnk_src[i] == wrk_id[j])
             {
                 lnk_src[i] = j;
-                found_id = true;
+                found_src = true;
             }
             if (lnk_dst[i] == wrk_id[j])
             {
                 lnk_dst[i] = j;
-                found_id = true;
+                found_dst = true;
+            }
+            if (found_src && found_dst)
+            {
+                break;
             }
         }
-        if (!found_id)
+        if (!found_src || !found_dst)
         {
-            printf("ERROR: Invalid work id for L[%d] = (%d, %d)", i, lnk_src[i], lnk_dst[i]);
+            printf("ERROR: Invalid work id in link[%d] = (%d, %d)\n", i, lnk_src[i], lnk_dst[i]);
             ret = CCMP_EINVAL;
             goto end;
         }
@@ -519,7 +524,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         /*Loop detection*/
         if (!wrk_started[i])
         {
-            printf("ERROR: Found a loop, check work: %5d", wrk_id[i]);
+            printf("ERROR: Found a loop, check work: %5d\n", wrk_id[i]);
             ret = CCMP_ELOOP;
             goto end;
         }
