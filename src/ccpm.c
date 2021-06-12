@@ -359,6 +359,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     printf("\nProcess started works...\n");
     for (j = 0; j < n_chk_wrk; j++)
     {
+        /*Find new started works and their dependencies*/
         uint16_t n_grp = 0;
         for (p = 0; p < n_wrk; p++)
         {
@@ -389,12 +390,13 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
                 {
                     /*First work in a group is used to get groups dependency list(array)*/
                     uint16_t pred = grp_data[n_wrk * k];
+
+                    /*Compare dependency lists*/
                     if (wrk_ndep[pred] != wrk_ndep[i])
                     {
                         continue;
                     }
 
-                    /*Compare dependency lists*/
                     bool is_equal = true;
                     for (l = 0; l < wrk_ndep[pred]; l++)
                     {
@@ -419,19 +421,21 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
                 }
                 else
                 {
-                    /*Create new group*/
+                    /*Create a new group*/
                     grp_sz[n_grp] = 1;
                     grp_data[n_wrk * n_grp++] = i;
                 }
             }
         }
-        printf("%5d: Current work is: %d. Found %d groups of started works...\n", j, wrk_id[chk_wrk[j]], n_grp);
+        printf("%5d: Current work in check list is: %d. Found %d groups of started works...\n", j, wrk_id[chk_wrk[j]], n_grp);
+
+        /*Check if we found some started works*/
         if (!n_grp)
         {
             continue;
         }
 
-        /*Process gpoups*/
+        /*Process groups*/
         for (k = 0; k < n_grp; k++)
         {
             printf("Process group %d\n", k);
