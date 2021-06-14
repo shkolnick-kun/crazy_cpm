@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-/**************************************************************************
     CrazyCPM
     Copyright (C) 2021 anonimous
 
@@ -19,7 +18,6 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
     Please contact with me by E-mail: shkolnick.kun@gmail.com
-**************************************************************************/
 """
 #import numpy as np
 import pandas as pd
