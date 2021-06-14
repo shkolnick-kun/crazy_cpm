@@ -18,6 +18,7 @@
 		</Build>
 		<Compiler>
 			<Add option="-Wall" />
+			<Add option="-DCCPM_LOG_PRINTF=printf" />
 			<Add directory="../../src" />
 		</Compiler>
 		<Unit filename="../../src/ccmp.h" />

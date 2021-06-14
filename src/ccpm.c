@@ -89,6 +89,10 @@ static inline uint16_t * _merge_sort(uint16_t * tmp, uint16_t * key, uint16_t * 
 
 void ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n)
 {
+    if (!n)
+    {
+        return;
+    }
     uint16_t * ms = _merge_sort(tmp, key, val, n);
     if (ms != key)
     {
@@ -155,6 +159,20 @@ void _ccpm_mem_free(ccpmMemStackSt ** stack)
 static int _qs_comp (const uint16_t *i, const uint16_t *j)
 {
     return *i - *j;
+}
+
+/*===========================================================================*/
+static inline bool _ccpm_lookup_wrk_pos(uint16_t * link, uint16_t * wrk_id, uint16_t n_wrk)
+{
+    for (uint16_t i = 0; i < n_wrk; i++)
+    {
+        if (0 == *link - wrk_id[i])
+        {
+            *link = i;
+            return true;
+        }
+    }
+    return false;
 }
 
 /*===========================================================================*/
@@ -244,25 +262,12 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     CCPM_LOG_PRINTF("Translate work indexes to work array positions...\n");
     for (i = 0; i < _n_lnk; i++)
     {
-        bool found_src = false;
-        bool found_dst = false;
-        for (j = 0; j < n_wrk; j++)
-        {
-            if (lnk_src[i] == wrk_id[j])
-            {
-                lnk_src[i] = j;
-                found_src = true;
-            }
-            if (lnk_dst[i] == wrk_id[j])
-            {
-                lnk_dst[i] = j;
-                found_dst = true;
-            }
-            if (found_src && found_dst)
-            {
-                break;
-            }
-        }
+        CCPM_LOG_PRINTF("L[%d]=(%d,%d)->", i, lnk_src[i], lnk_dst[i]);
+
+        bool found_src = _ccpm_lookup_wrk_pos(lnk_src + i, wrk_id, n_wrk);
+        bool found_dst = _ccpm_lookup_wrk_pos(lnk_dst + i, wrk_id, n_wrk);
+
+        CCPM_LOG_PRINTF("[%d,%d]=(%d,%d)\n", lnk_src[i], lnk_dst[i], wrk_id[lnk_src[i]], wrk_id[lnk_dst[i]]);
         if (!found_src || !found_dst)
         {
             CCPM_LOG_PRINTF("ERROR: Invalid work id in link[%d] = (%d, %d)\n", i, lnk_src[i], lnk_dst[i]);
@@ -542,6 +547,11 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         {
             wrk_dst[i] = evt_id;
         }
+    }
+
+    if(!n_dummys)
+    {
+        goto end;
     }
 
     CCPM_LOG_PRINTF("Removing redundant dummies...\n");
