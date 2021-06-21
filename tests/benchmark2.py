@@ -105,7 +105,7 @@ if __name__ == '__main__':
 
             print(i)
 
-            g=nx.gnp_random_graph(n, 10/n, directed=True)
+            g=nx.gnp_random_graph(n, 0.001, directed=True)
             dag = nx.DiGraph([(u,v) for (u,v) in g.edges() if u<v])
             print(nx.is_directed_acyclic_graph(dag))
 
@@ -144,7 +144,7 @@ if __name__ == '__main__':
                        'n_effective':n_effective,
                        'i': ii,
                        'time':tm})
-    bm.to_csv('../doc/benchmark.csv')
+    bm.to_csv('../doc/benchmark2.csv')
 
     plt.scatter(n_effective, tm, s=0.1)
     plt.show()

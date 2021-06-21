@@ -555,16 +555,21 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     }
 
     CCPM_LOG_PRINTF("Removing redundant dummies...\n");
-    /*Sort dummies*/
+    /*Dummies are sorted by "dst" now, sort dummies by "src"*/
+    CCPM_LOG_PRINTF("Unsorted dummies:\n");
     for (l = 0; l < n_dummys; l++)
     {
         dummy_pos[l] = l;
+        CCPM_LOG_PRINTF("%d %d\n", lnk_src[l], lnk_dst[l]);
     }
     ccpm_sort(tmp, dummy_pos, lnk_src, n_dummys);
+    /*Dummies are sorted by "src" and "dst" now as merge sort is stable*/
 
     /*Mark redundant dummies*/
+    CCPM_LOG_PRINTF("Sorted dummies:\n");
     for (l = 0; l < n_dummys; l++)
     {
+        CCPM_LOG_PRINTF("%d %d\n", lnk_src[dummy_pos[l]], lnk_dst[dummy_pos[l]]);
         tmp[l] = 1; /*Will use tmp for marks*/
     }
     for (k = 0; k < n_dummys; k++)
@@ -579,10 +584,17 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
             {
                 break;
             }
+
             uint16_t cur = lnk_dst[j];
             for (m = l + 1; m < n_dummys; m++)
             {
                 p = dummy_pos[m];
+
+                if (lnk_src[p] > pvt)
+                {
+                    break;
+                }
+
                 if ((lnk_src[p] == pvt) && (lnk_dst[p] == cur))
                 {
                     tmp[j] = 0; /*Must drop this dummy*/
