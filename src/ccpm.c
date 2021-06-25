@@ -311,6 +311,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         CCPM_LOG_PRINTF("link[%d] = [%d, %d]\n", l, wrk_id[i], wrk_id[j]);
     }
 
+    /*This is the most time consumming part*/
     CCPM_LOG_PRINTF("Remove redundant dependencies\nDependency map:\n");
     for (i = 0; i < n_wrk; i++)
     {
@@ -344,6 +345,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         }
         CCPM_LOG_PRINTF(" ]\n");
 
+        /*Repopulate dependency arrays*/
         wrk_ndep[i] = 0;
         for (j = 0; j < n_wrk; j++)
         {
