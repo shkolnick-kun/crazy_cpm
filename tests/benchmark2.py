@@ -99,9 +99,9 @@ if __name__ == '__main__':
     ii = []
     tm  = []
 
-    for n in range(100, 10000, 100):
+    for n in range(1000, 11000, 1000):
 
-        for i in range(100):
+        for i in range(10):
 
             print(i)
 
@@ -144,7 +144,7 @@ if __name__ == '__main__':
                        'n_effective':n_effective,
                        'i': ii,
                        'time':tm})
-    bm.to_csv('../doc/benchmark2.csv')
+    bm.to_csv('../doc/benchmark3.csv')
 
     plt.scatter(n_effective, tm, s=0.1)
     plt.show()

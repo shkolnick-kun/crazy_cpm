@@ -34,7 +34,8 @@ typedef enum {
     CCMP_OK = 0,
     CCMP_EINVAL,
     CCMP_ENOMEM,
-    CCMP_ELOOP
+    CCMP_ELOOP,
+    CCMP_EUNK
 }ccpmResultEn;
 
 #define CCPM_DEP_BUF(id, ...) \

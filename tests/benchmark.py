@@ -44,72 +44,22 @@ import ccpmpy
 from ccpmpy import ccpm_compute_aoa
 
 if __name__ == '__main__':
-    # wrk = pd.DataFrame(data = {'dep':[
-    #     [5,19],
-    #     [1,4,16,17,10,12,14],
-    #     [2,18,6,7,20],
-    #     [5,19],
-    #     [],
-    #     [1,4,16,17,10,12,14],
-    #     [4,16,17,10,12,14],
-    #     [6,7,20],
-    #     [2,18,6,7,20],
-    #     [5,19,11,13],
-    #     [],
-    #     [5,19,11,13],
-    #     [],
-    #     [5,19,11,13,15],
-    #     [],
-    #     [5,19],
-    #     [5,19],
-    #     [1,4,16,17,10,12,14],
-    #     [],
-    #     [5,19,11,13,15],
-    #     [3,8,9],
-    #     ]}, index = list(range(1,22)))
-
-    # wrk_id = np.array(wrk.index)
-
-    # #Make links dataframe
-    # src = []
-    # dst = []
-    # for d in wrk.index:
-    #     wrk.dep.at[d].sort()
-    #     for s in wrk.dep[d]:
-    #         src.append(s)
-    #         dst.append(d)
-    # src = np.array(src)
-    # dst = np.array(dst)
-
-    # status, wrk_src, wrk_dst, lnk_src, lnk_dst = ccpm_compute_aoa(wrk_id, src, dst)
-
-    # print(status)
-    # wrk["src"] = wrk_src
-    # wrk["dst"] = wrk_dst
-
-    # wrk.sort_values(by='src', inplace=True)
-    # print(wrk)
-
-    # dummys = pd.DataFrame(data={'src': list(lnk_src), 'dst':list(lnk_dst)})
-    # dummys.sort_values(by='src', inplace=True)
-    # print(dummys)
-
     n_planed = []
     n_effective = []
+    n_links = []
+    tm = []
     ii = []
-    tm  = []
 
-    for n in range(100, 10000, 100):
+    for n in range(1000, 11000, 1000):
 
-        for i in range(100):
+        for i in range(2,13):
 
             print(i)
 
-            g=nx.gnp_random_graph(n, 10/n, directed=True)
+            g = nx.gnp_random_graph(n, i/(n - 1), directed=True)
             dag = nx.DiGraph([(u,v) for (u,v) in g.edges() if u<v])
             print(nx.is_directed_acyclic_graph(dag))
 
-            #print(dag.edges())
 
             wrk_id = np.array(dag.nodes())
             src, dst = tuple(zip(*dag.edges()))
@@ -137,16 +87,18 @@ if __name__ == '__main__':
 
             n_planed.append(n)
             n_effective.append(len(wrk_id))
-            tm.append(end-start)
+            n_links.append(len(src))
             ii.append(i)
+            tm.append(end-start)
 
     bm = pd.DataFrame({'n_planed': n_planed,
                        'n_effective':n_effective,
-                       'i': ii,
+                       'n_links': n_links,
+                       'ii': ii,
                        'time':tm})
-    bm.to_csv('../doc/benchmark.csv')
+    bm.to_csv('../doc/benchmark3.csv')
 
-    plt.scatter(n_effective, tm, s=0.1)
+    plt.plot(bm.n_effective, bm.time, s=0.1)
     plt.show()
 
 

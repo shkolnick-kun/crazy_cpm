@@ -187,6 +187,10 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
 
     ccpmResultEn ret = CCMP_OK;
     uint16_t _n_lnk = *n_lnk;
+    uint16_t evt_id = 1;
+    uint16_t sg_id = 1;
+    uint16_t n_chk_wrk = 0;
+    uint16_t n_dummys = 0;
     uint16_t i;
     uint16_t j;
     uint16_t k;
@@ -231,17 +235,17 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     CCMP_MEM_ALLOC(uint16_t   ,wrk_rem_dep    ,n_wrk        ); /*Number of remaining dependencies*/
     /*---------------------------------------------------------------------------------*/
     CCMP_MEM_ALLOC(bool       ,wrk_started    ,n_wrk        ); /*Work started flag*/
-    CCMP_MEM_ALLOC(bool       ,wrk_no_dummy   ,n_wrk        ); /*Work does not have dummy successor*/
+    CCMP_MEM_ALLOC(uint16_t   ,wrk_sg_id      ,n_wrk        ); /*Work does not have dummy successor*/
 
     CCMP_MEM_ALLOC(uint16_t   ,chk_wrk        ,n_wrk        ); /*Work check list (array)*/
     /*-------------------------------------------------------------------------*/
     CCMP_MEM_ALLOC(uint16_t   ,grp_sz         ,n_wrk        ); /*Work group sizes*/
     CCMP_MEM_ALLOC(uint16_t   ,grp_data       ,n_wrk * n_wrk); /*Work groups (first member of the group has dependency list for the group)*/
     /*--------------------------------------------------------------------------------------*/
-    CCMP_MEM_ALLOC(uint16_t   ,no_dummy_works ,n_wrk        ); /*Array of works with no dummies successors*/
+    CCMP_MEM_ALLOC(uint16_t   ,new_sg_wrk ,n_wrk        ); /*Array of works with no dummies successors*/
     CCMP_MEM_ALLOC(uint16_t   ,dummy_pos      ,_n_lnk       ); /*Dummy work index*/
-    CCMP_MEM_ALLOC(bool       ,dummy_map      ,n_wrk * 2    ); /*Dummy work map*/
-    CCMP_MEM_ALLOC(bool       ,subgroup_map   ,n_wrk * 2    ); /*Work subgroup map*/
+    CCMP_MEM_ALLOC(int16_t    ,old_sg_map     ,n_wrk * 2    ); /*Dummy work map*/
+    CCMP_MEM_ALLOC(int16_t    ,new_sg_map     ,n_wrk * 2    ); /*Work subgroup map*/
 
     /*Temporary array for sortings*/
     CCMP_MEM_ALLOC(uint16_t   ,tmp  ,((n_wrk > _n_lnk) ? n_wrk : _n_lnk));
@@ -334,7 +338,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         /*Initiate other work properties*/
         wrk_rem_dep[i]  = k;
         wrk_started[i]  = false;
-        wrk_no_dummy[i] = true;
+        wrk_sg_id[i]    = 0;
     }
 
     CCPM_LOG_PRINTF("Sort works by ndep...\n");
@@ -345,10 +349,6 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     ccpm_sort(tmp, wrk_pos, wrk_ndep, n_wrk);
 
     CCPM_LOG_PRINTF("Collect started works...\n");
-    uint16_t evt_id = 1;
-    uint16_t n_chk_wrk = 0;
-    uint16_t n_dummys = 0;
-
     for (p = 0; p < n_wrk; p++)
     {
         i = wrk_pos[p];
@@ -449,12 +449,13 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         {
             CCPM_LOG_PRINTF("Process group %d\n", k);
             uint16_t n_added_dummys = 0;
-            uint16_t n_no_dummys    = 0;
+            uint16_t n_new_sg       = 0;
+            uint16_t n_old_sg       = 0;
 
             for (l = 0; l < n_wrk * 2; l++)
             {
-                dummy_map   [l] = false;
-                subgroup_map[l] = false;
+                old_sg_map[l] = -1;
+                new_sg_map[l] = -1;
             }
 
             /*Process groups dependency list(array)*/
@@ -466,35 +467,67 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
             for (l = 0; l < ndep; l++)
             {
                 i = dep[l];
-                CCPM_LOG_PRINTF("%5d: %5d %5d %d\n", wrk_id[i], wrk_src[i], wrk_dst[i], wrk_no_dummy[i]);
+                CCPM_LOG_PRINTF("%5d: %5d %5d %5d\n", wrk_id[i], wrk_src[i], wrk_dst[i], wrk_sg_id[i]);
                 if (wrk_dst[i])
                 {
-                    if (wrk_no_dummy[i])
+                    if (0 == wrk_sg_id[i])
                     {
-                        if (!dummy_map[wrk_dst[i]])
-                        {
-                            dummy_map[wrk_dst[i]] = true;
-                            /*Append a dummy work*/
-                            lnk_src[n_dummys + n_added_dummys++] = wrk_dst[i];
-                            //CCPM_LOG_PRINTF("Added dummy 1: %d %d\n", n_dummys + n_added_dummys, wrk_dst[i]);
-                        }
+                        ret = CCMP_EUNK;
+                        goto end;
+                    }
+
+                    if (old_sg_map[wrk_sg_id[i]] < 0)
+                    {
+                        /*Remind an old subgroup*/
+                        old_sg_map[wrk_sg_id[i]] = n_old_sg;
+                        tmp[n_old_sg++] = i; /*Old subgroup works*/
+
+                        /*Append a dummy work*/
+                        //lnk_src[n_dummys + n_added_dummys++] = wrk_dst[i];
+                        //CCPM_LOG_PRINTF("Added dummy 1: %d %d\n", n_dummys + n_added_dummys, wrk_dst[i]);
+                    }
+                    else if (wrk_dst[i] > wrk_dst[tmp[old_sg_map[wrk_sg_id[i]]]])
+                    {
+                        /*Find a work with bigest dst in an old subgroup*/
+                        tmp[old_sg_map[wrk_sg_id[i]]] = i;
                     }
                 }
-                else if (!subgroup_map[wrk_src[i]])
+                else if (new_sg_map[wrk_src[i]] < 0)
                 {
-                    subgroup_map[wrk_src[i]] = true;
-                    no_dummy_works[n_no_dummys++] = i;
+                    /*Create new subgroup*/
+                    wrk_sg_id[i] = sg_id++;
+                    new_sg_map[wrk_src[i]] = i;
+                    new_sg_wrk[n_new_sg++] = i;
                 }
                 else
                 {
-                    wrk_no_dummy[i] = false;
-                    wrk_dst[i] = evt_id;
+                    /*Assign a work to some old subgroup*/
+                    wrk_sg_id[i] = wrk_sg_id[new_sg_map[wrk_src[i]]];
+                    wrk_dst[i]   = evt_id;
+
                     /*Append a dummy work*/
                     lnk_src[n_dummys + n_added_dummys++] = evt_id++;
                     //CCPM_LOG_PRINTF("Added dummy 2: %d %d\n", n_dummys + n_added_dummys, wrk_dst[i]);
                 }
             }
             CCPM_LOG_PRINTF("\n");
+
+            CCPM_LOG_PRINTF("Process old subgroups:\n");
+            for (l = 0; l < n_wrk * 2; l++)
+            {
+                old_sg_map[l] = -1;
+            }
+
+            for (l = 0; l < n_old_sg; l++)
+            {
+                i = tmp[l];
+                if (old_sg_map[wrk_dst[i]] < 0)
+                {
+                    old_sg_map[wrk_dst[i]] = 1;
+                    lnk_src[n_dummys + n_added_dummys++] = wrk_dst[i];
+                    CCPM_LOG_PRINTF("Added dummy: %d %d\n", n_dummys + n_added_dummys, wrk_dst[i]);
+                }
+            }
 
             /*Finalize a group list processing*/
             CCPM_LOG_PRINTF("Group works: ");
@@ -520,9 +553,9 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
             CCPM_LOG_PRINTF("\n");
 
             CCPM_LOG_PRINTF("No dummy works:");
-            for (l = 0; l < n_no_dummys; l++)
+            for (l = 0; l < n_new_sg; l++)
             {
-                i = no_dummy_works[l];
+                i = new_sg_wrk[l];
                 CCPM_LOG_PRINTF("%5d", wrk_id[i]);
                 wrk_dst[i] = evt_id;
             }
