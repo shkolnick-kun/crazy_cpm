@@ -45,7 +45,7 @@ from ccpmpy import ccpm_compute_aoa
 
 if __name__ == '__main__':
 
-    g=nx.gnp_random_graph(5000, 0.001, directed=True)
+    g=nx.gnp_random_graph(10000, 0.001, directed=True)
     dag = nx.DiGraph([(u,v) for (u,v) in g.edges() if u<v])
     print(nx.is_directed_acyclic_graph(dag))
 

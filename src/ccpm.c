@@ -176,6 +176,7 @@ static inline bool _ccpm_lookup_wrk_pos(uint16_t * link, uint16_t * wrk_id, uint
     return false;
 }
 
+#define _CCPM_SG_LIM 0xffff
 /*===========================================================================*/
 ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t *n_lnk)
 {
@@ -245,8 +246,8 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     /*--------------------------------------------------------------------------------------*/
     CCMP_MEM_ALLOC(uint16_t   ,new_sg_wrk   ,n_wrk        ); /*Array of works with no dummies successors*/
     CCMP_MEM_ALLOC(uint16_t   ,dummy_pos    ,_n_lnk       ); /*Dummy work index*/
-    CCMP_MEM_ALLOC(int16_t    ,old_sg_map   ,n_wrk * 2    ); /*Dummy work map*/
-    CCMP_MEM_ALLOC(int16_t    ,new_sg_map   ,n_wrk * 2    ); /*Work subgroup map*/
+    CCMP_MEM_ALLOC(uint16_t   ,old_sg_map   ,n_wrk * 2    ); /*Dummy work map*/
+    CCMP_MEM_ALLOC(uint16_t   ,new_sg_map   ,n_wrk * 2    ); /*Work subgroup map*/
 
     /*Temporary array for sortings*/
     CCMP_MEM_ALLOC(uint16_t,tmp,((n_wrk > _n_lnk) ? n_wrk : _n_lnk));
@@ -311,21 +312,23 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         CCPM_LOG_PRINTF("link[%d] = [%d, %d]\n", l, wrk_id[i], wrk_id[j]);
     }
 
-    /*This is the most time consumming part*/
     CCPM_LOG_PRINTF("Remove redundant dependencies\nDependency map:\n");
     for (i = 0; i < n_wrk; i++)
     {
         CCPM_LOG_PRINTF("%5d: ", wrk_id[i]);
-        for (j = 0; j < n_wrk; j++)
+        p = wrk_ndep[i];
+        for (l = 0; l < p; l++)
         {
+            j = wrk_dep[i][l];
             CCPM_LOG_PRINTF("%d  ", wrk_dep_map[n_wrk * i + j]);
-            for (k = 0; k < n_wrk; k++)
+            for (m = 0; m < p; m++)
             {
+                k = wrk_dep[i][m];
                 if (k == j)
                 {
                     continue;
                 }
-                if (wrk_dep_map[n_wrk * i + j] && wrk_dep_map[n_wrk * i + k] && wrk_dep_map[n_wrk * k + j])
+                if (wrk_dep_map[n_wrk * k + j])
                 {
                     wrk_dep_map[n_wrk * i + j] = false;
                 }
@@ -490,8 +493,8 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
 
             for (l = 0; l < n_wrk * 2; l++)
             {
-                old_sg_map[l] = -1;
-                new_sg_map[l] = -1;
+                old_sg_map[l] = _CCPM_SG_LIM;
+                new_sg_map[l] = _CCPM_SG_LIM;
             }
 
             /*Process groups dependency list(array)*/
@@ -512,7 +515,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
                         goto end;
                     }
 
-                    if (old_sg_map[wrk_sg_id[i]] < 0)
+                    if (_CCPM_SG_LIM == old_sg_map[wrk_sg_id[i]])
                     {
                         /*Remind an old subgroup*/
                         old_sg_map[wrk_sg_id[i]] = n_old_sg;
@@ -528,7 +531,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
                         tmp[old_sg_map[wrk_sg_id[i]]] = i;
                     }
                 }
-                else if (new_sg_map[wrk_src[i]] < 0)
+                else if (_CCPM_SG_LIM == new_sg_map[wrk_src[i]])
                 {
                     /*Create new subgroup*/
                     wrk_sg_id[i] = sg_id++;
@@ -553,13 +556,13 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
                 CCPM_LOG_PRINTF("Process old subgroups:\n");
                 for (l = 0; l < n_wrk * 2; l++)
                 {
-                    old_sg_map[l] = -1;
+                    old_sg_map[l] = _CCPM_SG_LIM;
                 }
 
                 for (l = 0; l < n_old_sg; l++)
                 {
                     i = tmp[l];
-                    if (old_sg_map[wrk_dst[i]] < 0)
+                    if (_CCPM_SG_LIM == old_sg_map[wrk_dst[i]])
                     {
                         old_sg_map[wrk_dst[i]] = 1;
                         lnk_src[n_dummys + n_added_dummys++] = wrk_dst[i];
