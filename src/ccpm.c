@@ -177,6 +177,111 @@ static inline bool _ccpm_lookup_wrk_pos(uint16_t * link, uint16_t * wrk_id, uint
 }
 
 /*===========================================================================*/
+static inline ccpmResultEn _ccpm_build_dep(uint16_t n_wrk, uint16_t * wrk_id,
+                                           uint16_t * opt_n,  uint16_t * opt_dep,  uint16_t * opt_map,
+                                           uint16_t * full_n, uint16_t * full_dep, uint16_t * full_map)
+{
+    uint16_t i;
+    uint16_t j;
+    uint16_t k;
+    uint16_t l;
+    uint16_t m;
+    uint16_t p;
+
+    if ((!wrk_id) || (!opt_n) || (!opt_map) || (!opt_dep) || \
+        (!full_n) || (!full_map) || (!full_dep))
+    {
+        return CCMP_EINVAL;
+    }
+
+    for (i = 0; i < n_wrk; i++)
+    {
+        full_n[i] = 0;
+        for (j = 0; j < n_wrk; j++)
+        {
+            full_map[n_wrk * i + j] = false;
+            opt_map [n_wrk * i + j] = false;
+        }
+    }
+
+    CCPM_LOG_PRINTF("Build full dependency arrays and maps\n");
+    for (i = 0; i < n_wrk; i++)
+    {
+        for (j = 0; j < full_n[i]; j++)
+        {
+            k = full_dep[(n_wrk - 1) * i + j];
+            for (l = 0; l < full_n[k]; l++)
+            {
+                m = full_dep[(n_wrk - 1) * k + l];
+                if (!full_map[n_wrk * i + m])
+                {
+                    /*Loop detection must be here for segfault protection*/
+                    if (0 == i - m)
+                    {
+                        CCPM_LOG_PRINTF("ERROR: Found a loop, check work: %5d\n", wrk_id[i]);
+                        return CCMP_ELOOP;
+                    }
+
+                    /*Append a dependency*/
+                    full_dep[(n_wrk - 1) * i + full_n[i]++] = m;
+
+                    /*Add a dependency to maps*/
+                    full_map[n_wrk * i + m] = true;
+                    opt_map [n_wrk * i + k] = true;
+                }
+            }
+        }
+    }
+
+    CCPM_LOG_PRINTF("Remove redundant dependencies\n");
+    for (i = 0; i < n_wrk; i++)
+    {
+        p = full_n[i];
+        for (l = 0; l < p; l++)
+        {
+            j = full_dep[(n_wrk - 1) * i + l];
+            for (m = 0; m < p; m++)
+            {
+                k = full_dep[(n_wrk - 1) * i + m];
+                if (k == j)
+                {
+                    continue;
+                }
+                if (full_map[n_wrk * k + j])
+                {
+                    opt_map[n_wrk * i + j] = false;
+                }
+            }
+        }
+        CCPM_LOG_PRINTF("\n");
+    }
+
+    CCPM_LOG_PRINTF("Full dependency arrays:\n");
+    for (i = 0; i < n_wrk; i++)
+    {
+        k = full_n[i];
+        CCPM_LOG_PRINTF("%5d: n=%d dep=[", wrk_id[i], k);
+        for (j = 0; j < k; j++)
+        {
+            CCPM_LOG_PRINTF("%5d", wrk_id[full_dep[(n_wrk - 1) * i + j]]);
+        }
+        CCPM_LOG_PRINTF(" ]\n");
+
+        /*Populate optimized dependency arrays*/
+        opt_n[i] = 0;
+        for (j = 0; j < n_wrk; j++)
+        {
+            if (opt_map[n_wrk * i + j])
+            {
+                /*Append a dependency*/
+                opt_dep[(n_wrk - 1) * i + opt_n[i]++] = j;
+            }
+        }
+
+    }
+}
+
+/*===========================================================================*/
 #define _CCPM_SG_LIM 0xffff
 
 ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t *n_lnk)
