@@ -309,19 +309,20 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
 
                 if (!wrk_dep_map[n_wrk * i + m])
                 {
+                    /*Loop detection must be here for segfault protection*/
+                    if (0 == i - m)
+                    {
+                        CCPM_LOG_PRINTF("ERROR: Found a loop, check work: %5d\n", wrk_id[i]);
+                        ret = CCMP_ELOOP;
+                        goto end;
+                    }
+
                     /*Add a dependency to a map*/
                     wrk_dep_map[n_wrk * i + m] = true;
 
                     /*Append a dependency*/
                     wrk_dep[(n_wrk - 1) * i + wrk_ndep[i]++] = m;
                 }
-            }
-
-            if (wrk_dep_map[n_wrk * i + i])
-            {
-                CCPM_LOG_PRINTF("ERROR: Found a loop, check work: %5d\n", wrk_id[i]);
-                ret = CCMP_ELOOP;
-                goto end;
             }
         }
     }
