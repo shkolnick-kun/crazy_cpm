@@ -31,11 +31,11 @@
 
 /*===========================================================================*/
 typedef enum {
-    CCMP_OK = 0,
-    CCMP_EINVAL,
-    CCMP_ENOMEM,
-    CCMP_ELOOP,
-    CCMP_EUNK
+    CCPM_OK = 0,
+    CCPM_EINVAL,
+    CCPM_ENOMEM,
+    CCPM_ELOOP,
+    CCPM_EUNK
 }ccpmResultEn;
 
 #define CCPM_DEP_BUF(id, ...) \

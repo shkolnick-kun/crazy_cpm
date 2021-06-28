@@ -17,6 +17,7 @@
 			</Target>
 		</Build>
 		<Compiler>
+			<Add option="-Wextra" />
 			<Add option="-Wall" />
 			<Add option="-DCCPM_LOG_PRINTF=printf" />
 			<Add directory="../../src" />
