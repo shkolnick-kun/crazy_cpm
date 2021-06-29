@@ -446,8 +446,9 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     }
 
     CCPM_LOG_PRINTF("Sorted optimized dependency arrays:\n");
-    for (i = 0; i < n_wrk; i++)
+    for (p = 0; p < n_wrk; p++)
     {
+        i = wrk_pos[p];
         k = wrk_ndep[i];
         /*Process dependency data*/
         CCPM_LOG_PRINTF("%5d: n=%d dep=[", wrk_id[i], k);
@@ -477,7 +478,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
 
         wrk_started[i] = true;
         wrk_src[i] = evt_id;
-        chk_wrk[n_chk_wrk++] = i; /*Append work to chk_wrk*/
+        chk_wrk[n_chk_wrk++] = p; /*Append work to chk_wrk*/
         CCPM_LOG_PRINTF("%5d",  wrk_id[i]);
     }
     evt_id++;
@@ -485,9 +486,10 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     CCPM_LOG_PRINTF("\nProcess started works...\n");
     for (j = 0; j < n_chk_wrk; j++)
     {
+        q = wrk_pos[chk_wrk[j]];
         /*Find new started works and their dependencies*/
         uint16_t n_grp = 0;
-        for (p = 0; p < n_wrk; p++)
+        for (p = chk_wrk[j] + 1; p < n_wrk; p++)
         {
             i = wrk_pos[p];
             if (wrk_started[i])
@@ -495,7 +497,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
                 continue;
             }
 
-            if (wrk_dep_map[n_wrk * i + chk_wrk[j]])
+            if (wrk_dep_map[n_wrk * i + q])
             {
                 wrk_rem_dep[i]--;
             }
@@ -515,7 +517,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
                 for (k = 0; k < n_grp; k++)
                 {
                     /*First work in a group is used to get groups dependency list(array)*/
-                    uint16_t pred = grp_data[n_wrk * k];
+                    uint16_t pred = wrk_pos[grp_data[n_wrk * k]];
 
                     /*Compare dependency lists*/
                     if (wrk_ndep[pred] != wrk_ndep[i])
@@ -543,17 +545,17 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
                 if (is_in_pred)
                 {
                     /*Append a work to some group*/
-                    grp_data[n_wrk * k + grp_sz[k]++] = i;
+                    grp_data[n_wrk * k + grp_sz[k]++] = p;
                 }
                 else
                 {
                     /*Create a new group*/
                     grp_sz[n_grp] = 1;
-                    grp_data[n_wrk * n_grp++] = i;
+                    grp_data[n_wrk * n_grp++] = p;
                 }
             }
         }
-        CCPM_LOG_PRINTF("%5d: Current work in check list is: %d. Found %d groups of started works...\n", j, wrk_id[chk_wrk[j]], n_grp);
+        CCPM_LOG_PRINTF("%5d: Current work in check list is: %d. Found %d groups of started works...\n", j, wrk_id[q], n_grp);
 
         /*Check if we found some started works*/
         if (!n_grp)
@@ -576,7 +578,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
             }
 
             /*Process groups dependency list(array)*/
-            uint16_t pred = grp_data[n_wrk * k];
+            uint16_t pred = wrk_pos[grp_data[n_wrk * k]];
             uint16_t ndep = wrk_ndep[pred];
             uint16_t *dep = wrk_dep + (n_wrk - 1) * pred;
 
@@ -653,13 +655,14 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
             CCPM_LOG_PRINTF("Group works: ");
             for (l = 0; l < grp_sz[k]; l++)
             {
-                i = grp_data[n_wrk * k + l];
+                p = grp_data[n_wrk * k + l];
+                i = wrk_pos[p];
                 wrk_src[i]     = evt_id;
                 wrk_started[i] = true;
                 CCPM_LOG_PRINTF("%5d", wrk_id[i]);
 
                 /*Add this work to work check list(array)*/
-                chk_wrk[n_chk_wrk++] = i;
+                chk_wrk[n_chk_wrk++] = p;
             }
             CCPM_LOG_PRINTF("\n");
 
@@ -667,7 +670,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
             for (l = 0; l < n_added_dummys; l++)
             {
                 lnk_dst[n_dummys + l] = evt_id;
-                CCPM_LOG_PRINTF("%d %d\n", lnk_src[n_dummys + l], lnk_dst[n_dummys + l]);
+                CCPM_LOG_PRINTF("%5d %5d\n", lnk_src[n_dummys + l], lnk_dst[n_dummys + l]);
             }
             n_dummys += n_added_dummys;
             CCPM_LOG_PRINTF("\n");
@@ -705,7 +708,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     for (l = 0; l < n_dummys; l++)
     {
         dummy_pos[l] = l;
-        CCPM_LOG_PRINTF("%d %d\n", lnk_src[l], lnk_dst[l]);
+        CCPM_LOG_PRINTF("%5d: %5d %5d\n", l, lnk_src[l], lnk_dst[l]);
     }
     ccpm_sort(tmp, dummy_pos, lnk_src, n_dummys);
     /*Dummies are sorted by "src" and "dst" now as merge sort is stable*/
@@ -714,7 +717,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     CCPM_LOG_PRINTF("Sorted dummies:\n");
     for (l = 0; l < n_dummys; l++)
     {
-        CCPM_LOG_PRINTF("%d %d\n", lnk_src[dummy_pos[l]], lnk_dst[dummy_pos[l]]);
+        CCPM_LOG_PRINTF("%5d: %5d %5d\n", l, lnk_src[dummy_pos[l]], lnk_dst[dummy_pos[l]]);
         tmp[l] = 1; /*Will use tmp for marks*/
     }
 
@@ -766,7 +769,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
     {
         lnk_src[l] = wrk_dep  [l];
         lnk_dst[l] = dummy_pos[l];
-        CCPM_LOG_PRINTF("%d %d\n", lnk_src[l], lnk_dst[l]);
+        CCPM_LOG_PRINTF("%5d: %5d %5d\n", l, lnk_src[l], lnk_dst[l]);
     }
     *n_lnk = _n_lnk;
 end:
