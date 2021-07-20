@@ -57,8 +57,8 @@ def ccpm_compute_aoa(np.ndarray wrk_id, np.ndarray lnk_src, np.ndarray lnk_dst):
     cdef stdint.uint16_t [::1] v_lnk_src = _lnk_src
     cdef stdint.uint16_t [::1] v_lnk_dst = _lnk_dst
 
-    wrk_src = np.zeros((n_wrk,), dtype=np.uint16)
-    wrk_dst = np.zeros((n_wrk,), dtype=np.uint16)
+    wrk_src = np.zeros((n_wrk + n_lnk,), dtype=np.uint16)
+    wrk_dst = np.zeros((n_wrk + n_lnk,), dtype=np.uint16)
 
     cdef stdint.uint16_t [::1] v_wrk_src = wrk_src
     cdef stdint.uint16_t [::1] v_wrk_dst = wrk_dst
@@ -66,4 +66,8 @@ def ccpm_compute_aoa(np.ndarray wrk_id, np.ndarray lnk_src, np.ndarray lnk_dst):
     status = ccpm_make_aoa(&v_wrk_id[0], &v_wrk_src[0], &v_wrk_dst[0], n_wrk, \
                            &v_lnk_src[0], &v_lnk_dst[0], &n_lnk)
 
-    return status, wrk_src, wrk_dst, _lnk_src[:n_lnk].copy(), _lnk_dst[:n_lnk].copy()
+    return status, \
+        wrk_src[:n_wrk].copy(), \
+            wrk_dst[:n_wrk].copy(), \
+                wrk_src[n_wrk : n_wrk + n_lnk].copy(), \
+                    wrk_dst[n_wrk : n_wrk + n_lnk].copy()

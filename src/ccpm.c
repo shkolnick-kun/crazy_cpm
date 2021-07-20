@@ -753,24 +753,22 @@ ccpmResultEn ccpm_make_aoa(uint16_t * wrk_id, uint16_t * wrk_src, uint16_t * wrk
         }
     }
 
-    /*Drop redundant dumies*/
+    /*Append dummies without redundant ones*/
+    CCPM_LOG_PRINTF("Dummy works:\n");
+    wrk_src += n_wrk;
+    wrk_dst += n_wrk;
     _n_lnk = 0;
     for (l = 0; l < n_dummys; l++)
     {
-        if (tmp[l])
+        j = dummy_pos[l];
+        if (tmp[j])
         {
-            wrk_dep  [_n_lnk  ] = lnk_src[l];
-            dummy_pos[_n_lnk++] = lnk_dst[l];
+            CCPM_LOG_PRINTF("%5d: %5d %5d\n", j, lnk_src[j], lnk_dst[j]);
+            wrk_src[_n_lnk]   = lnk_src[j];
+            wrk_dst[_n_lnk++] = lnk_dst[j];
         }
     }
 
-    CCPM_LOG_PRINTF("Dummy works:\n");
-    for (l = 0; l < _n_lnk; l++)
-    {
-        lnk_src[l] = wrk_dep  [l];
-        lnk_dst[l] = dummy_pos[l];
-        CCPM_LOG_PRINTF("%5d: %5d %5d\n", l, lnk_src[l], lnk_dst[l]);
-    }
     *n_lnk = _n_lnk;
 end:
     CCPM_MEM_FREE_ALL();

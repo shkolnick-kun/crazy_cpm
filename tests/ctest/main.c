@@ -114,8 +114,8 @@ typedef enum
     CCPM_WRK_NUM /*Number of works*/
 }ccpmWrkEn;
 
-uint16_t wrk_src[CCPM_WRK_NUM];
-uint16_t wrk_dst[CCPM_WRK_NUM];
+//uint16_t wrk_src[CCPM_WRK_NUM];
+//uint16_t wrk_dst[CCPM_WRK_NUM];
 uint16_t wrk_pos[CCPM_WRK_NUM];
 uint16_t tmp[CCPM_WRK_NUM];
 /*===========================================================================*/
@@ -143,6 +143,8 @@ static const uint16_t link_num[] = {
 #define X(id, ...) +CCPM_ARRAY_SZ(_ccpm_dep_buf##id)
 uint16_t link_src[0 WBS];
 uint16_t link_dst[0 WBS];
+uint16_t wrk_src[CCPM_WRK_NUM WBS];
+uint16_t wrk_dst[CCPM_WRK_NUM WBS];
 #undef X
 
 /*===========================================================================*/
@@ -182,7 +184,7 @@ int main(void)
     printf("Scheduled dummy works: \n");
     for (uint16_t i = 0; i < n_lnk; i++)
     {
-        printf("%5d: %5d %5d\n", i + 1, link_src[i], link_dst[i]);
+        printf("%5d: %5d %5d\n", i + 1, wrk_src[CCPM_WRK_NUM + i], wrk_dst[CCPM_WRK_NUM + i]);
     }
 
     return 0;
