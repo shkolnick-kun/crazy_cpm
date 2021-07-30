@@ -68,7 +68,7 @@ if __name__ == '__main__':
             [5,19,11,13,15],
             [3,8,9],
             ],
-        'time':[1,2,3,4,14,4,7,6,2,3,11,1,1,1,7,4,2,5,2,9,3]
+        'time':[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
         }, index = list(range(1,22)))
 
     wrk_id = np.array(wrk.index)
@@ -107,19 +107,11 @@ if __name__ == '__main__':
     net_wrk = pd.concat([wrk, dummys])
     net_wrk.sort_values(by=['src','dst'], inplace=True)
     nn = len(net_wrk)
-    net_wrk['estart']   = [-1]*nn
-    net_wrk['lstart']   = [-1]*nn
-    net_wrk['efinish']  = [-1]*nn
-    net_wrk['lfinish']  = [-1]*nn
-    net_wrk['reserve']  = [-1]*nn
     print(net_wrk)
 
     #Вехи
     ne = np.max(net_wrk.dst.values)
-    net_evt = pd.DataFrame(data={'early'  :[-1] * ne,
-                                 'late'   :[-1] * ne,
-                                 'reserve':[-1] * ne,
-                                 'start'  :[[] for i in range(ne)],
+    net_evt = pd.DataFrame(data={'start'  :[[] for i in range(ne)],
                                  'finish' :[[] for i in range(ne)],
                                  'fwd'    :[0] * ne,
                                  'rev'    :[0] * ne,},
@@ -137,6 +129,60 @@ if __name__ == '__main__':
 
     #Расчет критического пути
     #Прямой ход; Берем работы из start, при обнулении rev пополняем список вех
+    net_evt['early'] = [0] * ne
+    net_wrk['estart']   = [-1] * nn
+    net_wrk['efinish']  = [-1] * nn
+    i = 0
+    evt = [1] #list(net_evt[net_evt.rev == 0].index)
+    while True:
+        print(i, evt[i])
+
+        start = net_evt.early.at[evt[i]]
+        for j in net_evt.start.at[evt[i]]:
+            net_wrk.estart.at[j]  = start
+
+            efinish = start + net_wrk.time.at[j]
+            net_wrk.efinish.at[j] = efinish
+
+            dst = net_wrk.dst.at[j]
+            net_evt.early.at[dst] = max(net_evt.early.at[dst], efinish)
+            net_evt.rev.at[dst] -= 1
+
+            if 0 >= net_evt.rev.at[dst]:
+                evt.append(dst)
+
+        #Пост условие
+        i += 1
+        if i >= len(evt):
+            break
+
     #Обратный ход: Берем работы из finish, при обнулении fwd пополняем список вех
+    net_evt['late'] = [np.max(net_evt.early)] * ne
+    net_wrk['lstart']   = [-1] * nn
+    net_wrk['lfinish']  = [-1] * nn
+    i = 0
+    evt = list(net_evt[net_evt.fwd == 0].index)
+    while True:
+        print(i, evt[i])
 
+        finish = net_evt.late.at[evt[i]]
+        for j in net_evt.finish.at[evt[i]]:
+            net_wrk.lfinish.at[j]  = finish
 
+            lstart = finish - net_wrk.time.at[j]
+            net_wrk.lstart.at[j] = lstart
+
+            src = net_wrk.src.at[j]
+            net_evt.late.at[src] = min(net_evt.late.at[src], lstart)
+            net_evt.fwd.at[src] -= 1
+
+            if 0 >= net_evt.fwd.at[src]:
+                evt.append(src)
+
+        #Пост условие
+        i += 1
+        if i >= len(evt):
+            break
+
+    net_wrk['reserve'] = net_wrk.lstart - net_wrk.estart
+    net_evt['reserve'] = net_evt.late - net_evt.early
