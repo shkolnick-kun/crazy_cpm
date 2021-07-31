@@ -29,10 +29,11 @@ cdef extern from "ccpm.c":
         CCMP_ENOMEM
         CCMP_ELOOP
 
-    cdef ccpmResultEn ccpm_make_aoa(stdint.uint16_t * wrk_id,  \
-                                    stdint.uint16_t * wrk_src, \
-                                    stdint.uint16_t * wrk_dst, \
-                                    stdint.uint16_t n_wrk,     \
+    cdef ccpmResultEn ccpm_make_aoa(stdint.uint16_t * act_id,  \
+                                    stdint.uint16_t * act_src, \
+                                    stdint.uint16_t * act_dst, \
+                                    stdint.uint16_t n_act,     \
+                                    stdint.uint16_t * n_dum,   \
                                     stdint.uint16_t * lnk_src, \
                                     stdint.uint16_t * lnk_dst, \
                                     stdint.uint16_t *n_lnk)
@@ -40,34 +41,36 @@ cdef extern from "ccpm.c":
 cimport numpy as np
 import  numpy as np#WTF??
 
-def ccpm_compute_aoa(np.ndarray wrk_id, np.ndarray lnk_src, np.ndarray lnk_dst):
-    assert wrk_id.dtype == np.int
+def ccpm_compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
+    assert act_id.dtype == np.int
     assert lnk_src.dtype == np.int
     assert lnk_dst.dtype == np.int
     assert len(lnk_src) == len(lnk_dst)
 
-    cdef stdint.uint16_t n_wrk = len(wrk_id)
+    cdef stdint.uint16_t n_act = len(act_id)
     cdef stdint.uint16_t n_lnk = len(lnk_src)
+    cdef stdint.uint16_t n_dum = 0
 
-    _wrk_id  = wrk_id.astype(np.uint16)
+    _act_id  = act_id.astype(np.uint16)
     _lnk_src = lnk_src.astype(np.uint16)
     _lnk_dst = lnk_dst.astype(np.uint16)
 
-    cdef stdint.uint16_t [::1] v_wrk_id  = _wrk_id
+    cdef stdint.uint16_t [::1] v_act_id  = _act_id
     cdef stdint.uint16_t [::1] v_lnk_src = _lnk_src
     cdef stdint.uint16_t [::1] v_lnk_dst = _lnk_dst
 
-    wrk_src = np.zeros((n_wrk + n_lnk,), dtype=np.uint16)
-    wrk_dst = np.zeros((n_wrk + n_lnk,), dtype=np.uint16)
+    act_src = np.zeros((n_act + n_lnk,), dtype=np.uint16)
+    act_dst = np.zeros((n_act + n_lnk,), dtype=np.uint16)
 
-    cdef stdint.uint16_t [::1] v_wrk_src = wrk_src
-    cdef stdint.uint16_t [::1] v_wrk_dst = wrk_dst
+    cdef stdint.uint16_t [::1] v_act_src = act_src
+    cdef stdint.uint16_t [::1] v_act_dst = act_dst
 
-    status = ccpm_make_aoa(&v_wrk_id[0], &v_wrk_src[0], &v_wrk_dst[0], n_wrk, \
-                           &v_lnk_src[0], &v_lnk_dst[0], &n_lnk)
+    status = ccpm_make_aoa(&v_act_id[0], &v_act_src[0], &v_act_dst[0], n_act, \
+                           &n_dum, &v_lnk_src[0], &v_lnk_dst[0], &n_lnk)
 
     return status, \
-        wrk_src[:n_wrk].copy(), \
-            wrk_dst[:n_wrk].copy(), \
-                wrk_src[n_wrk : n_wrk + n_lnk].copy(), \
-                    wrk_dst[n_wrk : n_wrk + n_lnk].copy()
+        act_src[:n_act].copy(), \
+            act_dst[:n_act].copy(), \
+                act_src[n_act : n_act + n_dum].copy(), \
+                    act_dst[n_act : n_act + n_dum].copy(), \
+                        lnk_src[:n_lnk].copy(), lnk_dst[:n_lnk].copy()

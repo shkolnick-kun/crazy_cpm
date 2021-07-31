@@ -42,9 +42,11 @@ typedef enum {
 static const uint16_t _ccpm_dep_buf##id[] = {__VA_ARGS__};
 
 /*===========================================================================*/
-void ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n);
+ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n);
 
 /*===========================================================================*/
-ccpmResultEn ccpm_make_aoa(uint16_t * wrk_index, uint16_t * wrk_src, uint16_t * wrk_dst, uint16_t n_wrk, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t *n_lnk);
+ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act_dst, \
+                           uint16_t n_act, uint16_t * n_dum, \
+                           uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t * n_lnk);
 
 #endif // CCMP_H

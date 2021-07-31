@@ -85,7 +85,7 @@ if __name__ == '__main__':
     dst = np.array(dst)
 
     #Строим сетевую модель
-    status, wrk_src, wrk_dst, lnk_src, lnk_dst = ccpm_compute_aoa(wrk_id, src, dst)
+    status, wrk_src, wrk_dst, dum_src, dum_dst, lnk_src, lnk_dst = ccpm_compute_aoa(wrk_id, src, dst)
 
     print(status)
     wrk["src"] = wrk_src
@@ -94,11 +94,11 @@ if __name__ == '__main__':
     wrk.sort_values(by='src', inplace=True)
     print(wrk)
 
-    nd = len(lnk_src)
+    nd = len(dum_src)
     d_start = max(list(wrk.index)) + 1
     print(list(range(d_start, d_start + nd)))
     dummys = pd.DataFrame(data={'dep':[None] * nd, 'time':[0] * nd,
-                                'src': list(lnk_src), 'dst':list(lnk_dst)},
+                                'src': list(dum_src), 'dst':list(dum_dst)},
                           index=list(range(d_start, d_start + nd)))
     dummys.sort_values(by='src', inplace=True)
     print(dummys)
