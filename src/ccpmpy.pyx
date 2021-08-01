@@ -41,23 +41,23 @@ cdef extern from "ccpm.c":
 cimport numpy as np
 import  numpy as np#WTF??
 
-def ccpm_compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
-    assert act_id.dtype == np.int
-    assert lnk_src.dtype == np.int
-    assert lnk_dst.dtype == np.int
-    assert len(lnk_src) == len(lnk_dst)
+def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
+    assert act_id.dtype  == np.uint16
+    assert lnk_src.dtype == np.uint16
+    assert lnk_dst.dtype == np.uint16
+    assert len(lnk_src)  == len(lnk_dst)
 
     cdef stdint.uint16_t n_act = len(act_id)
     cdef stdint.uint16_t n_lnk = len(lnk_src)
     cdef stdint.uint16_t n_dum = 0
 
-    _act_id  = act_id.astype(np.uint16)
-    _lnk_src = lnk_src.astype(np.uint16)
-    _lnk_dst = lnk_dst.astype(np.uint16)
+    #_act_id  = act_id.astype(np.uint16)
+    #_lnk_src = lnk_src.astype(np.uint16)
+    #_lnk_dst = lnk_dst.astype(np.uint16)
 
-    cdef stdint.uint16_t [::1] v_act_id  = _act_id
-    cdef stdint.uint16_t [::1] v_lnk_src = _lnk_src
-    cdef stdint.uint16_t [::1] v_lnk_dst = _lnk_dst
+    cdef stdint.uint16_t [::1] v_act_id  = act_id
+    cdef stdint.uint16_t [::1] v_lnk_src = lnk_src
+    cdef stdint.uint16_t [::1] v_lnk_dst = lnk_dst
 
     act_src = np.zeros((n_act + n_lnk,), dtype=np.uint16)
     act_dst = np.zeros((n_act + n_lnk,), dtype=np.uint16)
@@ -69,8 +69,5 @@ def ccpm_compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
                            &n_dum, &v_lnk_src[0], &v_lnk_dst[0], &n_lnk)
 
     return status, \
-        act_src[:n_act].copy(), \
-            act_dst[:n_act].copy(), \
-                act_src[n_act : n_act + n_dum].copy(), \
-                    act_dst[n_act : n_act + n_dum].copy(), \
-                        lnk_src[:n_lnk].copy(), lnk_dst[:n_lnk].copy()
+        act_src[:n_act + n_dum].copy(), act_dst[:n_act + n_dum].copy(), \
+            lnk_src[:n_lnk].copy(), lnk_dst[:n_lnk].copy()
