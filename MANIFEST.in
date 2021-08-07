@@ -1,0 +1,3 @@
+include src/* src/ccpm/* requirements.txt requirements-dev.txt
+include LICENSE README.md
+include doc/*.pdf doc/*.md

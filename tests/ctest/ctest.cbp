@@ -22,10 +22,10 @@
 			<Add option="-DCCPM_LOG_PRINTF=printf" />
 			<Add directory="../../src" />
 		</Compiler>
-		<Unit filename="../../src/ccmp.h" />
 		<Unit filename="../../src/ccpm.c">
 			<Option compilerVar="CC" />
 		</Unit>
+		<Unit filename="../../src/ccpm.h" />
 		<Unit filename="main.c">
 			<Option compilerVar="CC" />
 		</Unit>
