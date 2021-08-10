@@ -30,7 +30,7 @@ def create(act_id, act_time, lnk_id, lnk_src, lnk_dst):
     """
     status, net_src, net_dst, lnk_src, lnk_dst = _ccpm.compute_aoa(act_id, lnk_src, lnk_dst)
     if 0 != status:
-        raise RuntimeError("Couldn't compute AoA network model!")
+        raise RuntimeError("Couldn't compute AoA network model! Status:%d"%status)
 
     #Оптимизированные связи
     prj_lnk = pd.DataFrame(data={'src': lnk_src, 'dst': lnk_dst},
