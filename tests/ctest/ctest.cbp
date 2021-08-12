@@ -19,7 +19,7 @@
 		<Compiler>
 			<Add option="-Wextra" />
 			<Add option="-Wall" />
-			<Add option="-DCCPM_LOG_PRINTF=printf" />
+			<Add option="-DCCPM_CFG_PRINTF=printf" />
 			<Add directory="../../src" />
 		</Compiler>
 		<Unit filename="../../src/ccpm.c">

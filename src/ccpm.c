@@ -23,26 +23,47 @@
 
 #include "ccpm.h"
 
-#ifndef CCPM_LOG_PRINTF
-#define CCPM_LOG_PRINTF(...)
-#endif/*CCPM_LOG_PRINTF*/
+/*===========================================================================*/
+#ifdef __GNUC__
+#   define CCPM_UNLIKELY(x) __builtin_expect((x), 0)
+#else /*__GNUC__*/
+#   define CCPM_UNLIKELY(x) (x)
+#endif/*__GNUC__*/
+
+/*===========================================================================*/
+#ifndef CCPM_CFG_PRINTF
+#   define CCPM_LOG_PRINTF(...) do {} while (0)
+#   define CCPM_ERR(...)        fprintf(stderr, __VA_ARGS__)
+#else /*CCPM_CFG_PRINTF*/
+#   define CCPM_LOG_PRINTF(...) CCPM_CFG_PRINTF(__VA_ARGS__)
+#   define CCPM_ERR(...)        CCPM_CFG_PRINTF(__VA_ARGS__)
+#endif/*CCPM_CFG_PRINTF*/
+
+/*===========================================================================*/
+#define _CCPM_CHECK_RETURN(cond, err, file, func, line)                    \
+do {                                                                       \
+    if (CCPM_UNLIKELY(!(cond)))                                            \
+    {                                                                      \
+        CCPM_ERR("CCPM:The expression (%s) is false in \n function: %s",   \
+                 #cond, func);                                             \
+        CCPM_ERR("\n file: %s\n line: %d\n will return: %s\n",             \
+                 file, line, #err);                                        \
+        return err;                                                        \
+    }                                                                      \
+} while (0)
+
+#define CCPM_CHECK_RETURN(cond, err) _CCPM_CHECK_RETURN(cond, err, __FILE__, __func__, __LINE__)
 
 /*===========================================================================*/
 static inline ccpmResultEn _ccpm_check_act_ids(uint16_t * act_id, uint16_t n_act)
 {
-    if (!act_id)
-    {
-        return CCPM_EINVAL;
-    }
+    CCPM_CHECK_RETURN(act_id, CCPM_EINVAL);
+
     for (uint16_t i = 0; i < n_act; i++)
     {
         for (uint16_t j = i + 1; j < n_act; j++)
         {
-            if (act_id[i] == act_id[j])
-            {
-                CCPM_LOG_PRINTF("ERROR: Work ids are not unique: %d, %d\n", i, j);
-                return CCPM_EINVAL;
-            }
+            CCPM_CHECK_RETURN(act_id[i] != act_id[j], CCPM_EINVAL);
         }
     }
     return CCPM_OK;
@@ -51,19 +72,14 @@ static inline ccpmResultEn _ccpm_check_act_ids(uint16_t * act_id, uint16_t n_act
 /*===========================================================================*/
 static inline ccpmResultEn _ccpm_check_links(uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
 {
-    if ((!lnk_src)  || (!lnk_dst))
-    {
-        return CCPM_EINVAL;
-    }
+    CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
+
     for (uint16_t i = 0; i < n_lnk; i++)
     {
         for (uint16_t j = i + 1; j < n_lnk; j++)
         {
-            if ((lnk_src[i] == lnk_src[j]) && (lnk_dst[i] == lnk_dst[j]))
-            {
-                CCPM_LOG_PRINTF("ERROR: Links are not unique: %d, %d\n", i, j);
-                return CCPM_EINVAL;
-            }
+            CCPM_CHECK_RETURN((lnk_src[i] != lnk_src[j]) || (lnk_dst[i] != lnk_dst[j]), CCPM_EINVAL);
         }
     }
     return CCPM_OK;
@@ -80,16 +96,11 @@ struct _ccpmMemStackSt
 
 void * _ccpm_mem_alloc(ccpmMemStackSt * item, ccpmMemStackSt ** stack, size_t sz)
 {
-    if ((!item) || (!stack))
-    {
-        return 0;
-    }
+    CCPM_CHECK_RETURN(item,  0);
+    CCPM_CHECK_RETURN(stack, 0);
 
     void * _data = malloc(sz);
-    if (!_data)
-    {
-        return 0;
-    }
+    CCPM_CHECK_RETURN(_data, 0);
 
     item->data = _data;
     item->next = *stack;
@@ -111,7 +122,7 @@ void _ccpm_mem_free(ccpmMemStackSt ** stack)
 #define _CCPM_MEM_ALLOC(type, var, n, l)                                                     \
     ccpmMemStackSt CCPM_CAT(_item_,l);                                                       \
     type * var = (type *)_ccpm_mem_alloc(&CCPM_CAT(_item_,l), &mem_stack, n * sizeof(type)); \
-    if (!var)                                                                                \
+    if (CCPM_UNLIKELY(!var))                                                                 \
     {                                                                                        \
         CCPM_LOG_PRINTF("Not enough memory at %s, %d", __FILE__, l);                         \
         _ccpm_mem_free(&mem_stack);                                                          \
@@ -138,10 +149,9 @@ static inline bool _ccpm_lookup_act_pos(uint16_t * link, uint16_t * act_id, uint
 
 static inline ccpmResultEn _ccpm_links_prepare(uint16_t * act_id, uint16_t n_act, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
 {
-    if ((!act_id) || (!lnk_src)  || (!lnk_dst))
-    {
-        return CCPM_EINVAL;
-    }
+    CCPM_CHECK_RETURN(act_id,  CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
 
     CCPM_LOG_PRINTF("Translate work indexes to work array positions...\n");
     for (uint16_t i = 0; i < n_lnk; i++)
@@ -152,11 +162,7 @@ static inline ccpmResultEn _ccpm_links_prepare(uint16_t * act_id, uint16_t n_act
         bool found_dst = _ccpm_lookup_act_pos(lnk_dst + i, act_id, n_act);
 
         CCPM_LOG_PRINTF("[%d,%d]=(%d,%d)\n", lnk_src[i], lnk_dst[i], act_id[lnk_src[i]], act_id[lnk_dst[i]]);
-        if (!found_src || !found_dst)
-        {
-            CCPM_LOG_PRINTF("ERROR: Invalid work id in link[%d] = (%d, %d)\n", i, lnk_src[i], lnk_dst[i]);
-            return CCPM_EINVAL;
-        }
+        CCPM_CHECK_RETURN(found_src && found_dst, CCPM_EINVAL);
     }
     return CCPM_OK;
 }
@@ -169,10 +175,12 @@ static inline ccpmResultEn _ccpm_populate_dep_info(uint16_t * act_id,  uint16_t 
     uint16_t i;
     uint16_t j;
 
-    if ((!act_id) || (!dep) || (!n_dep) || (!dep_map) || (!lnk_src)  || (!lnk_dst))
-    {
-        return CCPM_EINVAL;
-    }
+    CCPM_CHECK_RETURN(act_id,  CCPM_EINVAL);
+    CCPM_CHECK_RETURN(dep,     CCPM_EINVAL);
+    CCPM_CHECK_RETURN(n_dep,   CCPM_EINVAL);
+    CCPM_CHECK_RETURN(dep_map, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
 
     for (i = 0; i < n_act; i++)
     {
@@ -267,10 +275,10 @@ static inline uint16_t * _merge_sort(uint16_t * tmp, uint16_t * key, uint16_t * 
 
 ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n)
 {
-    if ((!tmp) || (!key) || (!val))
-    {
-        return CCPM_EINVAL;
-    }
+    CCPM_CHECK_RETURN(tmp, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(key, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(val, CCPM_EINVAL);
+
     if (!n)
     {
         return CCPM_OK;
@@ -300,12 +308,15 @@ static inline ccpmResultEn _ccpm_build_dep(uint16_t    n_act, int16_t     map_le
     uint16_t p;
     uint16_t q;
 
-    if ((!act_id) || (!act_pos)  || (!tmp)     || \
-        (!opt_n)  || (!opt_map)  || (!opt_dep) || \
-        (!full_n) || (!full_map) || (!full_dep))
-    {
-        return CCPM_EINVAL;
-    }
+    CCPM_CHECK_RETURN(act_id,   CCPM_EINVAL);
+    CCPM_CHECK_RETURN(act_pos,  CCPM_EINVAL);
+    CCPM_CHECK_RETURN(tmp,      CCPM_EINVAL);
+    CCPM_CHECK_RETURN(opt_n,    CCPM_EINVAL);
+    CCPM_CHECK_RETURN(opt_map,  CCPM_EINVAL);
+    CCPM_CHECK_RETURN(opt_dep,  CCPM_EINVAL);
+    CCPM_CHECK_RETURN(full_n,   CCPM_EINVAL);
+    CCPM_CHECK_RETURN(full_map, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(full_dep, CCPM_EINVAL);
 
     if (full_n != opt_n)
     {
@@ -337,11 +348,7 @@ static inline ccpmResultEn _ccpm_build_dep(uint16_t    n_act, int16_t     map_le
                 if (!full_map[map_len * i + m])
                 {
                     /*Loop detection must be here for segfault protection*/
-                    if (0 == i - m)
-                    {
-                        CCPM_LOG_PRINTF("ERROR: Found a loop, check work: %5d\n", act_id[i]);
-                        return CCPM_ELOOP;
-                    }
+                    CCPM_CHECK_RETURN(i != m, CCPM_ELOOP);
 
                     /*Append a dependency*/
                     full_dep[(n_act - 1) * i + full_n[i]++] = m;
@@ -368,11 +375,7 @@ static inline ccpmResultEn _ccpm_build_dep(uint16_t    n_act, int16_t     map_le
     {
         act_pos[i] = i;
     }
-
-    if (CCPM_OK != ccpm_sort(tmp, act_pos, full_n, n_act))
-    {
-        return CCPM_EUNK; /*That's REALLY bad!*/
-    }
+    CCPM_CHECK_RETURN(CCPM_OK == ccpm_sort(tmp, act_pos, full_n, n_act), CCPM_EUNK);
 
     CCPM_LOG_PRINTF("Removing redundant dependencies\n");
     /*
@@ -444,11 +447,12 @@ static inline ccpmResultEn _ccpm_restore_links(uint16_t * act_id,  uint16_t * de
     uint16_t j;
     uint16_t _n_lnk;
 
-    if ((!act_id)   || (!dep)     || (!n_dep) || \
-        (!lnk_src)  || (!lnk_dst) || (!n_lnk))
-    {
-        return CCPM_EINVAL;
-    }
+    CCPM_CHECK_RETURN(act_id,  CCPM_EINVAL);
+    CCPM_CHECK_RETURN(dep,     CCPM_EINVAL);
+    CCPM_CHECK_RETURN(n_dep,   CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(n_lnk,   CCPM_EINVAL);
 
     CCPM_LOG_PRINTF("Restoring optimized links:\n");
     _n_lnk = 0;
@@ -466,19 +470,58 @@ static inline ccpmResultEn _ccpm_restore_links(uint16_t * act_id,  uint16_t * de
     *n_lnk = _n_lnk;
     return CCPM_OK;
 }
+/*===========================================================================*/
+#define _CCPM_CHECK_GOTO_END(cond, err, file, func, line)                    \
+do {                                                                       \
+    if (CCPM_UNLIKELY(!(cond)))                                            \
+    {                                                                      \
+        CCPM_ERR("CCPM:The expression (%s) is false in \n function: %s",   \
+                 #cond, func);                                             \
+        CCPM_ERR("\n file: %s\n line: %d\n will return: %s\n",             \
+                 file, line, #err);                                        \
+        goto end;                                                          \
+    }                                                                      \
+} while (0)
+
+#define CCPM_CHECK_GOTO_END(cond, err) _CCPM_CHECK_GOTO_END(cond, err, __FILE__, __func__, __LINE__)
+
+/*===========================================================================*/
+#define _CCPM_TRY_RETURN(exp, file, func, line)                               \
+do {                                                                          \
+    ret = (exp);                                                              \
+    if (CCPM_UNLIKELY(CCPM_OK != ret))                                        \
+    {                                                                         \
+        CCPM_ERR("CCPM:The expression (%s) gave an error in \n function: %s", \
+                 #exp, func);                                                 \
+        CCPM_ERR("\n file: %s\n line: %d\n will return: %d\n",                \
+                 file, line, ret);                                            \
+        return ret;                                                           \
+    }                                                                         \
+} while (0)
+
+#define CCPM_TRY_RETURN(exp) _CCPM_TRY_RETURN(exp, __FILE__, __func__, __LINE__)
+
+/*===========================================================================*/
+#define _CCPM_TRY_GOTO_END(exp, file, func, line)                             \
+do {                                                                          \
+    ret = (exp);                                                              \
+    if (CCPM_UNLIKELY(CCPM_OK != ret))                                        \
+    {                                                                         \
+        CCPM_ERR("CCPM:The expression (%s) gave an error in \n function: %s", \
+                 #exp, func);                                                 \
+        CCPM_ERR("\n file: %s\n line: %d\n will return: %d\n",                \
+                 file, line, ret);                                            \
+        goto end;                                                             \
+    }                                                                         \
+} while (0)
+
+#define CCPM_TRY_GOTO_END(exp) _CCPM_TRY_GOTO_END(exp, __FILE__, __func__, __LINE__)
 
 /*===========================================================================*/
 #define _CCPM_SG_LIM 0xffff
 
 ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act_dst, uint16_t n_act, uint16_t * n_dum, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t * n_lnk)
 {
-    if ((!act_id) || (!act_src) || (!act_dst) || \
-            (!n_act) || (!lnk_src) || (!lnk_dst) || (!n_lnk))
-    {
-        CCPM_LOG_PRINTF("ERROR: Incorrect input parameters.\n");
-        return CCPM_EINVAL;
-    }
-
     ccpmResultEn ret = CCPM_OK;
     const uint16_t _n_lnk = *n_lnk;
     uint16_t evt_id = 1;
@@ -493,17 +536,16 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
     uint16_t p;
     uint16_t q;
 
-    ret = _ccpm_check_act_ids(act_id, n_act);
-    if (CCPM_OK != ret)
-    {
-        return ret;
-    }
+    CCPM_CHECK_RETURN(act_id,  CCPM_EINVAL);
+    CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(act_dst, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(n_act,   CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(n_lnk,   CCPM_EINVAL);
 
-    ret = _ccpm_check_links(lnk_src, lnk_dst, _n_lnk);
-    if (CCPM_OK != ret)
-    {
-        return ret;
-    }
+    CCPM_TRY_RETURN(_ccpm_check_act_ids(act_id, n_act));
+    CCPM_TRY_RETURN(_ccpm_check_links(lnk_src, lnk_dst, _n_lnk));
 
     CCPM_MEM_INIT();
     CCPM_MEM_ALLOC(uint16_t   ,act_pos      ,n_act              ); /*Works positions in sorted lists*/
@@ -530,26 +572,18 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
     /*Temporary array for sortings*/
     CCPM_MEM_ALLOC(uint16_t,tmp,((n_act > _n_lnk) ? n_act : _n_lnk));
 
-    ret = _ccpm_links_prepare(act_id, n_act, lnk_src, lnk_dst, _n_lnk);
-    if (CCPM_OK != ret)
-    {
-        goto end;
-    }
+    CCPM_TRY_GOTO_END(_ccpm_links_prepare(act_id, n_act, lnk_src, lnk_dst, _n_lnk));
 
-    ret = _ccpm_populate_dep_info(act_id, act_dep, act_ndep, act_dep_map, n_act, lnk_src, lnk_dst, _n_lnk);
-    if (CCPM_OK != ret)
-    {
-        goto end;
-    }
+    CCPM_TRY_GOTO_END(_ccpm_populate_dep_info(act_id, act_dep, act_ndep, act_dep_map, n_act, \
+                                              lnk_src, lnk_dst, _n_lnk));
+
+    CCPM_TRY_GOTO_END(_ccpm_build_dep(n_act, n_act, tmp, act_id, act_pos, \
+                                      act_ndep, act_dep, act_dep_map,     \
+                                      act_ndep, act_dep, act_dep_map));
 
     ret = _ccpm_build_dep(n_act, n_act, tmp, act_id, act_pos, \
                           act_ndep, act_dep, act_dep_map,     \
                           act_ndep, act_dep, act_dep_map);
-    if (CCPM_OK != ret)
-    {
-        CCPM_LOG_PRINTF("ERROR: Dependency preprocessing failed!\n");
-        goto end;
-    }
 
     CCPM_LOG_PRINTF("Sorted optimized dependency arrays:\n");
     for (p = 0; p < n_act; p++)
@@ -699,21 +733,13 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
                 CCPM_LOG_PRINTF("%5d: %5d %5d %5d\n", act_id[i], act_src[i], act_dst[i], act_sg_id[i]);
                 if (act_dst[i])
                 {
-                    if (0 == act_sg_id[i])
-                    {
-                        ret = CCPM_EUNK;
-                        goto end;
-                    }
+                    CCPM_CHECK_GOTO_END(0 != act_sg_id[i], CCPM_EUNK);
 
                     if (_CCPM_SG_LIM == old_sg_map[act_sg_id[i]])
                     {
                         /*Remind an old subgroup*/
                         old_sg_map[act_sg_id[i]] = n_old_sg;
                         tmp[n_old_sg++] = i; /*Old subgroup works*/
-
-                        /*Append a dummy work*/
-                        //lnk_src[_n_dum + n_added_dummys++] = act_dst[i];
-                        //CCPM_LOG_PRINTF("Added dummy 1: %d %d\n", _n_dum + n_added_dummys, act_dst[i]);
                     }
                     else if (act_dst[i] > act_dst[tmp[old_sg_map[act_sg_id[i]]]])
                     {
@@ -736,7 +762,6 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
 
                     /*Append a dummy work*/
                     lnk_src[_n_dum + n_added_dummys++] = evt_id++;
-                    //CCPM_LOG_PRINTF("Added dummy 2: %d %d\n", _n_dum + n_added_dummys, act_dst[i]);
                 }
             }
             CCPM_LOG_PRINTF("\n");
@@ -820,13 +845,8 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
         dummy_pos[l] = l;
         CCPM_LOG_PRINTF("%5d: %5d %5d\n", l, lnk_src[l], lnk_dst[l]);
     }
+    CCPM_TRY_GOTO_END(ccpm_sort(tmp, dummy_pos, lnk_src, _n_dum));
 
-    ret = ccpm_sort(tmp, dummy_pos, lnk_src, _n_dum);
-    if (CCPM_OK != ret)
-    {
-        ret = CCPM_EUNK;
-        goto end;
-    }
     /*Dummies are sorted by "src" and "dst" now as merge sort is stable*/
 
     /*Mark redundant dummies*/
@@ -887,13 +907,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
     *n_dum = q;
 
     /*Restore optimized links*/
-    ret = _ccpm_restore_links(act_id, act_dep, act_ndep, n_act, lnk_src, lnk_dst, n_lnk);
-    if (CCPM_OK != ret)
-    {
-        ret = CCPM_EUNK;
-        goto end;
-    }
-
+    CCPM_TRY_GOTO_END(_ccpm_restore_links(act_id, act_dep, act_ndep, n_act, lnk_src, lnk_dst, n_lnk));
 end:
     CCPM_MEM_FREE_ALL();
     return ret;
