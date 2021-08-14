@@ -59,6 +59,10 @@ prj_lnk, net_evt, net_act = net.create(act_id, act_time, lnk_id, lnk_src, lnk_ds
 #Считаем критический путь, резервы времени, слои графа сетевой модели
 net.do_cpm(net_evt, net_act)
 
+#Создаем граф для визуализации сетевой модели проекта
+viz_n, viz_e = net.create_viz_graph(net_act, net_evt)
+
 with pd.ExcelWriter('data/output/project_template.xlsx', mode='a', engine='openpyxl') as writer:
+    net_act.sort_index(inplace=True)
     net_act.to_excel(writer, sheet_name='Acvitities')
     net_evt.to_excel(writer, sheet_name='Events')

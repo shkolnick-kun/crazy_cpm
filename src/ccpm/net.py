@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 import _ccpm
-
+###############################################################################
 def create(act_id, act_time, lnk_id, lnk_src, lnk_dst):
     """
     Построение сетевой модели
@@ -59,6 +59,7 @@ def create(act_id, act_time, lnk_id, lnk_src, lnk_dst):
                            index=list(range(1, ne + 1)))
     return prj_lnk, net_evt, net_act
 
+###############################################################################
 def _cpm_compute(net_evt, net_act, target=None):
     if 'early' == target:
         act_base     = 'estart'
@@ -120,6 +121,7 @@ def _cpm_compute(net_evt, net_act, target=None):
 
     net_evt.drop(labels=['n_dep'], axis=1, inplace=True)
 
+#==============================================================================
 def do_cpm(net_evt, net_act):
     net_evt['start' ] = [list(net_act[net_act.dst == i].index) for i in net_evt.index]
     net_evt['finish'] = [list(net_act[net_act.src == i].index) for i in net_evt.index]
@@ -137,3 +139,68 @@ def do_cpm(net_evt, net_act):
 
     net_evt.drop(labels=['start', 'finish'], axis=1, inplace=True)
 
+###############################################################################
+def create_viz_graph(net_act, net_evt):
+    #Узлы
+    viz_node_idx    = list(net_evt.index)
+    viz_node_layer  = list(net_evt.layer.values)
+    viz_node_is_evt = [True] * len(viz_node_idx) #Ссылки на вехи
+    next_node_idx   = max(viz_node_idx) + 1
+
+    #Создаем связи и добавляем промежуточные узлы
+    viz_edge_idx = []
+    viz_edge_src = []
+    viz_edge_dst = []
+    next_edge_idx = 0
+    for i in net_act.index:
+        s = net_act.src.at[i]
+        d = net_act.dst.at[i]
+        sl = net_evt.layer.at[s]
+        nl = net_evt.layer.at[d] - sl
+        if nl > 1:
+            #Нужно "пробросить" работу по слоям
+            for j in range(1, nl):
+                #Добавляем узел
+                sl += 1
+                viz_node_layer.append(sl)
+                viz_node_is_evt.append(False)
+                viz_node_idx.append(next_node_idx)
+
+                viz_edge_src.append(s)
+                viz_edge_dst.append(next_node_idx)
+                viz_edge_idx.append(next_edge_idx)
+                next_edge_idx += 1
+
+                #Следующее ребро начнем с добаленного узла
+                s = next_node_idx
+                next_node_idx += 1
+
+        #Добавить последнее/единственное ребро
+        viz_edge_src.append(s)
+        viz_edge_dst.append(d)
+        viz_edge_idx.append(next_edge_idx)
+        next_edge_idx += 1
+
+    viz_nodes = pd.DataFrame(data={'layer': viz_node_layer,
+                                   'is_evt': viz_node_is_evt},
+                             index=viz_node_idx)
+
+    viz_nodes['place'] = 0
+    viz_nodes.sort_values(by='layer')
+
+    j = 0
+    ll = -1
+    for i in viz_nodes.index:
+        if ll != viz_nodes.layer.at[i]:
+            j = 0
+            ll = viz_nodes.layer.at[i]
+
+        viz_nodes.place.at[i] = j
+        j += 1
+
+    viz_edges = pd.DataFrame(data={'src': viz_edge_src,
+                                   'dst': viz_edge_dst},
+                             index=viz_edge_idx)
+
+    #TODO: Оптимизация графа визуализации
+    return viz_nodes, viz_edges
