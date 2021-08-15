@@ -151,6 +151,7 @@ def create_viz_graph(net_act, net_evt):
     viz_edge_idx = []
     viz_edge_src = []
     viz_edge_dst = []
+    viz_edge_w   = []
     next_edge_idx = 0
     for i in net_act.index:
         s = net_act.src.at[i]
@@ -169,6 +170,7 @@ def create_viz_graph(net_act, net_evt):
                 viz_edge_src.append(s)
                 viz_edge_dst.append(next_node_idx)
                 viz_edge_idx.append(next_edge_idx)
+                viz_edge_w.append(nl)
                 next_edge_idx += 1
 
                 #Следующее ребро начнем с добаленного узла
@@ -179,6 +181,7 @@ def create_viz_graph(net_act, net_evt):
         viz_edge_src.append(s)
         viz_edge_dst.append(d)
         viz_edge_idx.append(next_edge_idx)
+        viz_edge_w.append(nl)
         next_edge_idx += 1
 
     viz_nodes = pd.DataFrame(data={'layer': viz_node_layer,
@@ -199,7 +202,8 @@ def create_viz_graph(net_act, net_evt):
         j += 1
 
     viz_edges = pd.DataFrame(data={'src': viz_edge_src,
-                                   'dst': viz_edge_dst},
+                                   'dst': viz_edge_dst,
+                                   'w':   viz_edge_w},
                              index=viz_edge_idx)
 
     #TODO: Оптимизация графа визуализации

@@ -60,9 +60,81 @@ prj_lnk, net_evt, net_act = net.create(act_id, act_time, lnk_id, lnk_src, lnk_ds
 net.do_cpm(net_evt, net_act)
 
 #Создаем граф для визуализации сетевой модели проекта
-viz_n, viz_e = net.create_viz_graph(net_act, net_evt)
+viz_nodes, viz_edges = net.create_viz_graph(net_act, net_evt)
 
-with pd.ExcelWriter('data/output/project_template.xlsx', mode='a', engine='openpyxl') as writer:
-    net_act.sort_index(inplace=True)
-    net_act.to_excel(writer, sheet_name='Acvitities')
-    net_evt.to_excel(writer, sheet_name='Events')
+#with pd.ExcelWriter('data/output/project_template.xlsx', mode='a', engine='openpyxl') as writer:
+#    net_act.sort_index(inplace=True)
+#    net_act.to_excel(writer, sheet_name='Acvitities')
+#    net_evt.to_excel(writer, sheet_name='Events')
+
+#TODO: Это надо переписать на Си/Cython
+def optimize_this(p):
+    nn, = p.shape
+    assert nn == len(viz_nodes)
+    #Значение функции стоимости
+    cost = 0.0
+
+    #Держим дистанцию между нодами
+    for i in range(1, nn - 1):
+        for j in range(i + 1, nn - 1):
+            if viz_nodes.layer.iat[i] == viz_nodes.layer.iat[j]:
+                cost += 1.0 / (abs(p[i] - p[j]) + 0.1)
+            else:
+                break
+
+    #Считаем длину пути и количество пересечений связей
+    viz_nodes['y'] = p
+    ne = len(viz_edges)
+    n_cross = 0
+    l_graph = 0.0
+
+    for i in range(ne):
+        si = viz_edges.src.iat[i]
+        di = viz_edges.dst.iat[i]
+        l_graph += viz_edges.w.iat[i] * np.sqrt(1.0 + np.square(viz_nodes.y.at[di] - viz_nodes.y.at[si]))
+
+        for j in range(i + 1, ne):
+            sj = viz_edges.src.iat[j]
+            dj = viz_edges.dst.iat[j]
+
+            #Тут нет пересечений
+            if si == sj or di == dj:
+                continue
+
+            #Поиск пересечений
+            if viz_nodes.layer.at[si] == viz_nodes.layer.at[sj]:
+                if viz_nodes.y.at[si] > viz_nodes.y.at[sj]:
+                    if viz_nodes.y.at[di] <= viz_nodes.y.at[dj]:
+                        n_cross += 1
+                else:
+                    if viz_nodes.y.at[di] >= viz_nodes.y.at[dj]:
+                        n_cross += 1
+
+    cost += l_graph * (n_cross + 1.0)
+    return cost
+
+NN = len(viz_nodes)
+
+# from sko.GA import GA
+# ga = GA(func=optimize_this, n_dim=NN, size_pop=50, max_iter=100, prob_mut=0.001,
+#         lb=np.zeros((NN,)), ub=np.ones((NN,)), precision=1e-7)
+
+# best_x, best_y = ga.run()
+# print('best_x:', best_x, '\n', 'best_y:', best_y)
+
+from sko.DE import DE
+
+
+de = DE(func=optimize_this, n_dim=NN, size_pop=50, max_iter=200,
+        lb=np.zeros((NN,)), ub=np.ones((NN,)))
+
+best_x, best_y = de.run()
+print('best_x:', best_x, '\n', 'best_y:', best_y)
+
+# from sko.SA import SA
+
+# sa = SA(func=optimize_this, x0=np.random.rand(NN), T_max=1, T_min=1e-9, L=300, max_stay_counter=150,
+#         lb=np.zeros((NN,)), ub=np.ones((NN,)))
+
+# best_x, best_y = sa.run()
+# print('best_x:', best_x, 'best_y', best_y)
