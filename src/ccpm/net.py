@@ -186,16 +186,16 @@ def create_viz_graph(net_act, net_evt):
                              index=viz_node_idx)
 
     viz_nodes['place'] = 0
-    viz_nodes.sort_values(by='layer')
+    viz_nodes.sort_values(by='layer', inplace=True)
 
     j = 0
     ll = -1
-    for i in viz_nodes.index:
-        if ll != viz_nodes.layer.at[i]:
+    for i in range(len(viz_nodes)):
+        if ll != viz_nodes.layer.iat[i]:
             j = 0
-            ll = viz_nodes.layer.at[i]
+            ll = viz_nodes.layer.iat[i]
 
-        viz_nodes.place.at[i] = j
+        viz_nodes.place.iat[i] = j
         j += 1
 
     viz_edges = pd.DataFrame(data={'src': viz_edge_src,
