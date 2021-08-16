@@ -22,6 +22,9 @@
 			<Add option="-DCCPM_CFG_PRINTF=printf" />
 			<Add directory="../../src" />
 		</Compiler>
+		<Linker>
+			<Add library="m" />
+		</Linker>
 		<Unit filename="../../src/ccpm.c">
 			<Option compilerVar="CC" />
 		</Unit>

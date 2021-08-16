@@ -912,3 +912,76 @@ end:
     CCPM_MEM_FREE_ALL();
     return ret;
 }
+
+/*===========================================================================*/
+#include <math.h>
+double ccpm_viz_loss(double * p, uint16_t * node_layer, uint16_t n_node, \
+                    uint16_t * edge_src, uint16_t * edge_dst, \
+                    double * edge_w, uint16_t n_edge)
+{
+    double    loss    = 0.0;
+    double    l_graph = 0.0;
+    uint16_t n_cross = 0;
+
+    uint16_t i;
+    uint16_t j;
+
+    n_node--;
+    for (i = 1; i < n_node; i++)
+    {
+        for (j = i + 1; j < n_node; j++)
+        {
+            if (node_layer[i] != node_layer[j])
+            {
+                break;
+            }
+            else
+            {
+                loss += 1.0 / (0.1 + fabs(p[i] - p[j]));
+            }
+        }
+    }
+
+    for (i = 0; i < n_edge; i++)
+    {
+        uint16_t si = edge_src[i];
+        uint16_t di = edge_dst[i];
+
+        double    d  = p[di] - p[si];
+        l_graph += edge_w[i] * sqrt(1.0 + d * d);
+
+        for (j = i + 1; j < n_edge; j++)
+        {
+            uint16_t sj = edge_src[j];
+            uint16_t dj = edge_dst[j];
+
+            if ((si == sj) || (di == dj))
+            {
+                continue;
+            }
+
+            if (node_layer[si] == node_layer[sj])
+            {
+                if (p[si] > p[sj])
+                {
+                    if (p[di] <= p[dj])
+                    {
+                        n_cross++;
+                    }
+                }
+                else
+                {
+                    if (p[di] >= p[dj])
+                    {
+                        n_cross++;
+                    }
+                }
+            }
+        }
+    }
+
+    loss += l_graph * (1.0 + (double)n_cross);
+
+    return loss;
+}
+

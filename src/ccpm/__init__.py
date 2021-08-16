@@ -19,4 +19,4 @@
 
     Please contact with me by E-mail: shkolnick.kun@gmail.com
 """
-from _ccpm import compute_aoa as compute_aoa
+from _ccpm import compute_aoa, vizGraphLoss

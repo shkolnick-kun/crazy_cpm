@@ -49,4 +49,8 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
                            uint16_t n_act, uint16_t * n_dum, \
                            uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t * n_lnk);
 
+/*===========================================================================*/
+double ccpm_viz_loss(double * p, uint16_t * node_layer, uint16_t n_node, \
+                    uint16_t * edge_src, uint16_t * edge_dst, \
+                    double * edge_w, uint16_t n_edge);
 #endif // CCMP_H
