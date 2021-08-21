@@ -149,6 +149,7 @@ def create_viz_graph(net_act, net_evt):
 
     #Создаем связи и добавляем промежуточные узлы
     viz_edge_idx = []
+    viz_edge_act = []
     viz_edge_src = []
     viz_edge_dst = []
     viz_edge_w   = []
@@ -170,6 +171,7 @@ def create_viz_graph(net_act, net_evt):
                 viz_edge_src.append(s)
                 viz_edge_dst.append(next_node_idx)
                 viz_edge_idx.append(next_edge_idx)
+                viz_edge_act.append(i)
                 viz_edge_w.append(nl)
                 next_edge_idx += 1
 
@@ -181,6 +183,7 @@ def create_viz_graph(net_act, net_evt):
         viz_edge_src.append(s)
         viz_edge_dst.append(d)
         viz_edge_idx.append(next_edge_idx)
+        viz_edge_act.append(i)
         viz_edge_w.append(nl)
         next_edge_idx += 1
 
@@ -203,6 +206,7 @@ def create_viz_graph(net_act, net_evt):
 
     viz_edges = pd.DataFrame(data={'src': viz_edge_src,
                                    'dst': viz_edge_dst,
+                                   'act': viz_edge_act,
                                    'w':   viz_edge_w},
                              index=viz_edge_idx)
 
