@@ -68,18 +68,28 @@ viz_nodes, viz_edges = net.create_viz_graph(net_act, net_evt)
 #    net_evt.to_excel(writer, sheet_name='Events')
 
 ###############################################################################
-from sko.DE import DE
 from ccpm import vizGraphLoss
-
 loss = vizGraphLoss(np.array(viz_nodes.index), viz_nodes.layer.values,
                     viz_edges.src.values, viz_edges.dst.values, viz_edges.w.values)
 
+from sko.DE import DE
 
+#Этот вариант лучше и быстрее работает
 NN = len(viz_nodes)
 de = DE(func=loss.run, n_dim=NN, size_pop=NN*10, max_iter=NN*100,
         lb=np.zeros((NN,)), ub=np.ones((NN,)))
-
 best_x, best_y = de.run()
+
+#Этот вариант работает медленно и дает нестабильный результат.
+#from scipy.optimize import differential_evolution
+# result = differential_evolution(loss.run,
+#                                 popsize=NN*2,
+#                                 maxiter=NN*100,
+#                                 mutation=.5,
+#                                 recombination=.3,
+#                                 bounds=[(0., 1.)]*NN)
+#best_x, best_y = result.x, result.fun
+
 print('best_x:', best_x, '\n', 'best_y:', best_y)
 
 #print(viz_nodes['place'].max()+1)
