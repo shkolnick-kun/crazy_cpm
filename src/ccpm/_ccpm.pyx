@@ -81,7 +81,7 @@ def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
 
     return status, \
         act_src[:n_act + n_dum].copy(), act_dst[:n_act + n_dum].copy(), \
-            lnk_src[:n_lnk].copy(), lnk_dst[:n_lnk].copy()
+            _lnk_src[:n_lnk].copy(), _lnk_dst[:n_lnk].copy()
 
 ###############################################################################
 cdef class vizGraphLoss:

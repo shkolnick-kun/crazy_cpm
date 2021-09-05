@@ -188,5 +188,7 @@ int main(void)
         printf("%5d: %5d %5d\n", i + 1, wrk_src[CCPM_WRK_NUM + i], wrk_dst[CCPM_WRK_NUM + i]);
     }
 
+    printf("Optimized links: %d", n_lnk);
+
     return 0;
 }
