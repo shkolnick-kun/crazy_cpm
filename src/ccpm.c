@@ -937,7 +937,9 @@ double ccpm_viz_loss(double * p, uint16_t * node_layer, uint16_t n_node, \
             }
             else
             {
-                loss += 1.0 / (0.1 + fabs(p[i] - p[j]));
+                //double d = p[i] - p[j];
+                //loss += 1.0/(1 + d*d);
+                //loss += 1.0 / (0.1 + fabs(p[i] - p[j]));
             }
         }
     }
@@ -981,6 +983,7 @@ double ccpm_viz_loss(double * p, uint16_t * node_layer, uint16_t n_node, \
     }
 
     loss += l_graph * (1.0 + (double)n_cross);
+    //loss *= 1.0 + n_cross;
 
     return loss;
 }
