@@ -919,31 +919,14 @@ double ccpm_viz_loss(double * p, uint16_t * node_layer, uint16_t n_node, \
                     uint16_t * edge_src, uint16_t * edge_dst, \
                     double * edge_w, uint16_t n_edge)
 {
-    double    loss    = 0.0;
-    double    l_graph = 0.0;
+    double   l_graph = 0.0;
     uint16_t n_cross = 0;
 
     uint16_t i;
     uint16_t j;
 
     n_node--;
-    for (i = 1; i < n_node; i++)
-    {
-        for (j = i + 1; j < n_node; j++)
-        {
-            if (node_layer[i] != node_layer[j])
-            {
-                break;
-            }
-            else
-            {
-                //double d = p[i] - p[j];
-                //loss += 1.0/(1 + d*d);
-                //loss += 1.0 / (0.1 + fabs(p[i] - p[j]));
-            }
-        }
-    }
-
+    l_graph = 0;
     for (i = 0; i < n_edge; i++)
     {
         uint16_t si = edge_src[i];
@@ -957,23 +940,37 @@ double ccpm_viz_loss(double * p, uint16_t * node_layer, uint16_t n_node, \
             uint16_t sj = edge_src[j];
             uint16_t dj = edge_dst[j];
 
-            if ((si == sj) || (di == dj))
-            {
-                continue;
-            }
-
             if (node_layer[si] == node_layer[sj])
             {
+                bool cont = false;
+
+                if ((fabs(p[si] - p[sj]) < 0.5) && (si != sj))
+                {
+                    n_cross += 10;
+                    cont = true;
+                }
+
+                if ((fabs(p[di] - p[dj]) < 0.5) && (di != dj))
+                {
+                    n_cross += 10;
+                    cont = true;
+                }
+
+                if (cont)
+                {
+                    continue;
+                }
+
                 if (p[si] > p[sj])
                 {
-                    if (p[di] <= p[dj])
+                    if (p[di] < p[dj])
                     {
                         n_cross++;
                     }
                 }
                 else
                 {
-                    if (p[di] >= p[dj])
+                    if (p[di] > p[dj])
                     {
                         n_cross++;
                     }
@@ -982,9 +979,8 @@ double ccpm_viz_loss(double * p, uint16_t * node_layer, uint16_t n_node, \
         }
     }
 
-    loss += l_graph * (1.0 + (double)n_cross);
-    //loss *= 1.0 + n_cross;
-
-    return loss;
+    //return n_cross;
+    return l_graph * (1.0 + (double)n_cross);
+    //return l_graph + (double)n_cross;
 }
 
