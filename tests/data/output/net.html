@@ -1,0 +1,108 @@
+<html>
+<head>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.16.1/vis.css" type="text/css" />
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.16.1/vis-network.min.js"> </script>
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+
+<style type="text/css">
+
+        #mynetwork {
+            width: 770.0;
+            height: 470.0;
+            background-color: #ffffff;
+            border: 1px solid lightgray;
+            position: relative;
+            float: left;
+        }
+
+        
+
+        
+
+        
+</style>
+
+</head>
+
+<body>
+<div id = "mynetwork"></div>
+
+
+<script type="text/javascript">
+
+    // initialize global variables.
+    var edges;
+    var nodes;
+    var network; 
+    var container;
+    var options, data;
+
+    
+    // This method is responsible for drawing the graph, returns the drawn network
+    function drawGraph() {
+        var container = document.getElementById('mynetwork');
+        
+        
+
+        // parsing and collecting nodes and edges from the python
+        nodes = new vis.DataSet([{"borderWidth": 2, "id": 1, "label": "1", "physics": false, "shape": "circle", "title": "1", "x": -350.0, "y": -100.0}, {"borderWidth": 2, "id": 2, "label": "2", "physics": false, "shape": "circle", "title": "2", "x": -250.0, "y": -100.0}, {"borderWidth": 2, "id": 3, "label": "3", "physics": false, "shape": "circle", "title": "3", "x": -150.0, "y": -100.0}, {"borderWidth": 2, "id": 4, "label": "4", "physics": false, "shape": "circle", "title": "4", "x": -50.0, "y": -100.0}, {"borderWidth": 2, "id": 5, "label": "5", "physics": false, "shape": "circle", "title": "5", "x": -150.0, "y": 0.0}, {"borderWidth": 2, "id": 6, "label": "6", "physics": false, "shape": "circle", "title": "6", "x": -50.0, "y": 0.0}, {"borderWidth": 2, "id": 7, "label": "7", "physics": false, "shape": "circle", "title": "7", "x": 50.0, "y": -200.0}, {"borderWidth": 2, "id": 8, "label": "8", "physics": false, "shape": "circle", "title": "8", "x": 50.0, "y": -100.0}, {"borderWidth": 2, "id": 9, "label": "9", "physics": false, "shape": "circle", "title": "9", "x": 150.0, "y": -200.0}, {"borderWidth": 2, "id": 10, "label": "10", "physics": false, "shape": "circle", "title": "10", "x": 250.0, "y": -200.0}, {"borderWidth": 2, "id": 11, "label": "11", "physics": false, "shape": "circle", "title": "11", "x": 350.0, "y": -200.0}, {"borderWidth": 2, "id": 12, "label": " ", "physics": false, "shape": "circle", "title": " ", "x": -250.0, "y": -200.0}, {"borderWidth": 2, "id": 13, "label": " ", "physics": false, "shape": "circle", "title": " ", "x": -150.0, "y": -200.0}, {"borderWidth": 2, "id": 14, "label": " ", "physics": false, "shape": "circle", "title": " ", "x": -250.0, "y": 100.0}, {"borderWidth": 2, "id": 15, "label": " ", "physics": false, "shape": "circle", "title": " ", "x": -250.0, "y": 200.0}, {"borderWidth": 2, "id": 16, "label": " ", "physics": false, "shape": "circle", "title": " ", "x": 50.0, "y": 0.0}, {"borderWidth": 2, "id": 17, "label": " ", "physics": false, "shape": "circle", "title": " ", "x": 150.0, "y": -100.0}, {"borderWidth": 2, "id": 18, "label": " ", "physics": false, "shape": "circle", "title": " ", "x": 250.0, "y": -100.0}]);
+        edges = new vis.DataSet([{"arrows": "to", "from": 1, "label": "3", "title": "3", "to": 2, "width": 2}, {"arrows": "to", "from": 1, "label": "1", "title": "1", "to": 12, "width": 2}, {"arrows": "to", "from": 1, "label": "2", "title": "2", "to": 14, "width": 2}, {"arrows": "to", "from": 1, "label": "4", "title": "4", "to": 15, "width": 2}, {"arrows": "to", "from": 2, "label": "Dummy", "title": "Dummy", "to": 3, "width": 1}, {"arrows": "to", "from": 2, "label": "Dummy", "title": "Dummy", "to": 5, "width": 1}, {"arrows": "to", "from": 3, "label": "Dummy", "title": "Dummy", "to": 4, "width": 1}, {"arrows": "to", "from": 3, "label": "6", "title": "6", "to": 6, "width": 2}, {"arrows": "to", "from": 4, "label": "Dummy", "title": "Dummy", "to": 7, "width": 1}, {"arrows": "to", "from": 4, "label": "5", "title": "5", "to": 8, "width": 2}, {"arrows": "to", "from": 5, "label": "7", "title": "7", "to": 6, "width": 2}, {"arrows": "to", "from": 6, "label": "Dummy", "title": "Dummy", "to": 7, "width": 1}, {"arrows": "to", "from": 6, "label": "Dummy", "title": "Dummy", "to": 8, "width": 1}, {"arrows": "to", "from": 6, "label": "10", "title": "10", "to": 16, "width": 2}, {"arrows": "to", "from": 7, "label": "8", "title": "8", "to": 9, "width": 2}, {"arrows": "to", "from": 8, "label": "9", "title": "9", "to": 9, "width": 2}, {"arrows": "to", "from": 9, "label": "Dummy", "title": "Dummy", "to": 10, "width": 1}, {"arrows": "to", "from": 9, "label": "11", "title": "11", "to": 18, "width": 2}, {"arrows": "to", "from": 10, "label": "12", "title": "12", "to": 11, "width": 2}, {"arrows": "to", "from": 12, "label": "1", "title": "1", "to": 13, "width": 2}, {"arrows": "to", "from": 13, "label": "1", "title": "1", "to": 4, "width": 2}, {"arrows": "to", "from": 14, "label": "2", "title": "2", "to": 3, "width": 2}, {"arrows": "to", "from": 15, "label": "4", "title": "4", "to": 5, "width": 2}, {"arrows": "to", "from": 16, "label": "10", "title": "10", "to": 17, "width": 2}, {"arrows": "to", "from": 17, "label": "10", "title": "10", "to": 10, "width": 2}, {"arrows": "to", "from": 18, "label": "11", "title": "11", "to": 11, "width": 2}]);
+
+        // adding nodes and edges to the graph
+        data = {nodes: nodes, edges: edges};
+
+        var options = {
+    "configure": {
+        "enabled": false
+    },
+    "edges": {
+        "color": {
+            "inherit": true
+        },
+        "smooth": {
+            "enabled": false,
+            "type": "continuous"
+        }
+    },
+    "interaction": {
+        "dragNodes": true,
+        "hideEdgesOnDrag": false,
+        "hideNodesOnDrag": false
+    },
+    "physics": {
+        "enabled": true,
+        "stabilization": {
+            "enabled": true,
+            "fit": true,
+            "iterations": 1000,
+            "onlyDynamicEdges": false,
+            "updateInterval": 50
+        }
+    }
+};
+        
+        
+
+        
+
+        network = new vis.Network(container, data, options);
+	 
+        
+
+
+        
+
+        return network;
+
+    }
+
+    drawGraph();
+
+</script>
+</body>
+</html>
