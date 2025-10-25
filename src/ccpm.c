@@ -581,10 +581,6 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
                                       act_ndep, act_dep, act_dep_map,     \
                                       act_ndep, act_dep, act_dep_map));
 
-    /*ret = _ccpm_build_dep(n_act, n_act, tmp, act_id, act_pos, \
-                          act_ndep, act_dep, act_dep_map,     \
-                          act_ndep, act_dep, act_dep_map);//*/
-
     CCPM_LOG_PRINTF("Sorted optimized dependency arrays:\n");
     for (p = 0; p < n_act; p++)
     {

@@ -1,3 +1,6 @@
+#Data
+tests/data*
+
 # Setup tools outputs #
 #######################
 src/ccpm/_ccpm.c
