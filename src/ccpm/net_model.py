@@ -211,6 +211,24 @@ class NetworkModel:
             a.late_end  = a.late_start  + a.duration
             a.reserve   = a.late_start  - a.early_start
 
+        # Заменяем отрицательные значения на 0 и округляем до 1 знака
+        self._replace_negative_with_zero()
+
+    #--------------------------------------------------------------------------
+    def _replace_negative_with_zero(self):
+        """Заменяет все отрицательные значения временных параметров на 0"""
+        for e in self.events:
+            e.early = np.maximum(e.early, 0)
+            e.late = np.maximum(e.late, 0)
+            e.reserve = np.maximum(e.reserve, 0)
+
+        for a in self.activities:
+            a.early_start = np.maximum(a.early_start, 0)
+            a.late_start = np.maximum(a.late_start, 0)
+            a.early_end = np.maximum(a.early_end, 0)
+            a.late_end = np.maximum(a.late_end, 0)
+            a.reserve = np.maximum(a.reserve, 0)
+
     #--------------------------------------------------------------------------
     def _add_event(self, i):
         self.events.append(_Event(i, self))
@@ -323,11 +341,11 @@ class NetworkModel:
 
         for e in self.events:
             dot.node(str(e.id), 
-                     '{{%d |{%.1f|%.1f}| %.1f}}' % (e.id, 
-                                                    e.early[1],  # Сбалансированный сценарий
-                                                    e.late[1],   # Сбалансированный сценарий
-                                                    e.reserve[1] # Сбалансированный сценарий
-                                                    ), 
+                     '{{%d |{%.1f|%.1f}| %.1f}}' % (
+                         e.id, e.early[1], #Сбалансированнный сценарий (индекс 1)
+                         e.late[1],        #Сбалансированнный сценарий (индекс 1)
+                         e.reserve[1]      #Сбалансированнный сценарий (индекс 1)
+                         ), 
                      color=_cl(e.reserve[1]))
 
         for a in self.activities:
@@ -359,6 +377,7 @@ class NetworkModel:
 
         # Создаем узлы событий в виде таблиц
         for e in self.events:
+
             label = '{{%d|{%.1f|%.1f|%.1f}|{%.1f|%.1f|%.1f}|{%.1f|%.1f|%.1f}}}' % (
                 e.id,
                 # Пессимистический сценарий (индекс 2)
@@ -368,19 +387,32 @@ class NetworkModel:
                 # Оптимистический сценарий (индекс 0)
                 e.early[0], e.reserve[0], e.late[0]
             )
-            
+
             dot.node(str(e.id), label, color=_cl(e.reserve[1]))
 
         # Создаем ребра работ
         for a in self.activities:
+           
             if a.wbs_id:
                 # Обычная работа - показываем три оценки через точку с запятой
-                duration_str = '%.1f; %.1f; %.1f' % (a.duration[0], a.duration[1], a.duration[2])
-                reserve_str = '%.1f; %.1f; %.1f' % (a.reserve[0], a.reserve[1], a.reserve[2])
+                duration_str = '%.1f; %.1f; %.1f' % (
+                    a.duration[0],
+                    a.duration[1],
+                    a.duration[2]
+                    )
+                reserve_str = '%.1f; %.1f; %.1f' % (
+                    a.reserve[0],
+                    a.reserve[1],
+                    a.reserve[2]
+                    )
                 lbl = '%s\n t: %s\n r: %s' % (a.leter, duration_str, reserve_str)
             else:
                 # Фиктивная работа
-                reserve_str = '%.1f; %.1f; %.1f' % (a.reserve[0], a.reserve[1], a.reserve[2])
+                reserve_str = '%.1f; %.1f; %.1f' % (
+                    a.reserve[0],
+                    a.reserve[1],
+                    a.reserve[2]
+                    )
                 lbl = '#\n r: %s' % reserve_str
 
             dot.edge(str(a.src.id), str(a.dst.id), 
@@ -432,7 +464,7 @@ if __name__ == '__main__':
     
     # Пример PERT модели
     for _,w in wbs.items():
-        w['duration'] *= np.array([np.random.uniform(0.75, 0.77), 1.0, np.random.uniform(1.15, 1.20)])
+        w['duration'] *= np.array([np.random.uniform(0.7, 0.8), 1.0, np.random.uniform(1.1, 1.2)])
     
     print("\n=== PERT Model ===")
     n_pert = NetworkModel(wbs, src, dst)
