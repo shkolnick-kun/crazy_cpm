@@ -25,7 +25,7 @@ import _ccpm
 
 #==============================================================================
 class _Activity:  
-    def __init__(self, id, wbs_id, leter, model, src, dst, duration=0.0):
+    def __init__(self, id, wbs_id, leter, model, src, dst, duration=0.0, data=None):
         """
         Activity class representing a task in the network
         
@@ -45,6 +45,8 @@ class _Activity:
             Destination event
         duration : float
             Activity duration
+        data : dict
+            Complete WBS data for this activity
         """
         assert isinstance(id,       int)
         assert isinstance(wbs_id,   int)
@@ -54,6 +56,7 @@ class _Activity:
         assert isinstance(dst,      _Event)
         assert isinstance(duration, float)
         assert duration >= 0.
+        assert data is None or isinstance(data, dict)
 
         self.id       = id
         self.wbs_id   = wbs_id
@@ -62,6 +65,7 @@ class _Activity:
         self.src      = src
         self.dst      = dst
         self.duration = duration
+        self.data     = data if data is not None else {}
 
         # CPM time parameters (calculated later)
         self.early_start = 0.0
@@ -72,14 +76,15 @@ class _Activity:
 
     #----------------------------------------------------------------------------------------------
     def __repr__(self):
-        return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, leter=%r)' % (
+        return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, leter=%r, data=%r)' % (
             self.id,
             self.src.id,
             self.dst.id,
             self.duration,
             self.reserve,
             self.wbs_id,
-            self.leter
+            self.leter,
+            self.data
             )
     
 #==============================================================================
@@ -140,6 +145,7 @@ class NetworkModel:
             - 'duration': activity duration (required)
             - 'leter': activity letter/code (required)
             - 'name': activity description (optional)
+            - any other custom fields
         lnk_src, lnk_dst : array-like, optional
             Old format: separate source and destination arrays
         links : various formats, optional
@@ -176,14 +182,15 @@ class NetworkModel:
             if i < na:
                 # Real activity - get data from WBS
                 act_id = act_ids[i]
-                duration = wbs_dict[act_id].get('duration', 0.)
-                leter = wbs_dict[act_id].get('leter', '')
+                wbs_data = wbs_dict[act_id]  # Get complete WBS data
+                duration = wbs_data.get('duration', 0.)
+                leter = wbs_data.get('leter', '')
                 self._add_activity(int(act_id), int(net_src[i]), int(net_dst[i]), 
-                                  duration, leter)
+                                  duration, leter, wbs_data)  # Pass complete data
             else:
-                # Add a dummy activity (no duration, no letter)
+                # Add a dummy activity (no duration, no letter, no data)
                 d += 1
-                self._add_activity(0, int(net_src[i]), int(net_dst[i]), 0., '')
+                self._add_activity(0, int(net_src[i]), int(net_dst[i]), 0., '', {})
                 
         # Compute Event and Activity attributes using CPM
         assert 0 < len(self.events)
@@ -256,7 +263,7 @@ class NetworkModel:
         self.events.append(_Event(i, self))
     
     #--------------------------------------------------------------------------
-    def _add_activity(self, wbs_id, src_id, dst_id, duration, leter):
+    def _add_activity(self, wbs_id, src_id, dst_id, duration, leter, data):
         """
         Add a new activity to the network
         
@@ -272,15 +279,19 @@ class NetworkModel:
             Activity duration
         leter : str
             Activity letter/code for visualization
+        data : dict
+            Complete WBS data for this activity
         """
         assert isinstance(wbs_id,   int)
         assert isinstance(src_id,   int)
         assert isinstance(dst_id,   int)
         assert isinstance(duration, float)
         assert isinstance(leter,    str)
+        assert isinstance(data,     dict)
 
         act = _Activity(self.next_act, wbs_id, leter, self, 
-                        self.events[src_id-1], self.events[dst_id-1], duration)
+                        self.events[src_id-1], self.events[dst_id-1], 
+                        duration, data)
         self.activities.append(act)
         self.next_act += 1
 
@@ -420,6 +431,49 @@ class NetworkModel:
 
         return dot
 
+    #--------------------------------------------------------------------------
+    def get_activity_by_wbs_id(self, wbs_id):
+        """
+        Get activity by WBS ID
+        
+        Parameters:
+        -----------
+        wbs_id : int
+            WBS identifier
+            
+        Returns:
+        --------
+        _Activity or None
+            Activity with specified WBS ID or None if not found
+        """
+        for activity in self.activities:
+            if activity.wbs_id == wbs_id:
+                return activity
+        return None
+
+    #--------------------------------------------------------------------------
+    def get_activities_by_data_field(self, field_name, field_value):
+        """
+        Get activities by custom data field value
+        
+        Parameters:
+        -----------
+        field_name : str
+            Name of the field in activity.data
+        field_value : any
+            Value to match
+            
+        Returns:
+        --------
+        list
+            List of activities with matching field value
+        """
+        result = []
+        for activity in self.activities:
+            if activity.data.get(field_name) == field_value:
+                result.append(activity)
+        return result
+
 #==============================================================================
 if __name__ == '__main__':
     # Example usage with all link formats
@@ -446,6 +500,14 @@ if __name__ == '__main__':
     dst_old = np.array([5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
     n_old = NetworkModel(wbs, src_old, dst_old)
     print("Успешно создана модель со старым форматом")
+    
+    # Демонстрация нового атрибута data
+    print("\n=== Демонстрация атрибута data ===")
+    for i, activity in enumerate(n_old.activities[:5]):  # Показать первые 5 активностей
+        if activity.wbs_id != 0:  # Пропустить фиктивные активности
+            print(f"Активность {i+1}: wbs_id={activity.wbs_id}, leter='{activity.leter}'")
+            print(f"  Данные: {activity.data}")
+    
     
     # Новый формат 1 (две строки)
     print("\n2. Новый формат 1 (две строки):")
@@ -477,19 +539,19 @@ if __name__ == '__main__':
     print("Успешно создана модель с форматом 3")
     
     # Проверка идентичности моделей
-    print(f"\n=== Проверка идентичности моделей ===")
+    print("\n=== Проверка идентичности моделей ===")
     print(f"Старый == Новый1: {len(n_old.activities) == len(n_new1.activities)}")
     print(f"Старый == Новый2: {len(n_old.activities) == len(n_new2.activities)}")
     print(f"Старый == Новый3: {len(n_old.activities) == len(n_new3.activities)}")
     
     # Демонстрация нового атрибута leter
-    print(f"\n=== Демонстрация атрибута leter ===")
+    print("\n=== Демонстрация атрибута leter ===")
     for i, activity in enumerate(n_old.activities[:5]):  # Показать первые 5 активностей
         if activity.wbs_id != 0:  # Пропустить фиктивные активности
             print(f"Активность {i+1}: wbs_id={activity.wbs_id}, leter='{activity.leter}', duration={activity.duration}")
     
     # Создание визуализации
-    print(f"\n=== Создание визуализации ===")
+    print("\n=== Создание визуализации ===")
     dot = n_old.viz_cpm()
     dot.render('cpm_network', format='png', cleanup=True)
     print("Визуализация сохранена как 'cpm_network.png'")
