@@ -57,66 +57,17 @@ class _Activity:
         self.early_end   = np.zeros(3)
         self.late_end    = np.zeros(3)
         self.reserve     = np.zeros(3)
-        
-        # Математические ожидания и стандартные отклонения для PERT
-        self.duration_E = 0.0
-        self.duration_s = 0.0
-        self.early_start_E = 0.0
-        self.early_start_s = 0.0
-        self.late_start_E = 0.0
-        self.late_start_s = 0.0
-        self.early_end_E = 0.0
-        self.early_end_s = 0.0
-        self.late_end_E = 0.0
-        self.late_end_s = 0.0
-        self.reserve_E = 0.0
-        self.reserve_s = 0.0
-
-    #----------------------------------------------------------------------------------------------
-    def _compute_pert_stats(self):
-        """Вычисляет математические ожидания и стандартные отклонения для PERT модели"""
-        # Для длительности
-        o, m, p = self.duration
-        self.duration_E = (o + 4.0 * m + p) / 6.0
-        self.duration_s = (p - o) / 6.0
-        
-        # Для раннего начала
-        o, m, p = self.early_start
-        self.early_start_E = (o + 4.0 * m + p) / 6.0
-        self.early_start_s = (p - o) / 6.0
-        
-        # Для позднего начала
-        o, m, p = self.late_start
-        self.late_start_E = (o + 4.0 * m + p) / 6.0
-        self.late_start_s = (p - o) / 6.0
-        
-        # Для раннего окончания
-        o, m, p = self.early_end
-        self.early_end_E = (o + 4.0 * m + p) / 6.0
-        self.early_end_s = (p - o) / 6.0
-        
-        # Для позднего окончания
-        o, m, p = self.late_end
-        self.late_end_E = (o + 4.0 * m + p) / 6.0
-        self.late_end_s = (p - o) / 6.0
-        
-        # Для резерва
-        o, m, p = self.reserve
-        self.reserve_E = (o + 4.0 * m + p) / 6.0
-        self.reserve_s = (p - o) / 6.0
 
     #----------------------------------------------------------------------------------------------
     def __repr__(self):
         if self.model.is_pert:
-            # Для PERT модели выводим математические ожидания и стандартные отклонения
-            return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%.1f±%.1f, reserve=%.1f±%.1f, wbs_id=%r, leter=%r)' % (
+            # Для PERT модели выводим все три значения
+            return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, leter=%r)' % (
                 self.id,
                 self.src.id,
                 self.dst.id,
-                self.duration_E,
-                self.duration_s,
-                self.reserve_E,
-                self.reserve_s,
+                self.duration.tolist(),
+                self.reserve.tolist(),
                 self.wbs_id,
                 self.leter
             )
@@ -147,14 +98,6 @@ class _Event:
         self.reserve = np.zeros(3)
         self.stage   = 0  # Стадия остается скаляром
         
-        # Математические ожидания и стандартные отклонения для PERT
-        self.early_E = 0.0
-        self.early_s = 0.0
-        self.late_E = 0.0
-        self.late_s = 0.0
-        self.reserve_E = 0.0
-        self.reserve_s = 0.0
-        
     @property
     def in_activities(self):
         return [a for a in self.model.activities if a.dst == self]
@@ -164,35 +107,14 @@ class _Event:
         return [a for a in self.model.activities if a.src == self]
 
     #--------------------------------------------------------------------------
-    def _compute_pert_stats(self):
-        """Вычисляет математические ожидания и стандартные отклонения для PERT модели"""
-        # Для раннего времени
-        o, m, p = self.early
-        self.early_E = (o + 4.0 * m + p) / 6.0
-        self.early_s = (p - o) / 6.0
-        
-        # Для позднего времени
-        o, m, p = self.late
-        self.late_E = (o + 4.0 * m + p) / 6.0
-        self.late_s = (p - o) / 6.0
-        
-        # Для резерва
-        o, m, p = self.reserve
-        self.reserve_E = (o + 4.0 * m + p) / 6.0
-        self.reserve_s = (p - o) / 6.0
-
-    #--------------------------------------------------------------------------
     def __repr__(self):
         if self.model.is_pert:
-            # Для PERT модели выводим математические ожидания и стандартные отклонения
-            return 'Event(id=%r early=%.1f±%.1f late=%.1f±%.1f reserve=%.1f±%.1f stage=%r)' % (
+            # Для PERT модели выводим все три значения
+            return 'Event(id=%r early=%r late=%r reserve=%r stage=%r)' % (
                 self.id,
-                self.early_E,
-                self.early_s,
-                self.late_E,
-                self.late_s,
-                self.reserve_E,
-                self.reserve_s,
+                self.early.tolist(),
+                self.late.tolist(),
+                self.reserve.tolist(),
                 self.stage
             )
         else:
@@ -319,19 +241,6 @@ class NetworkModel:
 
         # Заменяем отрицательные значения на 0 и округляем до 1 знака
         self._replace_negative_with_zero()
-        
-        # Вычисляем математические ожидания и стандартные отклонения для PERT модели
-        if self.is_pert:
-            self._compute_pert_stats()
-
-    #--------------------------------------------------------------------------
-    def _compute_pert_stats(self):
-        """Вычисляет математические ожидания и стандартные отклонения для всех событий и работ"""
-        for event in self.events:
-            event._compute_pert_stats()
-            
-        for activity in self.activities:
-            activity._compute_pert_stats()
 
     #--------------------------------------------------------------------------
     def _parse_links(self, lnk_src, lnk_dst, links):
