@@ -91,12 +91,27 @@ class _Event:
 
 #==============================================================================
 class NetworkModel:
-    def __init__(self, wbs_dict, lnk_src, lnk_dst):
-
+    def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None):
+        """
+        Initialize NetworkModel with multiple link formats support
+        
+        Parameters:
+        -----------
+        wbs_dict : dict
+            Work Breakdown Structure dictionary
+        lnk_src, lnk_dst : array-like, optional
+            Old format: separate source and destination arrays
+        links : various formats, optional
+            New formats:
+            - Format 1: two rows [[src1, src2, ...], [dst1, dst2, ...]]
+            - Format 2: two columns [[src1, dst1], [src2, dst2], ...]
+            - Format 3: dictionary {'src': [src1, src2, ...], 'dst': [dst1, dst2, ...]}
+        """
         assert isinstance(wbs_dict, dict)
-        assert isinstance(lnk_src, np.ndarray)
-        assert isinstance(lnk_dst, np.ndarray)
-
+        
+        # Parse links into standard format
+        lnk_src, lnk_dst = self._parse_links(lnk_src, lnk_dst, links)
+        
         assert len(lnk_src) == len(lnk_dst)
 
         self.events     = []
@@ -143,6 +158,44 @@ class NetworkModel:
             a.early_end = a.early_start + a.duration
             a.late_end  = a.late_start  + a.duration
             a.reserve   = a.late_start  - a.early_start
+
+    #--------------------------------------------------------------------------
+    def _parse_links(self, lnk_src, lnk_dst, links):
+        """
+        Parse links from various formats into standard lnk_src, lnk_dst arrays
+        """
+        # Case 1: Old format (lnk_src and lnk_dst provided)
+        if lnk_src is not None and lnk_dst is not None:
+            return np.asarray(lnk_src), np.asarray(lnk_dst)
+        
+        # Case 2: New formats via links parameter
+        if links is None:
+            raise ValueError("Either (lnk_src, lnk_dst) or links must be provided")
+        
+        # Format 1: Two rows [[src...], [dst...]]
+        if (isinstance(links, (list, tuple)) and len(links) == 2 and 
+            isinstance(links[0], (list, tuple, np.ndarray)) and
+            isinstance(links[1], (list, tuple, np.ndarray))):
+            return np.asarray(links[0]), np.asarray(links[1])
+        
+        # Format 2: Two columns [[src, dst], [src, dst], ...]
+        elif (isinstance(links, (list, tuple, np.ndarray)) and 
+              len(links) > 0 and
+              isinstance(links[0], (list, tuple, np.ndarray)) and
+              len(links[0]) == 2):
+            src_list = [item[0] for item in links]
+            dst_list = [item[1] for item in links]
+            return np.asarray(src_list), np.asarray(dst_list)
+        
+        # Format 3: Dictionary {'src': [...], 'dst': [...]}
+        elif isinstance(links, dict):
+            if 'src' in links and 'dst' in links:
+                return np.asarray(links['src']), np.asarray(links['dst'])
+            else:
+                raise ValueError("Dictionary links must contain 'src' and 'dst' keys")
+        
+        else:
+            raise ValueError(f"Unsupported links format: {type(links)}")
 
     #--------------------------------------------------------------------------
     def _add_event(self, i):
@@ -294,8 +347,42 @@ if __name__ == '__main__':
         12:{'leter':'L', 'duration':1., 'name':'Pavement'                                                }
         }
     
-    src = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10])
-    dst = np.array([5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
+    # Демонстрация всех форматов:
     
-    n = NetworkModel(wbs, src, dst)
-    print(n)
+    print("=== Старый формат ===")
+    src_old = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10])
+    dst_old = np.array([5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
+    n_old = NetworkModel(wbs, src_old, dst_old)
+    print("Успешно создана модель со старым форматом")
+    
+    print("\n=== Новый формат 1 (две строки) ===")
+    links_format1 = [
+        [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10],
+        [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
+    ]
+    n_new1 = NetworkModel(wbs, links=links_format1)
+    print("Успешно создана модель с форматом 1")
+    
+    print("\n=== Новый формат 2 (две колонки) ===")
+    links_format2 = [
+        [1,5], [2,5], [3,5], [2,6], [3,6], [3,7], [4,7],
+        [1,8], [6,8], [7,8], [5,9], [6,9], [7,9], [3,10],
+        [6,10], [7,10], [6,11], [8,11], [9,11], [7,12],
+        [8,12], [9,12], [10,12]
+    ]
+    n_new2 = NetworkModel(wbs, links=links_format2)
+    print("Успешно создана модель с форматом 2")
+    
+    print("\n=== Новый формат 3 (словарь) ===")
+    links_format3 = {
+        'src': [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10],
+        'dst': [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
+    }
+    n_new3 = NetworkModel(wbs, links=links_format3)
+    print("Успешно создана модель с форматом 3")
+    
+    # Проверяем, что все модели идентичны
+    print(f"\nПроверка идентичности моделей:")
+    print(f"Старый == Новый1: {len(n_old.activities) == len(n_new1.activities)}")
+    print(f"Старый == Новый2: {len(n_old.activities) == len(n_new2.activities)}")
+    print(f"Старый == Новый3: {len(n_old.activities) == len(n_new3.activities)}")
