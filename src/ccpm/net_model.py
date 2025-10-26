@@ -28,7 +28,7 @@ class _Activity:
     def __init__(self, id, wbs_id, leter, model, src, dst, duration=0.0):
         assert isinstance(id,       int)
         assert isinstance(wbs_id,   int)
-        assert isinstance(leter,   str)
+        assert isinstance(leter,    str)
         assert isinstance(model,    NetworkModel)
         assert isinstance(src,      _Event)
         assert isinstance(dst,      _Event)
@@ -37,16 +37,14 @@ class _Activity:
         if isinstance(duration, (list, tuple, np.ndarray)):
             assert len(duration) == 3
             self.duration = np.array(duration, dtype=float)
-            self.is_pert = True
         else:
             assert isinstance(duration, float)
             assert duration >= 0.
             self.duration = np.array([duration, duration, duration], dtype=float)
-            self.is_pert = False
 
         self.id       = id
         self.wbs_id   = wbs_id
-        self.leter   = leter
+        self.leter    = leter
         self.model    = model
         self.src      = src
         self.dst      = dst
@@ -60,19 +58,32 @@ class _Activity:
 
     #----------------------------------------------------------------------------------------------
     def __repr__(self):
-        return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, leter=%r)' % (
-            self.id,
-            self.src.id,
-            self.dst.id,
-            self.duration.tolist(),
-            self.reserve.tolist(),
-            self.wbs_id,
-            self.leter
+        if self.model.is_pert:
+            # Для PERT модели выводим все три значения
+            return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, leter=%r)' % (
+                self.id,
+                self.src.id,
+                self.dst.id,
+                self.duration.tolist(),
+                self.reserve.tolist(),
+                self.wbs_id,
+                self.leter
+            )
+        else:
+            # Для CPM модели выводим только сбалансированный сценарий (индекс 1)
+            return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, leter=%r)' % (
+                self.id,
+                self.src.id,
+                self.dst.id,
+                self.duration[1],
+                self.reserve[1],
+                self.wbs_id,
+                self.leter
             )
     
 #==============================================================================
 class _Event:    
-    def __init__(self, id, model, is_pert=False):
+    def __init__(self, id, model):
         assert isinstance(id,     int)
         assert isinstance(model, NetworkModel)
 
@@ -95,13 +106,24 @@ class _Event:
 
     #--------------------------------------------------------------------------
     def __repr__(self):
-        return 'Event(id=%r early=%r late=%r reserve=%r stage=%r)' % (
-            self.id,
-            self.early.tolist(),
-            self.late.tolist(),
-            self.reserve.tolist(),
-            self.stage
-        )
+        if self.model.is_pert:
+            # Для PERT модели выводим все три значения
+            return 'Event(id=%r early=%r late=%r reserve=%r stage=%r)' % (
+                self.id,
+                self.early.tolist(),
+                self.late.tolist(),
+                self.reserve.tolist(),
+                self.stage
+            )
+        else:
+            # Для CPM модели выводим только сбалансированный сценарий (индекс 1)
+            return 'Event(id=%r early=%r late=%r reserve=%r stage=%r)' % (
+                self.id,
+                self.early[1],
+                self.late[1],
+                self.reserve[1],
+                self.stage
+            )
 
 #==============================================================================
 class NetworkModel:
@@ -148,7 +170,7 @@ class NetworkModel:
         assert 0 == status
 
         for i in range(np.max(net_dst)):
-            self._add_event(int(i + 1), self.is_pert)
+            self._add_event(int(i + 1))
 
         na = len(act_ids)
         d  = np.max(act_ids)
@@ -187,15 +209,15 @@ class NetworkModel:
             a.reserve   = a.late_start  - a.early_start
 
     #--------------------------------------------------------------------------
-    def _add_event(self, i, is_pert=False):
-        self.events.append(_Event(i, self, is_pert))
+    def _add_event(self, i):
+        self.events.append(_Event(i, self))
     
     #--------------------------------------------------------------------------
     def _add_activity(self, wbs_id, leter, src_id, dst_id, duration):
-        assert isinstance(wbs_id,   int)
-        assert isinstance(leter,   str)
-        assert isinstance(dst_id,   int)
-        assert isinstance(wbs_id,   int)
+        assert isinstance(wbs_id, int)
+        assert isinstance(leter,  str)
+        assert isinstance(dst_id, int)
+        assert isinstance(wbs_id, int)
 
         act = _Activity(self.next_act, wbs_id, leter, self, self.events[src_id-1], 
                         self.events[dst_id-1], duration)
@@ -323,7 +345,7 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def _viz_pert(self):
         """Визуализация для PERT модели"""
-        dot = graphviz.Digraph(node_attr={'shape': 'plaintext'})
+        dot = graphviz.Digraph(node_attr={'shape': 'record', 'style':'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
 
         def _cl(res):
@@ -333,20 +355,7 @@ class NetworkModel:
 
         # Создаем узлы событий в виде таблиц
         for e in self.events:
-            # Создаем HTML-подобную таблицу для узла
-            label = '''<
-            <table border="1" cellborder="0" cellspacing="0">
-                <tr><td colspan="3"><b>%d</b></td></tr>
-                <tr>
-                    <td>%.1f</td><td>%.1f</td><td>%.1f</td>
-                </tr>
-                <tr>
-                    <td>%.1f</td><td>%.1f</td><td>%.1f</td>
-                </tr>
-                <tr>
-                    <td>%.1f</td><td>%.1f</td><td>%.1f</td>
-                </tr>
-            </table>>''' % (
+            label = '{{%d|{%.1f|%.1f|%.1f}|{%.1f|%.1f|%.1f}|{%.1f|%.1f|%.1f}}}' % (
                 e.id,
                 # Пессимистический сценарий (индекс 2)
                 e.early[2], e.reserve[2], e.late[2],
@@ -413,8 +422,9 @@ if __name__ == '__main__':
     print(n_cpm)
     
     # Пример PERT модели
-    wbs[5]['duration'] = [4,5,6]
-
+    for _,w in wbs.items():
+        w['duration'] *= np.array([np.random.uniform(0.75, 0.77), 1.0, np.random.uniform(1.15, 1.20)])
+    
     print("\n=== PERT Model ===")
     n_pert = NetworkModel(wbs, src, dst)
     print(n_pert)
