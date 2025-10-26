@@ -90,7 +90,7 @@ class _Event:
 #==============================================================================
 class NetworkModel:
     def __init__(self, wbs_dict, lnk_src, lnk_dst):
-        
+
         assert isinstance(wbs_dict, dict)
         assert isinstance(lnk_src, np.ndarray)
         assert isinstance(lnk_dst, np.ndarray)
@@ -100,13 +100,13 @@ class NetworkModel:
         self.events     = []
         self.next_act   = 1
         self.activities = []
-        
+
         #Generate network graph
         act_ids = np.array(list(wbs_dict.keys()), dtype=int)
-        
+
         status, net_src, net_dst, lnk_src, lnk_dst = _ccpm.compute_aoa(act_ids, lnk_src, lnk_dst)
         assert 0 == status
-        
+
         for i in range(np.max(net_dst)):
             self._add_event(int(i + 1))
 
@@ -123,18 +123,20 @@ class NetworkModel:
                 
         #Compute Event and Actions attributes
         assert 0 < len(self.events)
-        
+
+        self._cpm_compute('stage')
+
         self._cpm_compute('early')
-        
+
         l = max([e.early for e in self.events])
         for e in self.events:
             e.late = l
-        
+
         self._cpm_compute('late')
-        
+
         for e in self.events:
             e.reserve = e.late - e.early
-            
+
         for a in self.activities:
             a.early_end = a.early_start + a.duration
             a.late_end  = a.late_start  + a.duration
@@ -167,7 +169,7 @@ class NetworkModel:
             rev          = 'in_activities'
             delta        = lambda a : a.duration
             choise       = max
-        elif 'layer' == target:
+        elif 'stage' == target:
             act_base     = None
             act_new      = None
             act_next     = 'dst'
@@ -186,7 +188,7 @@ class NetworkModel:
         else:
             raise ValueError("Unknown 'target' value!!!")
         
-        if 'layer' != target:
+        if 'stage' != target:
             for a in self.activities:
                 setattr(a, act_base, -1)
                 setattr(a, act_new,  -1)
@@ -239,19 +241,14 @@ class NetworkModel:
         return _repr
     
     #--------------------------------------------------------------------------
-    def generate_viz(self):
+    def viz_cpm(self):
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style':'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
 
-        _mr = max([e.reserve for e in self.events])
-
         def _cl(res):
-            if _mr < 0.0:
+            if res <= 1e-12: #Absolutre precision is nonsense
                 return '#ff0000'
-
-            g = int(res / _mr * 255)
-            r = 255 - g
-            return '#' + hex(r)[2:] + hex(g)[2:] + '00'
+            return '#000000'
 
         for e in self.events:
             dot.node(str(e.id), 
@@ -260,8 +257,6 @@ class NetworkModel:
                                                     e.late, 
                                                     e.reserve), 
                      color=_cl(e.reserve))
-
-        _mr = max([a.reserve for a in self.activities])
 
         for a in self.activities:
 
@@ -289,7 +284,7 @@ if __name__ == '__main__':
         4 :{'duration':4., 'name': 'Earthwork and concrete longitudinal beams'               },
         5 :{'duration':6., 'name': 'Frame construction'                                      },
         6 :{'duration':2., 'name': 'Frame transport'                                         },
-        7 :{'duration':5., 'name': 'Assemblage'                                              },
+        7 :{'duration':6., 'name': 'Assemblage'                                              },
         8 :{'duration':2., 'name': 'Earthwork and pose drains'                               },
         9 :{'duration':5., 'name': 'Heating provisioning and assembly'                       },
         10:{'duration':5., 'name': 'Electric installation'                                   },
