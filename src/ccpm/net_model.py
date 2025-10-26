@@ -22,6 +22,7 @@
 import graphviz
 import numpy as np
 import pandas as pd
+import os
 import _ccpm
 
 #==============================================================================
@@ -554,10 +555,16 @@ class NetworkModel:
         return _repr
     
     #--------------------------------------------------------------------------
-    def viz_cpm(self):
+    def viz_cpm(self, output_path=None):
         """
         Create Graphviz visualization of the CPM network
         
+        Parameters:
+        -----------
+        output_path : str, optional
+            Custom output path for saving the visualization file.
+            If None, uses default location.
+            
         Returns:
         --------
         graphviz.Digraph
@@ -598,6 +605,10 @@ class NetworkModel:
                      style='dashed' if a.duration == 0 else 'solid'
                     )
 
+        # If output path is specified, render to that location
+        if output_path is not None:
+            dot.render(output_path, format='png', cleanup=True)
+            
         return dot
 
     #--------------------------------------------------------------------------
@@ -661,34 +672,34 @@ if __name__ == '__main__':
         12:{'letter':'L', 'duration':1., 'name':'Pavement'                                                }
         }
     
-    print("=== Демонстрация всех форматов связей ===")
+    print("=== Demonstration of all link formats ===")
     
-    # Старый формат
-    print("\n1. Старый формат:")
+    # Old format
+    print("\n1. Old format:")
     src_old = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10])
     dst_old = np.array([5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
     n_old = NetworkModel(wbs, src_old, dst_old)
-    print("Успешно создана модель со старым форматом")
+    print("Successfully created model with old format")
     
-    # Демонстрация нового атрибута data
-    print("\n=== Демонстрация атрибута data ===")
-    for i, activity in enumerate(n_old.activities[:5]):  # Показать первые 5 активностей
-        if activity.wbs_id != 0:  # Пропустить фиктивные активности
-            print(f"Активность {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
-            print(f"  Данные: {activity.data}")
+    # Demonstration of the new data attribute
+    print("\n=== Demonstration of the data attribute ===")
+    for i, activity in enumerate(n_old.activities[:5]):  # Show first 5 activities
+        if activity.wbs_id != 0:  # Skip dummy activities
+            print(f"Activity {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
+            print(f"  Data: {activity.data}")
     
     
-    # Новый формат 1 (две строки)
-    print("\n2. Новый формат 1 (две строки):")
+    # New format 1 (two rows)
+    print("\n2. New format 1 (two rows):")
     links_format1 = [
         [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10],
         [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
     ]
     n_new1 = NetworkModel(wbs, links=links_format1)
-    print("Успешно создана модель с форматом 1")
+    print("Successfully created model with format 1")
     
-    # Новый формат 2 (две колонки)
-    print("\n3. Новый формат 2 (две колонки):")
+    # New format 2 (two columns)
+    print("\n3. New format 2 (two columns):")
     links_format2 = [
         [1,5], [2,5], [3,5], [2,6], [3,6], [3,7], [4,7],
         [1,8], [6,8], [7,8], [5,9], [6,9], [7,9], [3,10],
@@ -696,76 +707,90 @@ if __name__ == '__main__':
         [8,12], [9,12], [10,12]
     ]
     n_new2 = NetworkModel(wbs, links=links_format2)
-    print("Успешно создана модель с форматом 2")
+    print("Successfully created model with format 2")
     
-    # Новый формат 3 (словарь)
-    print("\n4. Новый формат 3 (словарь):")
+    # New format 3 (dictionary)
+    print("\n4. New format 3 (dictionary):")
     links_format3 = {
         'src': [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10],
         'dst': [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
     }
     n_new3 = NetworkModel(wbs, links=links_format3)
-    print("Успешно создана модель с форматом 3")
+    print("Successfully created model with format 3")
     
-    # Проверка идентичности моделей
-    print("\n=== Проверка идентичности моделей ===")
-    print(f"Старый == Новый1: {len(n_old.activities) == len(n_new1.activities)}")
-    print(f"Старый == Новый2: {len(n_old.activities) == len(n_new2.activities)}")
-    print(f"Старый == Новый3: {len(n_old.activities) == len(n_new3.activities)}")
+    # Check model equivalence
+    print("\n=== Checking model equivalence ===")
+    print(f"Old == New1: {len(n_old.activities) == len(n_new1.activities)}")
+    print(f"Old == New2: {len(n_old.activities) == len(n_new2.activities)}")
+    print(f"Old == New3: {len(n_old.activities) == len(n_new3.activities)}")
     
-    # Демонстрация нового атрибута letter
-    print("\n=== Демонстрация атрибута letter ===")
-    for i, activity in enumerate(n_old.activities[:5]):  # Показать первые 5 активностей
-        if activity.wbs_id != 0:  # Пропустить фиктивные активности
-            print(f"Активность {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}', duration={activity.duration}")
+    # Demonstration of the letter attribute
+    print("\n=== Demonstration of the letter attribute ===")
+    for i, activity in enumerate(n_old.activities[:5]):  # Show first 5 activities
+        if activity.wbs_id != 0:  # Skip dummy activities
+            print(f"Activity {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}', duration={activity.duration}")
     
-    print("\n=== Демонстрация экспорта в словарь ===")
+    print("\n=== Demonstration of dictionary export ===")
     model_dict = n_old.to_dict()
     
-    print(f"Количество активностей: {len(model_dict['activities'])}")
-    print(f"Количество событий: {len(model_dict['events'])}")
+    print(f"Number of activities: {len(model_dict['activities'])}")
+    print(f"Number of events: {len(model_dict['events'])}")
     
-    # Показать структуру данных
-    print("\nСтруктура данных активностей:")
+    # Show data structure
+    print("\nActivity data structure:")
     if len(model_dict['activities']) > 0:
         first_activity = model_dict['activities'][0]
-        print(f"Ключи: {list(first_activity.keys())}")
-        print(f"Пример активности: {first_activity}")
+        print(f"Keys: {list(first_activity.keys())}")
+        print(f"Example activity: {first_activity}")
     
-    print("\nСтруктура данных событий:")
+    print("\nEvent data structure:")
     if len(model_dict['events']) > 0:
         first_event = model_dict['events'][0]
-        print(f"Ключи: {list(first_event.keys())}")
-        print(f"Пример события: {first_event}")
+        print(f"Keys: {list(first_event.keys())}")
+        print(f"Example event: {first_event}")
     
-    # Демонстрация экспорта в DataFrame (если pandas доступен)
-    print("\n=== Демонстрация экспорта в DataFrame ===")
+    # Demonstration of DataFrame export (if pandas is available)
+    print("\n=== Demonstration of DataFrame export ===")
     try:
         activities_df, events_df = n_old.to_dataframe()
         
-        print("\nDataFrame активностей:")
-        print(f"Размер: {activities_df.shape}")
-        print(f"Колонки: {list(activities_df.columns)}")
-        print("\nПервые 5 строк:")
+        print("\nActivities DataFrame:")
+        print(f"Size: {activities_df.shape}")
+        print(f"Columns: {list(activities_df.columns)}")
+        print("\nFirst 5 rows:")
         print(activities_df.head())
         
-        print("\nDataFrame событий:")
-        print(f"Размер: {events_df.shape}")
-        print(f"Колонки: {list(events_df.columns)}")
-        print("\nПервые 5 строк:")
+        print("\nEvents DataFrame:")
+        print(f"Size: {events_df.shape}")
+        print(f"Columns: {list(events_df.columns)}")
+        print("\nFirst 5 rows:")
         print(events_df.head())
         
-        # Показать, что данные из поля 'data' теперь в отдельных колонках
-        print("\nПроверка развертывания данных:")
-        if 'name' in activities_df.columns and 'department' in activities_df.columns:
-            print("Данные из 'data' успешно развернуты в отдельные колонки:")
-            print(activities_df[['letter', 'name', 'department', 'duration', 'reserve']].head())
+        # Show that data from 'data' field is now in separate columns
+        print("\nChecking data expansion:")
+        if 'name' in activities_df.columns:
+            print("Data from 'data' successfully expanded into separate columns:")
+            print(activities_df[['letter', 'name', 'duration', 'reserve']].head())
         
     except Exception as e:
-        print(f"Ошибка при экспорте в DataFrame: {e}")
+        print(f"Error exporting to DataFrame: {e}")
     
-    # Создание визуализации
-    print("\n=== Создание визуализации ===")
-    dot = n_old.viz_cpm()
-    dot.render('cpm_network', format='png', cleanup=True)
-    print("Визуализация сохранена как 'cpm_network.png'")
+    # Create visualization in specific directory
+    print("\n=== Creating visualization ===")
+    
+    # Get the directory of the current module
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Construct the target directory path: <module directory>/../../tests/data
+    target_dir = os.path.normpath(os.path.join(module_dir, '../../tests/data'))
+    
+    # Create the directory if it doesn't exist
+    os.makedirs(target_dir, exist_ok=True)
+    
+    # Construct the full file path
+    file_path = os.path.join(target_dir, 'cpm_network')
+    
+    # Create and save the visualization
+    dot = n_old.viz_cpm(output_path=file_path)
+    print(f"Visualization saved as '{file_path}.png'")
+    print(f"Target directory: {target_dir}")
