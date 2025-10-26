@@ -214,6 +214,37 @@ class NetworkModel:
             a.late_end  = a.late_start  + a.duration
             a.reserve   = a.late_start  - a.early_start
 
+        # Replace negative time values with zeros
+        self._replace_negative_times_with_zeros()
+
+    #--------------------------------------------------------------------------
+    def _replace_negative_times_with_zeros(self):
+        """
+        Replace negative time values with zeros in all events and activities
+        This ensures all temporal parameters are non-negative
+        """
+        # Process events
+        for event in self.events:
+            if event.early < 0:
+                event.early = 0.0
+            if event.late < 0:
+                event.late = 0.0
+            if event.reserve < 0:
+                event.reserve = 0.0
+        
+        # Process activities
+        for activity in self.activities:
+            if activity.early_start < 0:
+                activity.early_start = 0.0
+            if activity.late_start < 0:
+                activity.late_start = 0.0
+            if activity.early_end < 0:
+                activity.early_end = 0.0
+            if activity.late_end < 0:
+                activity.late_end = 0.0
+            if activity.reserve < 0:
+                activity.reserve = 0.0
+
     #--------------------------------------------------------------------------
     def _parse_links(self, lnk_src, lnk_dst, links):
         """
@@ -407,6 +438,7 @@ class NetworkModel:
 
         # Add events/nodes
         for e in self.events:
+            # Format time values to 1 decimal place
             dot.node(str(e.id), 
                      '{{%d |{%.1f|%.1f}| %.1f}}' % (e.id, 
                                                     e.early, 
@@ -418,10 +450,11 @@ class NetworkModel:
         for a in self.activities:
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
+                # Format duration and reserve to 1 decimal place
                 lbl  = a.leter
-                lbl += '\n t=' + str(a.duration) + '\n r=' + str(a.reserve)
+                lbl += '\n t=' + format(a.duration, '.1f') + '\n r=' + format(a.reserve, '.1f')
             else:  # Dummy activity
-                lbl = '# \n r=' + str(a.reserve)
+                lbl = '# \n r=' + format(a.reserve, '.1f')
 
             dot.edge(str(a.src.id), str(a.dst.id), 
                      label=lbl, 
