@@ -25,13 +25,14 @@ import _ccpm
 
 #==============================================================================
 class _Activity:  
-    def __init__(self, id, wbs_id, leter, model, src, dst, duration=0.0):
+    def __init__(self, id, wbs_id, leter, model, src, dst, duration=0.0, data=None):
         assert isinstance(id,       int)
         assert isinstance(wbs_id,   int)
         assert isinstance(leter,    str)
         assert isinstance(model,    NetworkModel)
         assert isinstance(src,      _Event)
         assert isinstance(dst,      _Event)
+        assert isinstance(data,     dict)  # data должен быть словарем
         
         # Проверяем тип duration и преобразуем к нужному формату
         if isinstance(duration, (list, tuple, np.ndarray)):
@@ -48,6 +49,7 @@ class _Activity:
         self.model    = model
         self.src      = src
         self.dst      = dst
+        self.data     = data  # Сохраняем все данные из wbs записи
 
         # Временные параметры как массивы (3,)
         self.early_start = np.zeros(3)
@@ -179,12 +181,13 @@ class NetworkModel:
                 # Получаем буквенное обозначение из processed_wbs
                 leter = processed_wbs[act_ids[i]].get('leter', '')
                 duration = processed_wbs[act_ids[i]].get('duration', 0.)
-                self._add_activity(int(act_ids[i]), leter, int(net_src[i]), int(net_dst[i]), duration)
+                data = processed_wbs[act_ids[i]]  # Получаем все данные записи
+                self._add_activity(int(act_ids[i]), leter, int(net_src[i]), int(net_dst[i]), duration, data)
             else:
                 #Add a dummy - фиктивная работа
                 d += 1
-                self._add_activity(0, '', int(net_src[i]), int(net_dst[i]), np.zeros(3))
-                
+                self._add_activity(0, '', int(net_src[i]), int(net_dst[i]), np.zeros(3), {})
+
         #Compute Event and Actions attributes
         assert 0 < len(self.events)
 
@@ -213,14 +216,15 @@ class NetworkModel:
         self.events.append(_Event(i, self))
     
     #--------------------------------------------------------------------------
-    def _add_activity(self, wbs_id, leter, src_id, dst_id, duration):
+    def _add_activity(self, wbs_id, leter, src_id, dst_id, duration, data):
         assert isinstance(wbs_id, int)
         assert isinstance(leter,  str)
         assert isinstance(dst_id, int)
         assert isinstance(wbs_id, int)
+        assert isinstance(data,   dict)
 
         act = _Activity(self.next_act, wbs_id, leter, self, self.events[src_id-1], 
-                        self.events[dst_id-1], duration)
+                        self.events[dst_id-1], duration, data)
         self.activities.append(act)
         self.next_act += 1
 
@@ -420,6 +424,11 @@ if __name__ == '__main__':
     print("=== CPM Model ===")
     n_cpm = NetworkModel(wbs, src, dst)
     print(n_cpm)
+    
+    # Проверяем доступ к данным активности
+    for activity in n_cpm.activities:
+        if activity.wbs_id > 0:  # Пропускаем фиктивные работы
+            print(f"Activity {activity.leter}: name = {activity.data.get('name', 'N/A')}")
     
     # Пример PERT модели
     for _,w in wbs.items():
