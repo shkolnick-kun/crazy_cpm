@@ -25,9 +25,30 @@ import _ccpm
 
 #==============================================================================
 class _Activity:  
-    def __init__(self, id, wbs_id, model, src, dst, duration=0.0):
+    def __init__(self, id, wbs_id, leter, model, src, dst, duration=0.0):
+        """
+        Activity class representing a task in the network
+        
+        Parameters:
+        -----------
+        id : int
+            Unique activity identifier
+        wbs_id : int
+            Work Breakdown Structure identifier
+        leter : str
+            Activity letter/code for visualization
+        model : NetworkModel
+            Parent network model
+        src : _Event
+            Source event
+        dst : _Event
+            Destination event
+        duration : float
+            Activity duration
+        """
         assert isinstance(id,       int)
         assert isinstance(wbs_id,   int)
+        assert isinstance(leter,    str)
         assert isinstance(model,    NetworkModel)
         assert isinstance(src,      _Event)
         assert isinstance(dst,      _Event)
@@ -36,11 +57,13 @@ class _Activity:
 
         self.id       = id
         self.wbs_id   = wbs_id
+        self.leter    = leter
         self.model    = model
         self.src      = src
         self.dst      = dst
         self.duration = duration
 
+        # CPM time parameters (calculated later)
         self.early_start = 0.0
         self.late_start  = 0.0
         self.early_end   = 0.0
@@ -49,23 +72,36 @@ class _Activity:
 
     #----------------------------------------------------------------------------------------------
     def __repr__(self):
-        return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r)' % (
+        return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, leter=%r)' % (
             self.id,
             self.src.id,
             self.dst.id,
             self.duration,
             self.reserve,
             self.wbs_id,
+            self.leter
             )
     
 #==============================================================================
 class _Event:    
     def __init__(self, id, model):
+        """
+        Event class representing a milestone in the network
+        
+        Parameters:
+        -----------
+        id : int
+            Unique event identifier
+        model : NetworkModel
+            Parent network model
+        """
         assert isinstance(id,     int)
         assert isinstance(model, NetworkModel)
 
         self.id = id
         self.model   = model
+        
+        # CPM time parameters (calculated later)
         self.early   = 0.0
         self.late    = 0.0
         self.reserve = 0.0
@@ -73,10 +109,12 @@ class _Event:
         
     @property
     def in_activities(self):
+        """Get all activities entering this event"""
         return [a for a in self.model.activities if a.dst == self]
 
     @property
     def out_activities(self):
+        """Get all activities leaving this event"""
         return [a for a in self.model.activities if a.src == self]
 
     #--------------------------------------------------------------------------
@@ -98,7 +136,10 @@ class NetworkModel:
         Parameters:
         -----------
         wbs_dict : dict
-            Work Breakdown Structure dictionary
+            Work Breakdown Structure dictionary with activity data including:
+            - 'duration': activity duration (required)
+            - 'leter': activity letter/code (required)
+            - 'name': activity description (optional)
         lnk_src, lnk_dst : array-like, optional
             Old format: separate source and destination arrays
         links : various formats, optional
@@ -118,39 +159,46 @@ class NetworkModel:
         self.next_act   = 1
         self.activities = []
 
-        #Generate network graph
+        # Generate network graph using C++ extension
         act_ids = np.array(list(wbs_dict.keys()), dtype=int)
 
         status, net_src, net_dst, lnk_src, lnk_dst = _ccpm.compute_aoa(act_ids, lnk_src, lnk_dst)
         assert 0 == status
 
+        # Create events
         for i in range(np.max(net_dst)):
             self._add_event(int(i + 1))
 
+        # Create activities (real and dummy)
         na = len(act_ids)
         d  = np.max(act_ids)
         for i in range(len(net_src)):
             if i < na:
-                self._add_activity(int(act_ids[i]), int(net_src[i]), int(net_dst[i]), 
-                                  wbs_dict[act_ids[i]].get('duration', 0.))
+                # Real activity - get data from WBS
+                act_id = act_ids[i]
+                duration = wbs_dict[act_id].get('duration', 0.)
+                leter = wbs_dict[act_id].get('leter', '')
+                self._add_activity(int(act_id), int(net_src[i]), int(net_dst[i]), 
+                                  duration, leter)
             else:
-                #Add a dummy
+                # Add a dummy activity (no duration, no letter)
                 d += 1
-                self._add_activity(0, int(net_src[i]), int(net_dst[i]), 0.)
+                self._add_activity(0, int(net_src[i]), int(net_dst[i]), 0., '')
                 
-        #Compute Event and Actions attributes
+        # Compute Event and Activity attributes using CPM
         assert 0 < len(self.events)
 
         self._cpm_compute('stage')
-
         self._cpm_compute('early')
 
+        # Set late times starting from project completion
         l = max([e.early for e in self.events])
         for e in self.events:
             e.late = l
 
         self._cpm_compute('late')
 
+        # Calculate reserves
         for e in self.events:
             e.reserve = e.late - e.early
 
@@ -163,6 +211,11 @@ class NetworkModel:
     def _parse_links(self, lnk_src, lnk_dst, links):
         """
         Parse links from various formats into standard lnk_src, lnk_dst arrays
+        
+        Returns:
+        --------
+        lnk_src, lnk_dst : numpy.ndarray
+            Standardized source and destination arrays
         """
         # Case 1: Old format (lnk_src and lnk_dst provided)
         if lnk_src is not None and lnk_dst is not None:
@@ -199,23 +252,48 @@ class NetworkModel:
 
     #--------------------------------------------------------------------------
     def _add_event(self, i):
+        """Add a new event to the network"""
         self.events.append(_Event(i, self))
     
     #--------------------------------------------------------------------------
-    def _add_activity(self, wbs_id, src_id, dst_id, duration):
+    def _add_activity(self, wbs_id, src_id, dst_id, duration, leter):
+        """
+        Add a new activity to the network
+        
+        Parameters:
+        -----------
+        wbs_id : int
+            Work Breakdown Structure identifier (0 for dummy activities)
+        src_id : int
+            Source event ID
+        dst_id : int
+            Destination event ID
+        duration : float
+            Activity duration
+        leter : str
+            Activity letter/code for visualization
+        """
         assert isinstance(wbs_id,   int)
+        assert isinstance(src_id,   int)
         assert isinstance(dst_id,   int)
-        assert isinstance(wbs_id,   int)
         assert isinstance(duration, float)
+        assert isinstance(leter,    str)
 
-        act = _Activity(self.next_act, wbs_id, self, self.events[src_id-1], 
-                        self.events[dst_id-1
-                                    ], duration)
+        act = _Activity(self.next_act, wbs_id, leter, self, 
+                        self.events[src_id-1], self.events[dst_id-1], duration)
         self.activities.append(act)
         self.next_act += 1
 
     #--------------------------------------------------------------------------
     def _cpm_compute(self, target=None):
+        """
+        Compute CPM parameters for events and activities
+        
+        Parameters:
+        -----------
+        target : str
+            What to compute: 'stage', 'early', or 'late'
+        """
         if 'early' == target:
             act_base     = 'early_start'
             act_new      = 'early_finish'
@@ -248,19 +326,20 @@ class NetworkModel:
                 setattr(a, act_base, -1)
                 setattr(a, act_new,  -1)
            
+        # Count dependencies for topological sorting
         n_dep = [len(getattr(e, rev)) for e in self.events]
 
+        # Find starting events (no dependencies)
         evt = [i for i,n in enumerate(n_dep) if 0 == n]
         assert 1 == len(evt)
 
+        # Process events in topological order
         i = 0
         while True:
-
             e = self.events[evt[i]]
             base_val = getattr(e, target)
 
             for a in getattr(e, fwd):
-
                 if act_base:
                     setattr(a, act_base, base_val)
                     
@@ -285,6 +364,7 @@ class NetworkModel:
 
     #--------------------------------------------------------------------------
     def __repr__(self):
+        """String representation of the network model"""
         _repr = 'NetworkModel:\n    Events:\n'
         for e in self.events:
             _repr += '        ' + str(e) + '\n'    
@@ -297,14 +377,24 @@ class NetworkModel:
     
     #--------------------------------------------------------------------------
     def viz_cpm(self):
+        """
+        Create Graphviz visualization of the CPM network
+        
+        Returns:
+        --------
+        graphviz.Digraph
+            Graphviz object for rendering or saving
+        """
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style':'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
 
         def _cl(res):
-            if res <= 1e-6: #Absolutre precision is nonsense
+            """Choose color based on reserve (red for critical path)"""
+            if res <= 1e-6:  # Absolute precision is nonsense
                 return '#ff0000'
             return '#000000'
 
+        # Add events/nodes
         for e in self.events:
             dot.node(str(e.id), 
                      '{{%d |{%.1f|%.1f}| %.1f}}' % (e.id, 
@@ -313,12 +403,13 @@ class NetworkModel:
                                                     e.reserve), 
                      color=_cl(e.reserve))
 
+        # Add activities/edges
         for a in self.activities:
-
-            if a.wbs_id:
-                lbl  = str(a.wbs_id)
+            if a.wbs_id:  # Real activity
+                # Use letter instead of wbs_id in visualization
+                lbl  = a.leter
                 lbl += '\n t=' + str(a.duration) + '\n r=' + str(a.reserve)
-            else:
+            else:  # Dummy activity
                 lbl = '# \n r=' + str(a.reserve)
 
             dot.edge(str(a.src.id), str(a.dst.id), 
@@ -331,7 +422,7 @@ class NetworkModel:
 
 #==============================================================================
 if __name__ == '__main__':
-    
+    # Example usage with all link formats
     wbs = {
         1 :{'leter':'A', 'duration':1., 'name':'Heating and frames study'                                },
         2 :{'leter':'B', 'duration':2., 'name':'Scouring and installation of building site establishment'},
@@ -347,15 +438,17 @@ if __name__ == '__main__':
         12:{'leter':'L', 'duration':1., 'name':'Pavement'                                                }
         }
     
-    # Демонстрация всех форматов:
+    print("=== Демонстрация всех форматов связей ===")
     
-    print("=== Старый формат ===")
+    # Старый формат
+    print("\n1. Старый формат:")
     src_old = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10])
     dst_old = np.array([5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
     n_old = NetworkModel(wbs, src_old, dst_old)
     print("Успешно создана модель со старым форматом")
     
-    print("\n=== Новый формат 1 (две строки) ===")
+    # Новый формат 1 (две строки)
+    print("\n2. Новый формат 1 (две строки):")
     links_format1 = [
         [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10],
         [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
@@ -363,7 +456,8 @@ if __name__ == '__main__':
     n_new1 = NetworkModel(wbs, links=links_format1)
     print("Успешно создана модель с форматом 1")
     
-    print("\n=== Новый формат 2 (две колонки) ===")
+    # Новый формат 2 (две колонки)
+    print("\n3. Новый формат 2 (две колонки):")
     links_format2 = [
         [1,5], [2,5], [3,5], [2,6], [3,6], [3,7], [4,7],
         [1,8], [6,8], [7,8], [5,9], [6,9], [7,9], [3,10],
@@ -373,7 +467,8 @@ if __name__ == '__main__':
     n_new2 = NetworkModel(wbs, links=links_format2)
     print("Успешно создана модель с форматом 2")
     
-    print("\n=== Новый формат 3 (словарь) ===")
+    # Новый формат 3 (словарь)
+    print("\n4. Новый формат 3 (словарь):")
     links_format3 = {
         'src': [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10],
         'dst': [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
@@ -381,8 +476,20 @@ if __name__ == '__main__':
     n_new3 = NetworkModel(wbs, links=links_format3)
     print("Успешно создана модель с форматом 3")
     
-    # Проверяем, что все модели идентичны
-    print(f"\nПроверка идентичности моделей:")
+    # Проверка идентичности моделей
+    print(f"\n=== Проверка идентичности моделей ===")
     print(f"Старый == Новый1: {len(n_old.activities) == len(n_new1.activities)}")
     print(f"Старый == Новый2: {len(n_old.activities) == len(n_new2.activities)}")
     print(f"Старый == Новый3: {len(n_old.activities) == len(n_new3.activities)}")
+    
+    # Демонстрация нового атрибута leter
+    print(f"\n=== Демонстрация атрибута leter ===")
+    for i, activity in enumerate(n_old.activities[:5]):  # Показать первые 5 активностей
+        if activity.wbs_id != 0:  # Пропустить фиктивные активности
+            print(f"Активность {i+1}: wbs_id={activity.wbs_id}, leter='{activity.leter}', duration={activity.duration}")
+    
+    # Создание визуализации
+    print(f"\n=== Создание визуализации ===")
+    dot = n_old.viz_cpm()
+    dot.render('cpm_network', format='png', cleanup=True)
+    print("Визуализация сохранена как 'cpm_network.png'")
