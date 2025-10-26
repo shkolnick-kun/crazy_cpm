@@ -26,7 +26,7 @@ import _ccpm
 
 #==============================================================================
 class _Activity:  
-    def __init__(self, id, wbs_id, leter, model, src, dst, duration=0.0, data=None):
+    def __init__(self, id, wbs_id, letter, model, src, dst, duration=0.0, data=None):
         """
         Activity class representing a task in the network
         
@@ -36,7 +36,7 @@ class _Activity:
             Unique activity identifier
         wbs_id : int
             Work Breakdown Structure identifier
-        leter : str
+        letter : str
             Activity letter/code for visualization
         model : NetworkModel
             Parent network model
@@ -51,7 +51,7 @@ class _Activity:
         """
         assert isinstance(id,       int)
         assert isinstance(wbs_id,   int)
-        assert isinstance(leter,    str)
+        assert isinstance(letter,    str)
         assert isinstance(model,    NetworkModel)
         assert isinstance(src,      _Event)
         assert isinstance(dst,      _Event)
@@ -61,7 +61,7 @@ class _Activity:
 
         self.id       = id
         self.wbs_id   = wbs_id
-        self.leter    = leter
+        self.letter    = letter
         self.model    = model
         self.src      = src
         self.dst      = dst
@@ -77,14 +77,14 @@ class _Activity:
 
     #----------------------------------------------------------------------------------------------
     def __repr__(self):
-        return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, leter=%r, data=%r)' % (
+        return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, letter=%r, data=%r)' % (
             self.id,
             self.src.id,
             self.dst.id,
             self.duration,
             self.reserve,
             self.wbs_id,
-            self.leter,
+            self.letter,
             self.data
             )
     
@@ -101,7 +101,7 @@ class _Activity:
         return {
             'id': self.id,
             'wbs_id': self.wbs_id,
-            'leter': self.leter,
+            'letter': self.letter,
             'src_id': self.src.id,
             'dst_id': self.dst.id,
             'duration': self.duration,
@@ -187,7 +187,7 @@ class NetworkModel:
         wbs_dict : dict
             Work Breakdown Structure dictionary with activity data including:
             - 'duration': activity duration (required)
-            - 'leter': activity letter/code (required)
+            - 'letter': activity letter/code (required)
             - 'name': activity description (optional)
             - any other custom fields
         lnk_src, lnk_dst : array-like, optional
@@ -228,13 +228,13 @@ class NetworkModel:
                 act_id = act_ids[i]
                 wbs_data = wbs_dict[act_id]  # Get complete WBS data
                 duration = wbs_data.get('duration', 0.)
-                leter = wbs_data.get('leter', '')
+                letter = wbs_data.get('letter', '')
                 
                 # Create data dict without fields stored as separate attributes
-                data_without_duplicates = self._remove_duplicate_fields(wbs_data, duration, leter)
+                data_without_duplicates = self._remove_duplicate_fields(wbs_data, duration, letter)
                 
                 self._add_activity(int(act_id), int(net_src[i]), int(net_dst[i]), 
-                                  duration, leter, data_without_duplicates)
+                                  duration, letter, data_without_duplicates)
             else:
                 # Add a dummy activity (no duration, no letter, no data)
                 d += 1
@@ -324,7 +324,7 @@ class NetworkModel:
         return activities_df, events_df
 
     #--------------------------------------------------------------------------
-    def _remove_duplicate_fields(self, wbs_data, duration, leter):
+    def _remove_duplicate_fields(self, wbs_data, duration, letter):
         """
         Remove fields from WBS data that are stored as separate activity attributes
         
@@ -334,7 +334,7 @@ class NetworkModel:
             Complete WBS data for an activity
         duration : float
             Activity duration (already extracted)
-        leter : str
+        letter : str
             Activity letter (already extracted)
             
         Returns:
@@ -346,7 +346,7 @@ class NetworkModel:
         data_copy = wbs_data.copy()
         
         # Remove fields that are stored as separate attributes
-        fields_to_remove = ['duration', 'leter']
+        fields_to_remove = ['duration', 'letter']
         for field in fields_to_remove:
             if field in data_copy:
                 del data_copy[field]
@@ -360,26 +360,26 @@ class NetworkModel:
         This ensures all temporal parameters are non-negative
         """
         # Process events
-        for event in self.events:
-            if event.early < 0:
-                event.early = 0.0
-            if event.late < 0:
-                event.late = 0.0
-            if event.reserve < 0:
-                event.reserve = 0.0
+        for e in self.events:
+            if e.early < 0:
+                e.early = 0.0
+            if e.late < 0:
+                e.late = 0.0
+            if e.reserve < 0:
+                e.reserve = 0.0
         
         # Process activities
-        for activity in self.activities:
-            if activity.early_start < 0:
-                activity.early_start = 0.0
-            if activity.late_start < 0:
-                activity.late_start = 0.0
-            if activity.early_end < 0:
-                activity.early_end = 0.0
-            if activity.late_end < 0:
-                activity.late_end = 0.0
-            if activity.reserve < 0:
-                activity.reserve = 0.0
+        for a in self.activities:
+            if a.early_start < 0:
+                a.early_start = 0.0
+            if a.late_start < 0:
+                a.late_start = 0.0
+            if a.early_end < 0:
+                a.early_end = 0.0
+            if a.late_end < 0:
+                a.late_end = 0.0
+            if a.reserve < 0:
+                a.reserve = 0.0
 
     #--------------------------------------------------------------------------
     def _parse_links(self, lnk_src, lnk_dst, links):
@@ -430,7 +430,7 @@ class NetworkModel:
         self.events.append(_Event(i, self))
     
     #--------------------------------------------------------------------------
-    def _add_activity(self, wbs_id, src_id, dst_id, duration, leter, data):
+    def _add_activity(self, wbs_id, src_id, dst_id, duration, letter, data):
         """
         Add a new activity to the network
         
@@ -444,7 +444,7 @@ class NetworkModel:
             Destination event ID
         duration : float
             Activity duration
-        leter : str
+        letter : str
             Activity letter/code for visualization
         data : dict
             WBS data excluding fields stored as separate attributes
@@ -453,10 +453,10 @@ class NetworkModel:
         assert isinstance(src_id,   int)
         assert isinstance(dst_id,   int)
         assert isinstance(duration, float)
-        assert isinstance(leter,    str)
+        assert isinstance(letter,    str)
         assert isinstance(data,     dict)
 
-        act = _Activity(self.next_act, wbs_id, leter, self, 
+        act = _Activity(self.next_act, wbs_id, letter, self, 
                         self.events[src_id-1], self.events[dst_id-1], 
                         duration, data)
         self.activities.append(act)
@@ -587,7 +587,7 @@ class NetworkModel:
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
                 # Format duration and reserve to 1 decimal place
-                lbl  = a.leter
+                lbl  = a.letter
                 lbl += '\n t=' + format(a.duration, '.1f') + '\n r=' + format(a.reserve, '.1f')
             else:  # Dummy activity
                 lbl = '# \n r=' + format(a.reserve, '.1f')
@@ -647,18 +647,18 @@ class NetworkModel:
 if __name__ == '__main__':
     # Example usage with all link formats
     wbs = {
-        1 :{'leter':'A', 'duration':1., 'name':'Heating and frames study'                                },
-        2 :{'leter':'B', 'duration':2., 'name':'Scouring and installation of building site establishment'},
-        3 :{'leter':'C', 'duration':4., 'name':'Earthwork and concrete well'                             },
-        4 :{'leter':'D', 'duration':4., 'name':'Earthwork and concrete longitudinal beams'               },
-        5 :{'leter':'E', 'duration':6., 'name':'Frame construction'                                      },
-        6 :{'leter':'F', 'duration':2., 'name':'Frame transport'                                         },
-        7 :{'leter':'G', 'duration':6., 'name':'Assemblage'                                              },
-        8 :{'leter':'H', 'duration':2., 'name':'Earthwork and pose drains'                               },
-        9 :{'leter':'I', 'duration':5., 'name':'Heating provisioning and assembly'                       },
-        10:{'leter':'J', 'duration':5., 'name':'Electric installation'                                   },
-        11:{'leter':'K', 'duration':2., 'name':'Painting'                                                },
-        12:{'leter':'L', 'duration':1., 'name':'Pavement'                                                }
+        1 :{'letter':'A', 'duration':1., 'name':'Heating and frames study'                                },
+        2 :{'letter':'B', 'duration':2., 'name':'Scouring and installation of building site establishment'},
+        3 :{'letter':'C', 'duration':4., 'name':'Earthwork and concrete well'                             },
+        4 :{'letter':'D', 'duration':4., 'name':'Earthwork and concrete longitudinal beams'               },
+        5 :{'letter':'E', 'duration':6., 'name':'Frame construction'                                      },
+        6 :{'letter':'F', 'duration':2., 'name':'Frame transport'                                         },
+        7 :{'letter':'G', 'duration':6., 'name':'Assemblage'                                              },
+        8 :{'letter':'H', 'duration':2., 'name':'Earthwork and pose drains'                               },
+        9 :{'letter':'I', 'duration':5., 'name':'Heating provisioning and assembly'                       },
+        10:{'letter':'J', 'duration':5., 'name':'Electric installation'                                   },
+        11:{'letter':'K', 'duration':2., 'name':'Painting'                                                },
+        12:{'letter':'L', 'duration':1., 'name':'Pavement'                                                }
         }
     
     print("=== Демонстрация всех форматов связей ===")
@@ -674,7 +674,7 @@ if __name__ == '__main__':
     print("\n=== Демонстрация атрибута data ===")
     for i, activity in enumerate(n_old.activities[:5]):  # Показать первые 5 активностей
         if activity.wbs_id != 0:  # Пропустить фиктивные активности
-            print(f"Активность {i+1}: wbs_id={activity.wbs_id}, leter='{activity.leter}'")
+            print(f"Активность {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
             print(f"  Данные: {activity.data}")
     
     
@@ -713,11 +713,11 @@ if __name__ == '__main__':
     print(f"Старый == Новый2: {len(n_old.activities) == len(n_new2.activities)}")
     print(f"Старый == Новый3: {len(n_old.activities) == len(n_new3.activities)}")
     
-    # Демонстрация нового атрибута leter
-    print("\n=== Демонстрация атрибута leter ===")
+    # Демонстрация нового атрибута letter
+    print("\n=== Демонстрация атрибута letter ===")
     for i, activity in enumerate(n_old.activities[:5]):  # Показать первые 5 активностей
         if activity.wbs_id != 0:  # Пропустить фиктивные активности
-            print(f"Активность {i+1}: wbs_id={activity.wbs_id}, leter='{activity.leter}', duration={activity.duration}")
+            print(f"Активность {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}', duration={activity.duration}")
     
     print("\n=== Демонстрация экспорта в словарь ===")
     model_dict = n_old.to_dict()
@@ -759,7 +759,7 @@ if __name__ == '__main__':
         print("\nПроверка развертывания данных:")
         if 'name' in activities_df.columns and 'department' in activities_df.columns:
             print("Данные из 'data' успешно развернуты в отдельные колонки:")
-            print(activities_df[['leter', 'name', 'department', 'duration', 'reserve']].head())
+            print(activities_df[['letter', 'name', 'department', 'duration', 'reserve']].head())
         
     except Exception as e:
         print(f"Ошибка при экспорте в DataFrame: {e}")
