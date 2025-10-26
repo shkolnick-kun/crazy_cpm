@@ -46,7 +46,7 @@ class _Activity:
         duration : float
             Activity duration
         data : dict
-            Complete WBS data for this activity
+            WBS data excluding fields stored as separate attributes
         """
         assert isinstance(id,       int)
         assert isinstance(wbs_id,   int)
@@ -185,8 +185,12 @@ class NetworkModel:
                 wbs_data = wbs_dict[act_id]  # Get complete WBS data
                 duration = wbs_data.get('duration', 0.)
                 leter = wbs_data.get('leter', '')
+                
+                # Create data dict without fields stored as separate attributes
+                data_without_duplicates = self._remove_duplicate_fields(wbs_data, duration, leter)
+                
                 self._add_activity(int(act_id), int(net_src[i]), int(net_dst[i]), 
-                                  duration, leter, wbs_data)  # Pass complete data
+                                  duration, leter, data_without_duplicates)
             else:
                 # Add a dummy activity (no duration, no letter, no data)
                 d += 1
@@ -216,6 +220,36 @@ class NetworkModel:
 
         # Replace negative time values with zeros
         self._replace_negative_times_with_zeros()
+
+    #--------------------------------------------------------------------------
+    def _remove_duplicate_fields(self, wbs_data, duration, leter):
+        """
+        Remove fields from WBS data that are stored as separate activity attributes
+        
+        Parameters:
+        -----------
+        wbs_data : dict
+            Complete WBS data for an activity
+        duration : float
+            Activity duration (already extracted)
+        leter : str
+            Activity letter (already extracted)
+            
+        Returns:
+        --------
+        dict
+            WBS data without fields stored as separate attributes
+        """
+        # Create a copy to avoid modifying the original data
+        data_copy = wbs_data.copy()
+        
+        # Remove fields that are stored as separate attributes
+        fields_to_remove = ['duration', 'leter']
+        for field in fields_to_remove:
+            if field in data_copy:
+                del data_copy[field]
+                
+        return data_copy
 
     #--------------------------------------------------------------------------
     def _replace_negative_times_with_zeros(self):
@@ -311,7 +345,7 @@ class NetworkModel:
         leter : str
             Activity letter/code for visualization
         data : dict
-            Complete WBS data for this activity
+            WBS data excluding fields stored as separate attributes
         """
         assert isinstance(wbs_id,   int)
         assert isinstance(src_id,   int)
@@ -506,6 +540,7 @@ class NetworkModel:
             if activity.data.get(field_name) == field_value:
                 result.append(activity)
         return result
+
 
 #==============================================================================
 if __name__ == '__main__':
