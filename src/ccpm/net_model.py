@@ -136,7 +136,9 @@ class NetworkModel:
             e.reserve = e.late - e.early
             
         for a in self.activities:
-            a.reserve = a.late_start - a.early_start
+            a.early_end = a.early_start + a.duration
+            a.late_end  = a.late_start  + a.duration
+            a.reserve   = a.late_start  - a.early_start
 
     #--------------------------------------------------------------------------
     def _add_event(self, i):
@@ -240,17 +242,17 @@ class NetworkModel:
     def generate_viz(self):
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style':'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
-        
+
         _mr = max([e.reserve for e in self.events])
 
         def _cl(res):
-            if _mr <= 0:
+            if _mr < 0.0:
                 return '#ff0000'
-            
+
             g = int(res / _mr * 255)
             r = 255 - g
             return '#' + hex(r)[2:] + hex(g)[2:] + '00'
-        
+
         for e in self.events:
             dot.node(str(e.id), 
                      '{{%d |{%.1f|%.1f}| %.1f}}' % (e.id, 
@@ -258,17 +260,23 @@ class NetworkModel:
                                                     e.late, 
                                                     e.reserve), 
                      color=_cl(e.reserve))
-        
+
         _mr = max([a.reserve for a in self.activities])
-        
+
         for a in self.activities:
-            
+
+            if a.wbs_id:
+                lbl  = 'Work: ' + str(a.wbs_id)
+                lbl += '\n dur=' + str(a.duration) + '\n res=' + str(a.reserve)
+            else:
+                lbl = '# \n res=' + str(a.reserve)
+
             dot.edge(str(a.src.id), str(a.dst.id), 
-                     label=(str(a.wbs_id) + '\n dur=' + str(a.duration) if a.wbs_id else '#') + '\n res=' + str(a.reserve), 
+                     label=lbl, 
                      color=_cl(a.reserve),
                      style='dashed' if a.duration == 0 else 'solid'
                     )
-        
+
         return dot
 
 #==============================================================================
