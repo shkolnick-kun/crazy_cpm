@@ -21,6 +21,7 @@
 """
 import graphviz
 import numpy as np
+import pandas as pd
 import _ccpm
 
 #==============================================================================
@@ -285,6 +286,42 @@ class NetworkModel:
             'activities': activities_data,
             'events': events_data
         }
+
+    #--------------------------------------------------------------------------
+    def to_dataframe(self):
+        """
+        Convert network model to pandas DataFrames
+        
+        Returns:
+        --------
+        tuple
+            (activities_df, events_df) - pandas DataFrames for activities and events
+        """
+        
+        # Convert to dictionaries first
+        model_dict = self.to_dict()
+        
+        # Create events DataFrame (straightforward)
+        events_df = pd.DataFrame(model_dict['events'])
+        
+        # Create activities DataFrame with data fields expanded
+        activities_list = model_dict['activities']
+        
+        # Expand data fields into separate columns
+        expanded_activities = []
+        for activity in activities_list:
+            # Start with basic activity data
+            activity_data = {k: v for k, v in activity.items() if k != 'data'}
+            
+            # Add data fields as separate columns
+            if 'data' in activity and activity['data']:
+                activity_data.update(activity['data'])
+            
+            expanded_activities.append(activity_data)
+        
+        activities_df = pd.DataFrame(expanded_activities)
+        
+        return activities_df, events_df
 
     #--------------------------------------------------------------------------
     def _remove_duplicate_fields(self, wbs_data, duration, leter):
@@ -700,6 +737,32 @@ if __name__ == '__main__':
         first_event = model_dict['events'][0]
         print(f"Ключи: {list(first_event.keys())}")
         print(f"Пример события: {first_event}")
+    
+    # Демонстрация экспорта в DataFrame (если pandas доступен)
+    print("\n=== Демонстрация экспорта в DataFrame ===")
+    try:
+        activities_df, events_df = n_old.to_dataframe()
+        
+        print("\nDataFrame активностей:")
+        print(f"Размер: {activities_df.shape}")
+        print(f"Колонки: {list(activities_df.columns)}")
+        print("\nПервые 5 строк:")
+        print(activities_df.head())
+        
+        print("\nDataFrame событий:")
+        print(f"Размер: {events_df.shape}")
+        print(f"Колонки: {list(events_df.columns)}")
+        print("\nПервые 5 строк:")
+        print(events_df.head())
+        
+        # Показать, что данные из поля 'data' теперь в отдельных колонках
+        print("\nПроверка развертывания данных:")
+        if 'name' in activities_df.columns and 'department' in activities_df.columns:
+            print("Данные из 'data' успешно развернуты в отдельные колонки:")
+            print(activities_df[['leter', 'name', 'department', 'duration', 'reserve']].head())
+        
+    except Exception as e:
+        print(f"Ошибка при экспорте в DataFrame: {e}")
     
     # Создание визуализации
     print("\n=== Создание визуализации ===")
