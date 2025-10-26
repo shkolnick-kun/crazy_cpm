@@ -136,27 +136,27 @@ class NetworkModel:
         Поддерживает несколько форматов задания связей:
         
         1. Старый формат (для обратной совместимости):
-           lnk_src = np.array([1, 2, 3, ...])
-           lnk_dst = np.array([5, 5, 5, ...])
+           lnk_src = [1, 2, 3, ...]  # список, кортеж или массив
+           lnk_dst = [5, 5, 5, ...]  # список, кортеж или массив
         
         2. Новый формат 1 - две строки:
-           links = np.array([[1, 2, 3, ...],  # src
-                            [5, 5, 5, ...]]) # dst
+           links = [[1, 2, 3, ...],  # src (список, кортеж или массив)
+                   [5, 5, 5, ...]]   # dst (список, кортеж или массив)
         
         3. Новый формат 2 - две колонки:
-           links = np.array([[1, 5],
-                            [2, 5], 
-                            [3, 5],
-                            ...])
+           links = [[1, 5],
+                   [2, 5], 
+                   [3, 5],
+                   ...]               # список, кортеж или массив
         
         4. Новый формат 3 - словарь:
-           links = {'src': [1, 2, 3, ...],
+           links = {'src': [1, 2, 3, ...],  # списки, кортежи или массивы
                    'dst': [5, 5, 5, ...]}
         
         Parameters:
             wbs_dict: словарь с описанием работ
-            lnk_src: массив начал связей (старый формат)
-            lnk_dst: массив концов связей (старый формат) 
+            lnk_src: начала связей (список, кортеж или массив)
+            lnk_dst: концы связей (список, кортеж или массив) 
             links: связи в одном из новых форматов
         """
         assert isinstance(wbs_dict, dict)
@@ -248,13 +248,17 @@ class NetworkModel:
         Парсит связи в различных форматах и возвращает два массива (src, dst)
         
         Поддерживаемые форматы:
-        1. Старый формат: lnk_src и lnk_dst как отдельные массивы
-        2. Две строки: массив shape=(2, N)
-        3. Две колонки: массив shape=(N, 2)  
+        1. Старый формат: lnk_src и lnk_dst как отдельные последовательности
+        2. Две строки: последовательность с двумя строками
+        3. Две колонки: последовательность с N строками по 2 элемента  
         4. Словарь: {'src': [...], 'dst': [...]}
         """
         # Если передан параметр links, используем новые форматы
         if links is not None:
+            # Преобразуем в numpy массив для единообразной обработки
+            if isinstance(links, (list, tuple)):
+                links = np.array(links)
+            
             if isinstance(links, np.ndarray):
                 if links.ndim == 2:
                     if links.shape[0] == 2:
@@ -273,19 +277,28 @@ class NetworkModel:
             elif isinstance(links, dict):
                 # Формат 3: словарь с ключами 'src' и 'dst'
                 if 'src' in links and 'dst' in links:
+                    # Преобразуем значения в массивы, если они еще не массивы
                     lnk_src = np.array(links['src'], dtype=int)
                     lnk_dst = np.array(links['dst'], dtype=int)
                 else:
                     raise ValueError("Словарь links должен содержать ключи 'src' и 'dst'")
             else:
-                raise ValueError("Неподдерживаемый тип для links. Должен быть np.ndarray или dict")
+                raise ValueError("Неподдерживаемый тип для links. Должен быть list, tuple, np.ndarray или dict")
                 
+        # Обрабатываем старый формат (lnk_src и lnk_dst как отдельные параметры)
+        # Преобразуем в массивы, если это еще не массивы
+        if lnk_src is not None and not isinstance(lnk_src, np.ndarray):
+            lnk_src = np.array(lnk_src, dtype=int)
+            
+        if lnk_dst is not None and not isinstance(lnk_dst, np.ndarray):
+            lnk_dst = np.array(lnk_dst, dtype=int)
+            
         # Проверяем, что получили валидные массивы
         if lnk_src is None or lnk_dst is None:
             raise ValueError("Не заданы связи между работами")
             
         if not isinstance(lnk_src, np.ndarray) or not isinstance(lnk_dst, np.ndarray):
-            raise ValueError("lnk_src и lnk_dst должны быть numpy массивами")
+            raise ValueError("lnk_src и lnk_dst должны быть преобразуемы в numpy массивы")
             
         return lnk_src, lnk_dst
 
@@ -525,44 +538,75 @@ if __name__ == '__main__':
         12:{'leter':'L', 'duration':1., 'name':'Pavement'                                                }
         }
     
-    # Старый формат (сохраняется для обратной совместимости)
-    src_old = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10])
-    dst_old = np.array([5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
+    # Старый формат со списками (сохраняется для обратной совместимости)
+    src_old = [1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10]
+    dst_old = [5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12]
     
-    print("=== CPM Model (старый формат) ===")
+    print("=== CPM Model (старый формат со списками) ===")
     n_cpm_old = NetworkModel(wbs, src_old, dst_old)
     print(n_cpm_old)
     
-    # Новый формат 1: две строки
-    links_two_rows = np.array([
+    # Новый формат 1: две строки (список)
+    links_two_rows_list = [
         [1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10],
         [5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12]
-    ])
+    ]
     
-    print("=== CPM Model (формат 1: две строки) ===")
-    n_cpm_new1 = NetworkModel(wbs, links=links_two_rows)
+    print("=== CPM Model (формат 1: две строки - список) ===")
+    n_cpm_new1 = NetworkModel(wbs, links=links_two_rows_list)
     print(n_cpm_new1)
     
-    # Новый формат 2: две колонки
-    links_two_cols = np.array([
+    # Новый формат 1: две строки (кортеж)
+    links_two_rows_tuple = (
+        (1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10),
+        (5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12)
+    )
+    
+    print("=== CPM Model (формат 1: две строки - кортеж) ===")
+    n_cpm_new1_tuple = NetworkModel(wbs, links=links_two_rows_tuple)
+    print(n_cpm_new1_tuple)
+    
+    # Новый формат 2: две колонки (список)
+    links_two_cols_list = [
         [1, 5], [2, 5], [3, 5], [2, 6], [3, 6], [3, 7], [4, 7], [1, 8], [6, 8], [7, 8],
         [5, 9], [6, 9], [7, 9], [3, 10], [6, 10], [7, 10], [6, 11], [8, 11], [9, 11],
         [7, 12], [8, 12], [9, 12], [10, 12]
-    ])
+    ]
     
-    print("=== CPM Model (формат 2: две колонки) ===")
-    n_cpm_new2 = NetworkModel(wbs, links=links_two_cols)
+    print("=== CPM Model (формат 2: две колонки - список) ===")
+    n_cpm_new2 = NetworkModel(wbs, links=links_two_cols_list)
     print(n_cpm_new2)
     
-    # Новый формат 3: словарь
-    links_dict = {
+    # Новый формат 2: две колонки (кортеж)
+    links_two_cols_tuple = (
+        (1, 5), (2, 5), (3, 5), (2, 6), (3, 6), (3, 7), (4, 7), (1, 8), (6, 8), (7, 8),
+        (5, 9), (6, 9), (7, 9), (3, 10), (6, 10), (7, 10), (6, 11), (8, 11), (9, 11),
+        (7, 12), (8, 12), (9, 12), (10, 12)
+    )
+    
+    print("=== CPM Model (формат 2: две колонки - кортеж) ===")
+    n_cpm_new2_tuple = NetworkModel(wbs, links=links_two_cols_tuple)
+    print(n_cpm_new2_tuple)
+    
+    # Новый формат 3: словарь со списками
+    links_dict_lists = {
         'src': [1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10],
         'dst': [5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12]
     }
     
-    print("=== CPM Model (формат 3: словарь) ===")
-    n_cpm_new3 = NetworkModel(wbs, links=links_dict)
+    print("=== CPM Model (формат 3: словарь со списками) ===")
+    n_cpm_new3 = NetworkModel(wbs, links=links_dict_lists)
     print(n_cpm_new3)
+    
+    # Новый формат 3: словарь с кортежами
+    links_dict_tuples = {
+        'src': (1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10),
+        'dst': (5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12)
+    }
+    
+    print("=== CPM Model (формат 3: словарь с кортежами) ===")
+    n_cpm_new3_tuple = NetworkModel(wbs, links=links_dict_tuples)
+    print(n_cpm_new3_tuple)
     
     # Проверяем доступ к данным активности
     for activity in n_cpm_new3.activities:
@@ -573,6 +617,6 @@ if __name__ == '__main__':
     for _,w in wbs.items():
         w['duration'] *= np.array([np.random.uniform(0.7, 0.8), 1.0, np.random.uniform(1.1, 1.2)])
     
-    print("\n=== PERT Model (формат 1: две строки) ===")
-    n_pert = NetworkModel(wbs, links=links_two_rows)
+    print("\n=== PERT Model (формат 1: две строки - список) ===")
+    n_pert = NetworkModel(wbs, links=links_two_rows_list)
     print(n_pert)
