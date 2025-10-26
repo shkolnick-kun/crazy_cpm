@@ -26,11 +26,13 @@ import _ccpm
 #==============================================================================
 class _Activity:  
     def __init__(self, id, wbs_id, model, src, dst, duration=0.0):
-        assert isinstance(id,     int)
-        assert isinstance(wbs_id, int)
-        assert isinstance(model,  NetworkModel)
-        assert isinstance(src,    _Event)
-        assert isinstance(dst,    _Event)
+        assert isinstance(id,       int)
+        assert isinstance(wbs_id,   int)
+        assert isinstance(model,    NetworkModel)
+        assert isinstance(src,      _Event)
+        assert isinstance(dst,      _Event)
+        assert isinstance(duration, float)
+        assert duration >= 0.
 
         self.id       = id
         self.wbs_id   = wbs_id
@@ -246,7 +248,7 @@ class NetworkModel:
         dot.graph_attr['rankdir'] = 'LR'
 
         def _cl(res):
-            if res <= 1e-12: #Absolutre precision is nonsense
+            if res <= 1e-6: #Absolutre precision is nonsense
                 return '#ff0000'
             return '#000000'
 
@@ -261,10 +263,10 @@ class NetworkModel:
         for a in self.activities:
 
             if a.wbs_id:
-                lbl  = 'Work: ' + str(a.wbs_id)
-                lbl += '\n dur=' + str(a.duration) + '\n res=' + str(a.reserve)
+                lbl  = str(a.wbs_id)
+                lbl += '\n t=' + str(a.duration) + '\n r=' + str(a.reserve)
             else:
-                lbl = '# \n res=' + str(a.reserve)
+                lbl = '# \n r=' + str(a.reserve)
 
             dot.edge(str(a.src.id), str(a.dst.id), 
                      label=lbl, 
@@ -278,18 +280,18 @@ class NetworkModel:
 if __name__ == '__main__':
     
     wbs = {
-        1 :{'duration':1., 'name': 'Heating and frames study'                                },
-        2 :{'duration':2., 'name': 'Scouring and installation of building site establishment'},
-        3 :{'duration':4., 'name': 'Earthwork and concrete well'                             },
-        4 :{'duration':4., 'name': 'Earthwork and concrete longitudinal beams'               },
-        5 :{'duration':6., 'name': 'Frame construction'                                      },
-        6 :{'duration':2., 'name': 'Frame transport'                                         },
-        7 :{'duration':6., 'name': 'Assemblage'                                              },
-        8 :{'duration':2., 'name': 'Earthwork and pose drains'                               },
-        9 :{'duration':5., 'name': 'Heating provisioning and assembly'                       },
-        10:{'duration':5., 'name': 'Electric installation'                                   },
-        11:{'duration':2., 'name': 'Painting'                                                },
-        12:{'duration':1., 'name': 'Pavement'                                                }
+        1 :{'leter':'A', 'duration':1., 'name':'Heating and frames study'                                },
+        2 :{'leter':'B', 'duration':2., 'name':'Scouring and installation of building site establishment'},
+        3 :{'leter':'C', 'duration':4., 'name':'Earthwork and concrete well'                             },
+        4 :{'leter':'D', 'duration':4., 'name':'Earthwork and concrete longitudinal beams'               },
+        5 :{'leter':'E', 'duration':6., 'name':'Frame construction'                                      },
+        6 :{'leter':'F', 'duration':2., 'name':'Frame transport'                                         },
+        7 :{'leter':'G', 'duration':6., 'name':'Assemblage'                                              },
+        8 :{'leter':'H', 'duration':2., 'name':'Earthwork and pose drains'                               },
+        9 :{'leter':'I', 'duration':5., 'name':'Heating provisioning and assembly'                       },
+        10:{'leter':'J', 'duration':5., 'name':'Electric installation'                                   },
+        11:{'leter':'K', 'duration':2., 'name':'Painting'                                                },
+        12:{'leter':'L', 'duration':1., 'name':'Pavement'                                                }
         }
     
     src = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10])
