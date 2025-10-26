@@ -87,6 +87,31 @@ class _Activity:
             self.data
             )
     
+    #----------------------------------------------------------------------------------------------
+    def to_dict(self):
+        """
+        Convert activity to dictionary representation
+        
+        Returns:
+        --------
+        dict
+            Dictionary with activity data
+        """
+        return {
+            'id': self.id,
+            'wbs_id': self.wbs_id,
+            'leter': self.leter,
+            'src_id': self.src.id,
+            'dst_id': self.dst.id,
+            'duration': self.duration,
+            'early_start': self.early_start,
+            'late_start': self.late_start,
+            'early_end': self.early_end,
+            'late_end': self.late_end,
+            'reserve': self.reserve,
+            'data': self.data.copy()  # Return a copy to avoid modifying original
+        }
+    
 #==============================================================================
 class _Event:    
     def __init__(self, id, model):
@@ -131,6 +156,24 @@ class _Event:
             self.reserve,
             self.stage
         )
+
+    #--------------------------------------------------------------------------
+    def to_dict(self):
+        """
+        Convert event to dictionary representation
+        
+        Returns:
+        --------
+        dict
+            Dictionary with event data
+        """
+        return {
+            'id': self.id,
+            'early': self.early,
+            'late': self.late,
+            'reserve': self.reserve,
+            'stage': self.stage
+        }
 
 #==============================================================================
 class NetworkModel:
@@ -220,6 +263,28 @@ class NetworkModel:
 
         # Replace negative time values with zeros
         self._replace_negative_times_with_zeros()
+
+    #--------------------------------------------------------------------------
+    def to_dict(self):
+        """
+        Convert network model to dictionary representation
+        
+        Returns:
+        --------
+        dict
+            Dictionary with structure:
+            {
+                'activities': [list of activity dictionaries],
+                'events': [list of event dictionaries]
+            }
+        """
+        activities_data = [activity.to_dict() for activity in self.activities]
+        events_data = [event.to_dict() for event in self.events]
+        
+        return {
+            'activities': activities_data,
+            'events': events_data
+        }
 
     #--------------------------------------------------------------------------
     def _remove_duplicate_fields(self, wbs_data, duration, leter):
@@ -541,7 +606,6 @@ class NetworkModel:
                 result.append(activity)
         return result
 
-
 #==============================================================================
 if __name__ == '__main__':
     # Example usage with all link formats
@@ -617,6 +681,25 @@ if __name__ == '__main__':
     for i, activity in enumerate(n_old.activities[:5]):  # Показать первые 5 активностей
         if activity.wbs_id != 0:  # Пропустить фиктивные активности
             print(f"Активность {i+1}: wbs_id={activity.wbs_id}, leter='{activity.leter}', duration={activity.duration}")
+    
+    print("\n=== Демонстрация экспорта в словарь ===")
+    model_dict = n_old.to_dict()
+    
+    print(f"Количество активностей: {len(model_dict['activities'])}")
+    print(f"Количество событий: {len(model_dict['events'])}")
+    
+    # Показать структуру данных
+    print("\nСтруктура данных активностей:")
+    if len(model_dict['activities']) > 0:
+        first_activity = model_dict['activities'][0]
+        print(f"Ключи: {list(first_activity.keys())}")
+        print(f"Пример активности: {first_activity}")
+    
+    print("\nСтруктура данных событий:")
+    if len(model_dict['events']) > 0:
+        first_event = model_dict['events'][0]
+        print(f"Ключи: {list(first_event.keys())}")
+        print(f"Пример события: {first_event}")
     
     # Создание визуализации
     print("\n=== Создание визуализации ===")
