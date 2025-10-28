@@ -681,6 +681,11 @@ if __name__ == '__main__':
     n_old = NetworkModel(wbs, src_old, dst_old)
     print("Successfully created model with old format")
     
+    print("Full dependency map for old format:")
+    status, act_id, full_dep_map = _ccpm.make_full_map(np.array(list(wbs.keys())), src_old, dst_old)
+    print(status, act_id)
+    print(full_dep_map)
+
     # Demonstration of the new data attribute
     print("\n=== Demonstration of the data attribute ===")
     for i, activity in enumerate(n_old.activities[:5]):  # Show first 5 activities

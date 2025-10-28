@@ -20,18 +20,19 @@
 """
 #cython: language_level=3
 #distutils: language=c
-from libc cimport stbool
-from libc cimport stdint
 
-ctypedef stbool.bool     _bool
+from libc cimport stdint
+from libcpp cimport bool
+
 ctypedef stdint.uint16_t _uint16_t
+ctypedef bool _bool
 
 cdef extern from "ccpm.c":
     ctypedef enum ccpmResultEn:
-        CCMP_OK=0
-        CCMP_EINVAL
-        CCMP_ENOMEM
-        CCMP_ELOOP
+        CCPM_OK=0
+        CCPM_EINVAL
+        CCPM_ENOMEM
+        CCPM_ELOOP
 
     cdef ccpmResultEn ccpm_check_act_ids(_uint16_t * act_id, _uint16_t n_act)
     
@@ -66,8 +67,20 @@ cdef extern from "ccpm.c":
                                     _uint16_t * lnk_dst, \
                                     _uint16_t *n_lnk)
 
+    cdef ccpmResultEn ccpm_make_full_map(_uint16_t * act_id, _uint16_t n_act, \
+                                         _uint16_t * lnk_src, \
+                                         _uint16_t * lnk_dst, \
+                                         _uint16_t n_lnk, \
+                                         _bool * full_dep_map)
+
 import  numpy as np#WTF??
 cimport numpy as np
+
+#Define constants
+_CCPM_OK     = CCPM_OK
+_CCPM_EINVAL = CCPM_EINVAL
+_CCPM_ENOMEM = CCPM_ENOMEM
+_CCPM_ELOOP  = CCPM_ELOOP
 
 ###############################################################################
 def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
@@ -101,3 +114,29 @@ def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
         act_src[:n_act + n_dum].copy(), act_dst[:n_act + n_dum].copy(), \
             _lnk_src[:n_lnk].copy(), _lnk_dst[:n_lnk].copy()
 
+###############################################################################
+def make_full_map(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
+    assert len(lnk_src) == len(lnk_dst)
+
+    cdef _uint16_t n_act = len(act_id)
+    cdef _uint16_t n_lnk = len(lnk_src)
+
+    _act_id  = act_id.astype(np.uint16)
+    _lnk_src = lnk_src.astype(np.uint16) 
+    _lnk_dst = lnk_dst.astype(np.uint16)
+
+    cdef _uint16_t [::1] v_act_id  = _act_id
+    cdef _uint16_t [::1] v_lnk_src = _lnk_src
+    cdef _uint16_t [::1] v_lnk_dst = _lnk_dst
+
+    # Создаём numpy массив для результата (матрица полных связей)
+    cdef np.ndarray full_dep_map = np.zeros((n_act, n_act), dtype=np.bool_)
+    cdef _bool [:, ::1] full_dep_map_view = full_dep_map
+
+    # Вызов C-функции
+    cdef ccpmResultEn status
+    status = ccpm_make_full_map(&v_act_id[0], n_act,
+                               &v_lnk_src[0], &v_lnk_dst[0], n_lnk,
+                               &full_dep_map_view[0, 0])
+
+    return status, _act_id, full_dep_map,

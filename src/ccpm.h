@@ -70,4 +70,9 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
                            uint16_t n_act, uint16_t * n_dum, \
                            uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t * n_lnk);
 
+/*===========================================================================*/
+ccpmResultEn ccpm_make_full_map(uint16_t * act_id, uint16_t n_act,
+                                uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk,
+                                bool * full_dep_map);
+
 #endif // CCMP_H
