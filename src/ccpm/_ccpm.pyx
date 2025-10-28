@@ -20,8 +20,10 @@
 """
 #cython: language_level=3
 #distutils: language=c
+from libc cimport stbool
 from libc cimport stdint
 
+ctypedef stbool.bool     _bool
 ctypedef stdint.uint16_t _uint16_t
 
 cdef extern from "ccpm.c":
@@ -31,6 +33,30 @@ cdef extern from "ccpm.c":
         CCMP_ENOMEM
         CCMP_ELOOP
 
+    cdef ccpmResultEn ccpm_check_act_ids(_uint16_t * act_id, _uint16_t n_act)
+    
+    cdef ccpmResultEn ccpm_check_links(_uint16_t * lnk_src, _uint16_t * lnk_dst, \
+                                       _uint16_t   n_lnk)
+    
+    cdef ccpmResultEn ccpm_links_prepare(_uint16_t *  act_id, _uint16_t     n_act, \
+                                         _uint16_t * lnk_src, _uint16_t * lnk_dst, \
+                                         _uint16_t     n_lnk)
+    
+    cdef ccpmResultEn ccpm_populate_dep_info(_uint16_t *  act_id, _uint16_t *     dep, \
+                                             _uint16_t *   n_dep, _bool     * dep_map, \
+                                             _uint16_t * lnk_src, _uint16_t * lnk_dst, \
+                                             _uint16_t     n_lnk)
+        
+    cdef ccpmResultEn ccpm_sort(_uint16_t * tmp, _uint16_t * key, \
+                                _uint16_t * val, _uint16_t     n)
+
+    cdef ccpmResultEn ccpm_build_dep(_uint16_t     n_act, _uint16_t    map_len, \
+                                     _uint16_t *     tmp, _uint16_t *   act_id, \
+                                     _uint16_t * act_pos, _uint16_t *    opt_n, \
+                                     _uint16_t * opt_dep, _bool     *  opt_map, \
+                                     _uint16_t *  full_n, _uint16_t * full_dep, \
+                                     _bool     * full_map)
+
     cdef ccpmResultEn ccpm_make_aoa(_uint16_t * act_id,  \
                                     _uint16_t * act_src, \
                                     _uint16_t * act_dst, \
@@ -39,14 +65,6 @@ cdef extern from "ccpm.c":
                                     _uint16_t * lnk_src, \
                                     _uint16_t * lnk_dst, \
                                     _uint16_t *n_lnk)
-
-    cdef double ccpm_viz_loss(double * p,             \
-                              _uint16_t * node_layer, \
-                              _uint16_t n_node,       \
-                              _uint16_t * edge_src,   \
-                              _uint16_t * edge_dst,   \
-                              double * edge_w,        \
-                              _uint16_t n_edge)
 
 import  numpy as np#WTF??
 cimport numpy as np
@@ -82,68 +100,4 @@ def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
     return status, \
         act_src[:n_act + n_dum].copy(), act_dst[:n_act + n_dum].copy(), \
             _lnk_src[:n_lnk].copy(), _lnk_dst[:n_lnk].copy()
-
-###############################################################################
-cdef class vizGraphLoss:
-    cdef _uint16_t _node_n
-    cdef _uint16_t _edge_n
-
-    cdef np.ndarray _node_layer
-    cdef np.ndarray _edge_src
-    cdef np.ndarray _edge_dst
-    cdef np.ndarray _edge_w
-
-    cdef _uint16_t [::1] v_node_layer
-    cdef _uint16_t [::1] v_edge_src
-    cdef _uint16_t [::1] v_edge_dst
-    cdef double    [::1] v_edge_w
-
-    def __init__(self, np.ndarray node_id, np.ndarray node_layer,\
-                 np.ndarray edge_src, np.ndarray edge_dst, np.ndarray edge_w):
-
-        assert len(node_id) == len(node_layer)
-        assert len(edge_w)  == len(edge_src)
-        assert len(edge_w)  == len(edge_dst)
-
-        self._node_layer  = node_layer.astype(np.uint16)
-        self.v_node_layer = self._node_layer
-
-        self._edge_src  = edge_src.astype(np.uint16)
-        self.v_edge_src = self._edge_src
-
-        self._edge_dst  = edge_dst.astype(np.uint16)
-        self.v_edge_dst = self._edge_dst
-
-        self._edge_w  = edge_w.astype(np.float64)
-        self.v_edge_w = self._edge_w
-
-        #Тут не нужна особая эффективность: выполняем 1 раз
-        self._node_n = len(node_id)
-        self._edge_n = len(edge_w)
-
-        _node_id = list(node_id)
-
-        for i in range(self._edge_n):
-            self._edge_src[i] = _node_id.index(self._edge_src[i])
-            self._edge_dst[i] = _node_id.index(self._edge_dst[i])
-
-    def run(self, np.ndarray p):
-        assert len(p) == self._node_n
-
-        cdef np.ndarray _p = p.astype(np.float64)
-        cdef double    [::1] v_p = _p
-
-        cdef float loss
-
-        #TODO: with nogil:
-        loss = ccpm_viz_loss(&v_p[0],
-                             &self.v_node_layer[0],
-                             self._node_n,
-                             &self.v_edge_src[0],
-                             &self.v_edge_dst[0],
-                             &self.v_edge_w[0],
-                             self._edge_n)
-
-        return loss
-
 

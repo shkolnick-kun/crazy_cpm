@@ -55,7 +55,7 @@ do {                                                                       \
 #define CCPM_CHECK_RETURN(cond, err) _CCPM_CHECK_RETURN(cond, err, __FILE__, __func__, __LINE__)
 
 /*===========================================================================*/
-static inline ccpmResultEn _ccpm_check_act_ids(uint16_t * act_id, uint16_t n_act)
+ccpmResultEn ccpm_check_act_ids(uint16_t * act_id, uint16_t n_act)
 {
     CCPM_CHECK_RETURN(act_id, CCPM_EINVAL);
 
@@ -70,7 +70,7 @@ static inline ccpmResultEn _ccpm_check_act_ids(uint16_t * act_id, uint16_t n_act
 }
 
 /*===========================================================================*/
-static inline ccpmResultEn _ccpm_check_links(uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
+ccpmResultEn ccpm_check_links(uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
 {
     CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
     CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
@@ -147,7 +147,7 @@ static inline bool _ccpm_lookup_act_pos(uint16_t * link, uint16_t * act_id, uint
     return false;
 }
 
-static inline ccpmResultEn _ccpm_links_prepare(uint16_t * act_id, uint16_t n_act, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
+ccpmResultEn ccpm_links_prepare(uint16_t * act_id, uint16_t n_act, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
 {
     CCPM_CHECK_RETURN(act_id,  CCPM_EINVAL);
     CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
@@ -168,9 +168,9 @@ static inline ccpmResultEn _ccpm_links_prepare(uint16_t * act_id, uint16_t n_act
 }
 
 /*===========================================================================*/
-static inline ccpmResultEn _ccpm_populate_dep_info(uint16_t * act_id,  uint16_t * dep, \
-                                                   uint16_t * n_dep,   bool     * dep_map, uint16_t n_act, \
-                                                   uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
+ccpmResultEn ccpm_populate_dep_info(uint16_t * act_id,  uint16_t * dep, \
+                                    uint16_t * n_dep,   bool     * dep_map, uint16_t n_act, \
+                                    uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk)
 {
     uint16_t i;
     uint16_t j;
@@ -295,10 +295,10 @@ ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t 
 }
 
 /*===========================================================================*/
-static inline ccpmResultEn _ccpm_build_dep(uint16_t    n_act, int16_t     map_len,
-                                           uint16_t *    tmp, uint16_t *   act_id, uint16_t * act_pos,
-                                           uint16_t *  opt_n, uint16_t *  opt_dep, bool     * opt_map,
-                                           uint16_t * full_n, uint16_t * full_dep, bool     * full_map)
+ccpmResultEn ccpm_build_dep(uint16_t    n_act, int16_t     map_len,
+                            uint16_t *    tmp, uint16_t *   act_id, uint16_t * act_pos,
+                            uint16_t *  opt_n, uint16_t *  opt_dep, bool     * opt_map,
+                            uint16_t * full_n, uint16_t * full_dep, bool     * full_map)
 {
     uint16_t i;
     uint16_t j;
@@ -364,9 +364,9 @@ static inline ccpmResultEn _ccpm_build_dep(uint16_t    n_act, int16_t     map_le
     CCPM_LOG_PRINTF("Sorting works\n");
     /*
     This sorting gives as some cool features:
-    1. In place preprocessing of dependencies by _ccpm_build_dep.
+    1. In place preprocessing of dependencies by ccpm_build_dep.
     2. No need to look back: all current work dependencies after
-       _ccpm_build_dep call are behind its position.
+       ccpm_build_dep call are behind its position.
     3. No need to process added dummies in Postovalova algorithm:
        a) all dummies added before work been processed are behind it!
        b) all dummies added before current dummy are behind it!
@@ -544,8 +544,8 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
     CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
     CCPM_CHECK_RETURN(n_lnk,   CCPM_EINVAL);
 
-    CCPM_TRY_RETURN(_ccpm_check_act_ids(act_id, n_act));
-    CCPM_TRY_RETURN(_ccpm_check_links(lnk_src, lnk_dst, _n_lnk));
+    CCPM_TRY_RETURN(ccpm_check_act_ids(act_id, n_act));
+    CCPM_TRY_RETURN(ccpm_check_links(lnk_src, lnk_dst, _n_lnk));
 
     CCPM_MEM_INIT();
     CCPM_MEM_ALLOC(uint16_t   ,act_pos      ,n_act              ); /*Works positions in sorted lists*/
@@ -572,12 +572,12 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
     /*Temporary array for sortings*/
     CCPM_MEM_ALLOC(uint16_t,tmp,((n_act > _n_lnk) ? n_act : _n_lnk));
 
-    CCPM_TRY_GOTO_END(_ccpm_links_prepare(act_id, n_act, lnk_src, lnk_dst, _n_lnk));
+    CCPM_TRY_GOTO_END(ccpm_links_prepare(act_id, n_act, lnk_src, lnk_dst, _n_lnk));
 
-    CCPM_TRY_GOTO_END(_ccpm_populate_dep_info(act_id, act_dep, act_ndep, act_dep_map, n_act, \
+    CCPM_TRY_GOTO_END(ccpm_populate_dep_info(act_id, act_dep, act_ndep, act_dep_map, n_act, \
                                               lnk_src, lnk_dst, _n_lnk));
 
-    CCPM_TRY_GOTO_END(_ccpm_build_dep(n_act, n_act, tmp, act_id, act_pos, \
+    CCPM_TRY_GOTO_END(ccpm_build_dep(n_act, n_act, tmp, act_id, act_pos, \
                                       act_ndep, act_dep, act_dep_map,     \
                                       act_ndep, act_dep, act_dep_map));
 
@@ -907,76 +907,5 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
 end:
     CCPM_MEM_FREE_ALL();
     return ret;
-}
-
-/*===========================================================================*/
-#include <math.h>
-double ccpm_viz_loss(double * p, uint16_t * node_layer, uint16_t n_node, \
-                    uint16_t * edge_src, uint16_t * edge_dst, \
-                    double * edge_w, uint16_t n_edge)
-{
-    double   l_graph = 0.0;
-    uint16_t n_cross = 0;
-
-    uint16_t i;
-    uint16_t j;
-
-    n_node--;
-    l_graph = 0;
-    for (i = 0; i < n_edge; i++)
-    {
-        uint16_t si = edge_src[i];
-        uint16_t di = edge_dst[i];
-
-        double    d  = p[di] - p[si];
-        l_graph += edge_w[i] * sqrt(1.0 + d * d);
-
-        for (j = i + 1; j < n_edge; j++)
-        {
-            uint16_t sj = edge_src[j];
-            uint16_t dj = edge_dst[j];
-
-            if (node_layer[si] == node_layer[sj])
-            {
-                bool cont = false;
-
-                if ((fabs(p[si] - p[sj]) < 0.5) && (si != sj))
-                {
-                    n_cross += 10;
-                    cont = true;
-                }
-
-                if ((fabs(p[di] - p[dj]) < 0.5) && (di != dj))
-                {
-                    n_cross += 10;
-                    cont = true;
-                }
-
-                if (cont)
-                {
-                    continue;
-                }
-
-                if (p[si] > p[sj])
-                {
-                    if (p[di] < p[dj])
-                    {
-                        n_cross++;
-                    }
-                }
-                else
-                {
-                    if (p[di] > p[dj])
-                    {
-                        n_cross++;
-                    }
-                }
-            }
-        }
-    }
-
-    //return n_cross;
-    return l_graph * (1.0 + (double)n_cross);
-    //return l_graph + (double)n_cross;
 }
 
