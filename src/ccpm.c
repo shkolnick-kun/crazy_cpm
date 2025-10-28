@@ -332,8 +332,8 @@ ccpmResultEn ccpm_build_dep(uint16_t    n_act, int16_t     map_len,
     else
     {
         /*In place preprocessing*/
-        full_dep = opt_dep;
-        full_map = opt_map;
+        opt_dep = full_dep;
+        opt_map = full_map;
     }
 
     CCPM_LOG_PRINTF("Building full dependency arrays and maps\n");
