@@ -23,8 +23,6 @@
 
 #include "ccpm.h"
 
-#define CCPM_CFG_PRINTF printf
-
 /*===========================================================================*/
 #ifdef __GNUC__
 #   define CCPM_UNLIKELY(x) __builtin_expect((x), 0)
@@ -299,8 +297,8 @@ ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t 
 /*===========================================================================*/
 ccpmResultEn ccpm_build_dep(uint16_t    n_act, int16_t     map_len,
                             uint16_t *    tmp, uint16_t *   act_id, uint16_t * act_pos,
-                            uint16_t *  opt_n, uint16_t *  opt_dep, bool     * opt_map,
-                            uint16_t * full_n, uint16_t * full_dep, bool     * full_map)
+                            uint16_t * full_n, uint16_t * full_dep, bool     * full_map,
+                            uint16_t *  opt_n, uint16_t *  opt_dep, bool     * opt_map)
 {
     uint16_t i;
     uint16_t j;
@@ -349,15 +347,17 @@ ccpmResultEn ccpm_build_dep(uint16_t    n_act, int16_t     map_len,
                 m = full_dep[(n_act - 1) * k + l];
                 if (!full_map[map_len * i + m])
                 {
+                    /*Add a dependency to full map*/
+                    full_map[map_len * i + m] = true;
+
                     /*Loop detection must be here for segfault protection*/
                     CCPM_CHECK_RETURN(i != m, CCPM_ELOOP);
 
+                    /*Add a dependency to optimized map*/
+                    opt_map [map_len * i + k] = true;
+
                     /*Append a dependency*/
                     full_dep[(n_act - 1) * i + full_n[i]++] = m;
-
-                    /*Add a dependency to maps*/
-                    full_map[map_len * i + m] = true;
-                    opt_map [map_len * i + k] = true;
                 }
             }
         }
@@ -929,13 +929,13 @@ ccpmResultEn ccpm_make_full_map(uint16_t * act_id, uint16_t n_act, \
 
     CCPM_MEM_INIT();
     CCPM_MEM_ALLOC(uint16_t   ,act_pos      ,n_act              ); /*Works positions in sorted lists*/
-    //CCPM_MEM_ALLOC(uint16_t   ,act_ndep     ,n_act              ); /*Number of dependencies*/
-    //CCPM_MEM_ALLOC(uint16_t   ,act_dep      ,n_act * (n_act - 1)); /*Array of dependencies*/
-    /*---------------------------------------------------------------------------------*/
-    //CCPM_MEM_ALLOC(bool       ,act_dep_map  ,n_act * n_act      ); /*Work dependency map*/
     /*---------------------------------------------------------------------------------*/
     CCPM_MEM_ALLOC(uint16_t   ,full_ndep     ,n_act              ); /*Number of dependencies*/
     CCPM_MEM_ALLOC(uint16_t   ,full_dep      ,n_act * (n_act - 1)); /*Array of dependencies*/
+    /*---------------------------------------------------------------------------------*/
+    CCPM_MEM_ALLOC(uint16_t   ,opt_ndep     ,n_act              ); /*Number of dependencies*/
+    CCPM_MEM_ALLOC(uint16_t   ,opt_dep      ,n_act * (n_act - 1)); /*Array of dependencies*/
+    CCPM_MEM_ALLOC(bool       ,opt_dep_map  ,n_act * n_act      ); /*Work dependency map*/
 
     /*Temporary array for sortings*/
     CCPM_MEM_ALLOC(uint16_t,tmp,((n_act > n_lnk) ? n_act : n_lnk));
@@ -947,7 +947,7 @@ ccpmResultEn ccpm_make_full_map(uint16_t * act_id, uint16_t n_act, \
 
     CCPM_TRY_GOTO_END(ccpm_build_dep(n_act, n_act, tmp, act_id, act_pos, \
                                      full_ndep, full_dep, full_dep_map,   \
-                                     full_ndep, full_dep, full_dep_map));
+                                     opt_ndep, opt_dep, opt_dep_map));
 #ifdef CCPM_CFG_PRINTF
     CCPM_LOG_PRINTF("Full dependency map:\n");
     for (uint16_t i = 0; i < n_act; i++)

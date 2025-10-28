@@ -67,11 +67,9 @@ cdef extern from "ccpm.c":
                                     _uint16_t * lnk_dst, \
                                     _uint16_t *n_lnk)
 
-    cdef ccpmResultEn ccpm_make_full_map(_uint16_t * act_id, _uint16_t n_act, \
-                                         _uint16_t * lnk_src, \
-                                         _uint16_t * lnk_dst, \
-                                         _uint16_t n_lnk, \
-                                         _bool * full_dep_map)
+    cdef ccpmResultEn ccpm_make_full_map(_uint16_t *  act_id, _uint16_t n_act, \
+                                         _uint16_t * lnk_src, _uint16_t * lnk_dst, _uint16_t n_lnk,
+                        _bool * full_dep_map)
 
 import  numpy as np#WTF??
 cimport numpy as np
@@ -128,15 +126,13 @@ def make_full_map(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
     cdef _uint16_t [::1] v_act_id  = _act_id
     cdef _uint16_t [::1] v_lnk_src = _lnk_src
     cdef _uint16_t [::1] v_lnk_dst = _lnk_dst
-
-    # Создаём numpy массив для результата (матрица полных связей)
-    cdef np.ndarray full_dep_map = np.zeros((n_act, n_act), dtype=np.bool_)
+    
+    full_dep_map = np.zeros((n_act, n_act), dtype=np.bool_)
     cdef _bool [:, ::1] full_dep_map_view = full_dep_map
 
-    # Вызов C-функции
     cdef ccpmResultEn status
     status = ccpm_make_full_map(&v_act_id[0], n_act,
                                &v_lnk_src[0], &v_lnk_dst[0], n_lnk,
                                &full_dep_map_view[0, 0])
 
-    return status, _act_id, full_dep_map,
+    return status, full_dep_map

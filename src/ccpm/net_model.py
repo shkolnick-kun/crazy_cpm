@@ -682,8 +682,10 @@ if __name__ == '__main__':
     print("Successfully created model with old format")
     
     print("Full dependency map for old format:")
-    status, act_id, full_dep_map = _ccpm.make_full_map(np.array(list(wbs.keys())), src_old, dst_old)
-    print(status, act_id)
+    act_id = np.array(list(wbs.keys()))
+    status, full_dep_map = _ccpm.make_full_map(act_id, src_old, dst_old)
+    print(status)
+    print(act_id)
     print(full_dep_map)
 
     # Demonstration of the new data attribute
@@ -799,3 +801,20 @@ if __name__ == '__main__':
     dot = n_old.viz_cpm(output_path=file_path)
     print(f"Visualization saved as '{file_path}.png'")
     print(f"Target directory: {target_dir}")
+
+
+
+    print("Full dependency map for old format:")
+    act_id = np.array(list(wbs.keys()))
+    status, full_dep_map = _ccpm.make_full_map(act_id, src_old, dst_old)
+    print(status)
+    print(act_id)
+    print(full_dep_map)
+    
+    
+    src_old[0] = 12
+    act_id = np.array(list(wbs.keys()))
+    status, full_dep_map = _ccpm.make_full_map(act_id, src_old, dst_old)
+    print(status)
+    print(act_id)
+    print(full_dep_map)

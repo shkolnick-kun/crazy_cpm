@@ -62,8 +62,8 @@ ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t 
 /*===========================================================================*/
 ccpmResultEn ccpm_build_dep(uint16_t    n_act, int16_t     map_len,
                             uint16_t *    tmp, uint16_t *   act_id, uint16_t * act_pos, \
-                            uint16_t *  opt_n, uint16_t *  opt_dep, bool     * opt_map, \
-                            uint16_t * full_n, uint16_t * full_dep, bool     * full_map);
+                            uint16_t * full_n, uint16_t * full_dep, bool     * full_map, \
+                            uint16_t *  opt_n, uint16_t *  opt_dep, bool     * opt_map);
 
 /*===========================================================================*/
 ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act_dst, \
@@ -71,7 +71,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
                            uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t * n_lnk);
 
 /*===========================================================================*/
-ccpmResultEn ccpm_make_full_map(uint16_t * act_id, uint16_t n_act,
+ccpmResultEn ccpm_make_full_map(uint16_t * act_id, uint16_t n_act, \
                                 uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk,
                                 bool * full_dep_map);
 
