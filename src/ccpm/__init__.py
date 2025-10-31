@@ -19,4 +19,5 @@
 
     Please contact with me by E-mail: shkolnick.kun@gmail.com
 """
-from _ccpm import compute_aoa
+from _ccpm import compute_aoa, make_full_map, EINVAL, ELOOP, ENOMEM, OK
+from .net_model import NetworkModel
