@@ -75,10 +75,10 @@ import  numpy as np#WTF??
 cimport numpy as np
 
 #Define constants
-_CCPM_OK     = CCPM_OK
-_CCPM_EINVAL = CCPM_EINVAL
-_CCPM_ENOMEM = CCPM_ENOMEM
-_CCPM_ELOOP  = CCPM_ELOOP
+OK     = CCPM_OK
+EINVAL = CCPM_EINVAL
+ENOMEM = CCPM_ENOMEM
+ELOOP  = CCPM_ELOOP
 
 ###############################################################################
 def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
