@@ -379,7 +379,9 @@ class NetworkModel:
         late = np.zeros((3,), dtype=float)
         for e in self.events:
             if e.early[RES] > late[RES]:
-                late = e.early
+                late = e.early.copy()
+
+        late[VAR] = 0.0 #Start back computation with zero variance
 
         for e in self.events:
             e.late = late
@@ -436,8 +438,8 @@ class NetworkModel:
             return _choise(old, new, old[RES] - new[RES])
 
         def _delta_late(a):
-            ret = -a.duration.copy()
-            ret[ERR] = a.duration[ERR]
+            ret = a.duration.copy()
+            ret[RES] = -a.duration[RES]
             return ret
 
         if 'stage' == target:
