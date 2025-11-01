@@ -27,6 +27,10 @@ import _ccpm
 
 EPS = np.finfo(float).eps
 
+RES = 0
+VAR = 1
+ERR = 2
+
 #==============================================================================
 class _Activity:
     def __init__(self, id, wbs_id, letter, model, src, dst, duration=0.0, variance = 0.0, data=None):
@@ -69,30 +73,16 @@ class _Activity:
         self.model    = model
         self.src      = src
         self.dst      = dst
-        self.duration = duration
-        self.variance = variance
+        #                            RES      VAR           ERR
+        self.duration = np.array([duration, variance, EPS * duration], dtype=float)
         self.data     = data if data is not None else {}
 
-        # CPM time parameters (calculated later)
-        self.early_start = 0.0
-        self.late_start  = 0.0
-        self.early_end   = 0.0
-        self.late_end    = 0.0
-        self.reserve     = 0.0
-
-        # Used to calculate CPM computation errors ant PERT variances
-        self.early_start_err = 0.0 # PERT start var
-        self.late_start_err  = 0.0
-        self.early_end_err   = 0.0 # PERT end var
-        self.late_end_err    = 0.0
-
-    @property
-    def start_var(self):
-        return self.early_start_err
-
-    @property
-    def end_var(self):
-        return self.early_end_err
+        # CPM/PERT parameters
+        self.early_start = np.zeros_like(self.duration)
+        self.late_start  = np.zeros_like(self.duration)
+        self.early_end   = np.zeros_like(self.duration)
+        self.late_end    = np.zeros_like(self.duration)
+        self.reserve     = np.zeros_like(self.duration)
 
     #----------------------------------------------------------------------------------------------
     def __repr__(self):
@@ -100,8 +90,8 @@ class _Activity:
             self.id,
             self.src.id,
             self.dst.id,
-            self.duration,
-            self.reserve,
+            self.duration[0],
+            self.reserve[0],
             self.wbs_id,
             self.letter,
             self.data
@@ -117,32 +107,38 @@ class _Activity:
         dict
             Dictionary with activity data
         """
-        return {
+        ret = {
             'id': self.id,
             'wbs_id': self.wbs_id,
             'letter': self.letter,
             'src_id': self.src.id,
             'dst_id': self.dst.id,
-            'duration': self.duration,
-            'variance': self.variance,
+            'duration': self.duration[RES],
+            'variance': self.duration[VAR],
             # CPM things
-            'early_start': self.early_start,
-            'late_start': self.late_start,
-            'early_end': self.early_end,
-            'late_end': self.late_end,
-            'reserve': self.reserve,
-            # CPM errors
-            #'early_start_err': self.early_start_err,
-            #'late_start_err': self.late_start_err,
-            #'early_end_err': self.early_end_err,
-            #'late_end_err': self.late_end_err,
-
+            'early_start': self.early_start[RES],
+            'late_start': self.late_start[RES],
+            'early_end': self.early_end[RES],
+            'late_end': self.late_end[RES],
+            'reserve': self.reserve[RES],
             # PERT things
-            'start_var': self.start_var,
-            'end_var': self.end_var,
+            'early_start_var': self.early_start[VAR],
+            'late_start_var': self.late_start[VAR],
+            'early_end_var': self.early_end[VAR],
+            'late_end_var': self.late_end[VAR],
+            'reserve_var': self.reserve[VAR],
 
             'data': self.data.copy()  # Return a copy to avoid modifying original
         }
+
+        if self.model.debug:
+            # CPM computation errors
+            ret['early_start_err'] = self.early_start[ERR]
+            ret['late_start_err' ] = self.late_start[ERR]
+            ret['early_end_err'  ] = self.early_end[ERR]
+            ret['late_end_err'   ] = self.late_end[ERR]
+
+        return ret
 
 #==============================================================================
 class _Event:
@@ -157,23 +153,17 @@ class _Event:
         model : NetworkModel
             Parent network model
         """
-        assert isinstance(id,     int)
+        assert isinstance(id, int)
         assert isinstance(model, NetworkModel)
 
         self.id = id
-        self.model   = model
+        self.model = model
 
         # CPM time parameters (calculated later)
-        self.early   = 0.0
-        self.late    = 0.0
-        self.reserve = 0.0
+        self.early   = np.zeros((3,), dtype=float)
+        self.late    = np.zeros((3,), dtype=float)
+        self.reserve = np.zeros((3,), dtype=float)
         self.stage   = 0
-
-        # Used to calculate CPM computation errors
-        self.early_err = 0.0
-        self.late_err  = 0.0
-
-        self.variance = 0.0
 
     @property
     def in_activities(self):
@@ -189,9 +179,9 @@ class _Event:
     def __repr__(self):
         return 'Event(id=%r early=%r late=%r reserve=%r stage=%r)' % (
             self.id,
-            self.early,
-            self.late,
-            self.reserve,
+            self.early[RES],
+            self.late[RES],
+            self.reserve[RES],
             self.stage
         )
 
@@ -205,24 +195,29 @@ class _Event:
         dict
             Dictionary with event data
         """
-        return {
+        ret = {
             'id': self.id,
-            'early': self.early,
-            'late': self.late,
-            'reserve': self.reserve,
             'stage': self.stage,
-
-            # CPM computation errors
-            #'early_err': self.early_err,
-            #'late_err': self.late_err,
+            'early': self.early[RES],
+            'late': self.late[RES],
+            'reserve': self.reserve[RES],
 
             # PERT things
-            'variance': self.variance
+            'early_var': self.early[VAR],
+            'late_var': self.late[VAR],
+            'reserve_var': self.reserve[VAR],
         }
+
+        if self.model.debug:
+            # CPM computation errors
+            ret['early_err'] = self.early[ERR]
+            ret['late_err' ] = self.late[ERR]
+
+        return ret
 
 #==============================================================================
 class NetworkModel:
-    def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None):
+    def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None, debug=True):
         """
         Initialize NetworkModel with multiple link formats support
 
@@ -244,6 +239,8 @@ class NetworkModel:
         """
         assert isinstance(wbs_dict, dict)
 
+        self.debug = debug
+
         # Parse links into standard format
         lnk_src, lnk_dst = self._parse_links(lnk_src, lnk_dst, links)
 
@@ -255,13 +252,8 @@ class NetworkModel:
         # Compute stages of project
         self._compute_target('stage')
 
-        # Compute Event and Activity attributes using CPM
-        self._do_cpm()
-
-        # Compute PERT variances
-        self._compute_target('variance')
-
-
+        # Compute Event and Activity attributes using CPM/PERT
+        self._compute_all()
 
     #--------------------------------------------------------------------------
     def _parse_links(self, lnk_src, lnk_dst, links):
@@ -380,11 +372,15 @@ class NetworkModel:
 
         return data_copy
 
-    def _do_cpm(self):
+    def _compute_all(self):
         self._compute_target('early')
 
         # Set late times starting from project completion
-        late = max([e.early for e in self.events])
+        late = np.zeros((3,), dtype=float)
+        for e in self.events:
+            if e.early[RES] > late[RES]:
+                late = e.early
+
         for e in self.events:
             e.late = late
 
@@ -392,30 +388,22 @@ class NetworkModel:
 
         # Compute reserves
         for e in self.events:
-            e.reserve = e.late - e.early
+            e.reserve[VAR] = e.late[VAR] + e.early[VAR]
+            e.reserve[ERR] = e.late[ERR] + e.early[ERR]
+            # Round off insignificant values
+            r = e.late[RES] - e.early[RES]
+            e.reserve[RES] = r if abs(r) > e.reserve[ERR] else 0.0
+            # Check for programming errors
+            assert r > -e.reserve[ERR]
 
         for a in self.activities:
-            #a.early_end = a.early_start + a.duration
-            #a.late_end  = a.late_start  + a.duration
-            a.reserve   = a.late_start  - a.early_start
-
-        # Evaluate time parameters errors
-        self._compute_target('early_err')
-
-        err = max([e.early_err for e in self.events])
-        for e in self.events:
-            e.late_err = err
-
-        self._compute_target('late_err')
-
-        # Replace erronious reserve time values with zeros
-        for e in self.events:
-           if abs(e.reserve) < (e.early_err + e.late_err):
-               e.reserve = 0.0
-
-        for a in self.activities:
-            if abs(a.reserve) < (a.early_start_err + a.late_start_err):
-                a.reserve = 0.0
+            a.reserve[VAR] = a.late_start[VAR] + a.early_start[VAR]
+            a.reserve[ERR] = a.late_start[ERR] + a.early_start[ERR]
+            # Round off insignificant values
+            r = a.late_start[RES] - a.early_start[RES]
+            a.reserve[RES] = r if abs(r) > a.reserve[ERR] else 0.0
+            # Check for programming errors
+            assert r > -a.reserve[ERR]
 
     #--------------------------------------------------------------------------
     def _compute_target(self, target=None):
@@ -427,54 +415,58 @@ class NetworkModel:
         target : str
             What to compute: 'stage', 'early', or 'late'
         """
+
+        def _choise(old, new, delta):
+            e = new[ERR] + old[ERR]
+            if delta >= e:
+                return new
+            elif delta >= -e:
+                ret = np.zeros((3,), dtype=float)
+                ret[RES] = 0.5 * (new[RES] + old[RES])
+                ret[VAR] = max(old[VAR], new[VAR])
+                ret[ERR] = 0.5 * e
+                return ret
+            else:
+                return old
+
+        def _choise_early(old, new):
+            return _choise(old, new, new[RES] - old[RES])
+
+        def _choise_late(old, new):
+            return _choise(old, new, old[RES] - new[RES])
+
+        def _delta_late(a):
+            ret = -a.duration.copy()
+            ret[ERR] = a.duration[ERR]
+            return ret
+
         if 'stage' == target:
             act_base     = None
             act_new      = None
             act_next     = 'dst'
             fwd          = 'out_activities'
             rev          = 'in_activities'
-            delta        = lambda a : 1
             choise       = max
+            delta        = lambda a : 1
+
         elif 'early' == target:
             act_base     = 'early_start'
             act_new      = 'early_end'
             act_next     = 'dst'
             fwd          = 'out_activities'
             rev          = 'in_activities'
+            choise       = _choise_early
             delta        = lambda a : a.duration
-            choise       = max
+
         elif 'late' == target:
             act_base     = 'late_end'
             act_new      = 'late_start'
             act_next     = 'src'
             fwd          = 'in_activities'
             rev          = 'out_activities'
-            delta        = lambda a : - a.duration
-            choise       = min
-        elif 'early_err' == target:
-            act_base     = 'early_start_err'
-            act_new      = 'early_end_err'
-            act_next     = 'dst'
-            fwd          = 'out_activities'
-            rev          = 'in_activities'
-            delta        = lambda a : a.duration * EPS
-            choise       = max
-        elif 'late_err' == target:
-            act_base     = 'late_end_err'
-            act_new      = 'late_start_err'
-            act_next     = 'src'
-            fwd          = 'in_activities'
-            rev          = 'out_activities'
-            delta        = lambda a : a.duration * EPS
-            choise       = max
-        elif 'variance' == target:
-            act_base     = 'early_start_err'
-            act_new      = 'early_end_err'
-            act_next     = 'dst'
-            fwd          = 'out_activities'
-            rev          = 'in_activities'
-            delta        = lambda a : a.variance if a.reserve <= 0.0 else 0.0
-            choise       = max
+            choise       = _choise_late
+            delta        = _delta_late
+
         else:
             raise ValueError("Unknown 'target' value!!!")
 
@@ -501,8 +493,6 @@ class NetworkModel:
                     setattr(a, act_base, base_val)
 
                 new_val = base_val + delta(a)
-                #New value must be >= 0.0
-                new_val = 0.0 if new_val < 0.0 else new_val
 
                 if act_new:
                     setattr(a, act_new, new_val)
@@ -653,7 +643,7 @@ class NetworkModel:
 
         def _cl(res):
             """Choose color based on reserve (red for critical path)"""
-            if res == 0.0:  # Absolute precision is nonsense
+            if abs(res[RES]) < res[ERR]:  # Absolute precision is nonsense
                 return '#ff0000'
             return '#000000'
 
@@ -662,9 +652,9 @@ class NetworkModel:
             # Format time values to 1 decimal place
             dot.node(str(e.id),
                      '{{%d |{%.1f|%.1f}| %.1f}}' % (e.id,
-                                                    e.early,
-                                                    e.late,
-                                                    e.reserve),
+                                                    e.early[RES],
+                                                    e.late[RES],
+                                                    e.reserve[RES]),
                      color=_cl(e.reserve))
 
         # Add activities/edges
@@ -673,14 +663,14 @@ class NetworkModel:
                 # Use letter instead of wbs_id in visualization
                 # Format duration and reserve to 1 decimal place
                 lbl  = a.letter
-                lbl += '\n t=' + format(a.duration, '.1f') + '\n r=' + format(a.reserve, '.1f')
+                lbl += '\n t=' + format(a.duration[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.1f')
             else:  # Dummy activity
-                lbl = '# \n r=' + format(a.reserve, '.1f')
+                lbl = '# \n r=' + format(a.reserve[RES], '.1f')
 
             dot.edge(str(a.src.id), str(a.dst.id),
                      label=lbl,
                      color=_cl(a.reserve),
-                     style='dashed' if a.duration == 0 else 'solid'
+                     style='dashed' if a.duration[RES] == 0 else 'solid'
                     )
 
         # If output path is specified, render to that location
