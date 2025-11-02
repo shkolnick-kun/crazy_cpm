@@ -22,14 +22,27 @@
 import graphviz
 import numpy as np
 import pandas as pd
+import scipy.stats as st
 import os
 import _ccpm
 
 EPS = np.finfo(float).eps
 
-RES = 0
-VAR = 1
-ERR = 2
+RES = 0 # Result of time computation
+VAR = 1 # Result variance estimation (used for PERT)
+ERR = 2 # Computation error upper limit
+
+#==============================================================================
+def _p_quantile_estimate(tm, p):
+    return tm[RES] + np.sqrt(tm[VAR]) * st.norm.ppf(p)
+
+#==============================================================================
+def _prob_estimate(tm, val):
+    s = np.sqrt(tm[VAR])
+    if s <= EPS * tm[RES]:
+        return 1.0 if val > tm[RES] else 0.0
+    else:
+        return st.norm.cdf((val - tm[RES]) / s)
 
 #==============================================================================
 class _Activity:
@@ -84,18 +97,23 @@ class _Activity:
         self.late_end    = np.zeros_like(self.duration)
         self.reserve     = np.zeros_like(self.duration)
 
+    @property
+    def early_start_pqe(self):
+        return _p_quantile_estimate(self.early_start, self.model.p)
+
+    def early_start_prob(self, val):
+        return _prob_estimate(self.early_start, val)
+
+    @property
+    def early_end_pqe(self):
+        return _p_quantile_estimate(self.early_end, self.model.p)
+
+    def early_end_prob(self, val):
+        return _prob_estimate(self.early_end, val)
+
     #----------------------------------------------------------------------------------------------
     def __repr__(self):
-        return 'Activity(id=%r, src_id=%r, dst_id=%r, duration=%r, reserve=%r, wbs_id=%r, letter=%r, data=%r)' % (
-            self.id,
-            self.src.id,
-            self.dst.id,
-            self.duration[0],
-            self.reserve[0],
-            self.wbs_id,
-            self.letter,
-            self.data
-            )
+        return str(self.to_dict())
 
     #----------------------------------------------------------------------------------------------
     def to_dict(self):
@@ -108,28 +126,29 @@ class _Activity:
             Dictionary with activity data
         """
         ret = {
-            'id': self.id,
-            'wbs_id': self.wbs_id,
-            'letter': self.letter,
-            'src_id': self.src.id,
-            'dst_id': self.dst.id,
-            'duration': self.duration[RES],
-            'variance': self.duration[VAR],
+            'id'         : self.id,
+            'wbs_id'     : self.wbs_id,
+            'letter'     : self.letter,
+            'src_id'     : self.src.id,
+            'dst_id'     : self.dst.id,
+            'duration'   : self.duration[RES],
+            'variance'   : self.duration[VAR],
             # CPM things
             'early_start': self.early_start[RES],
-            'late_start': self.late_start[RES],
-            'early_end': self.early_end[RES],
-            'late_end': self.late_end[RES],
-            'reserve': self.reserve[RES],
-            # PERT things
-            'early_start_var': self.early_start[VAR],
-            'late_start_var': self.late_start[VAR],
-            'early_end_var': self.early_end[VAR],
-            'late_end_var': self.late_end[VAR],
-            'reserve_var': self.reserve[VAR],
-
-            'data': self.data.copy()  # Return a copy to avoid modifying original
+            'late_start' : self.late_start[RES],
+            'early_end'  : self.early_end[RES],
+            'late_end'   : self.late_end[RES],
+            'reserve'    : self.reserve[RES],
+            #Additional data copy
+            'data'       : self.data.copy() # Return a copy to avoid modifying original
         }
+
+        if self.model.is_pert:
+            # PERT things
+            ret['early_start_var'] = self.early_start[VAR]
+            ret['early_end_var'  ] = self.early_end[VAR]
+            ret['early_start_pqe'] = self.early_start_pqe
+            ret['early_end_pqe'  ] = self.early_end_pqe
 
         if self.model.debug:
             # CPM computation errors
@@ -175,15 +194,16 @@ class _Event:
         """Get all activities leaving this event"""
         return [a for a in self.model.activities if a.src == self]
 
+    @property
+    def early_pqe(self):
+        return _p_quantile_estimate(self.early, self.model.p)
+
+    def early_prob(self, val):
+        return _prob_estimate(self.early, val)
+
     #--------------------------------------------------------------------------
     def __repr__(self):
-        return 'Event(id=%r early=%r late=%r reserve=%r stage=%r)' % (
-            self.id,
-            self.early[RES],
-            self.late[RES],
-            self.reserve[RES],
-            self.stage
-        )
+        return str(self.to_dict())
 
     #--------------------------------------------------------------------------
     def to_dict(self):
@@ -195,18 +215,22 @@ class _Event:
         dict
             Dictionary with event data
         """
+        # Basic action (CPM)
         ret = {
-            'id': self.id,
-            'stage': self.stage,
-            'early': self.early[RES],
-            'late': self.late[RES],
+            'id'     : self.id,
+            'stage'  : self.stage,
+            'early'  : self.early[RES],
+            'late'   : self.late[RES],
             'reserve': self.reserve[RES],
-
-            # PERT things
-            'early_var': self.early[VAR],
-            'late_var': self.late[VAR],
-            'reserve_var': self.reserve[VAR],
         }
+
+        if self.model.is_pert:
+            # PERT things
+            ret['early_var'  ] = self.early[VAR]
+            #ret['late_var'   ] = self.late[VAR]
+            #ret['reserve_var'] = self.reserve[VAR]
+            ret['early_pqe'] = self.early_pqe
+
 
         if self.model.debug:
             # CPM computation errors
@@ -217,7 +241,7 @@ class _Event:
 
 #==============================================================================
 class NetworkModel:
-    def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None, debug=True):
+    def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None, p=0.95, debug=False):
         """
         Initialize NetworkModel with multiple link formats support
 
@@ -240,6 +264,8 @@ class NetworkModel:
         assert isinstance(wbs_dict, dict)
 
         self.debug = debug
+        self.is_pert = False
+        self.p = p
 
         # Parse links into standard format
         lnk_src, lnk_dst = self._parse_links(lnk_src, lnk_dst, links)
@@ -252,8 +278,8 @@ class NetworkModel:
         # Compute stages of project
         self._compute_target('stage')
 
-        # Compute Event and Activity attributes using CPM/PERT
-        self._compute_all()
+        # Compute Event and Activity time parameters
+        self._compute_time_params()
 
     #--------------------------------------------------------------------------
     def _parse_links(self, lnk_src, lnk_dst, links):
@@ -317,9 +343,8 @@ class NetworkModel:
             self._add_event(int(i + 1))
 
         # Create activities (real and dummy)
-        na = len(act_ids)
-        d  = np.max(act_ids)
-        nd = 0
+        na = len(act_ids)    # Number of actions
+        nd = 0               # Number of dunny actions
         for i in range(len(net_src)):
             if i < na:
                 # Real activity - get data from WBS
@@ -329,6 +354,10 @@ class NetworkModel:
                 variance = wbs_data.get('variance', 0.)
                 letter = wbs_data.get('letter', '')
 
+                # Even one wbs item with ninzero variance is enough to compute PERT`
+                if variance > 0.0:
+                    self.is_pert = True
+
                 # Create data dict without fields stored as separate attributes
                 data_without_duplicates = self._remove_duplicate_fields(wbs_data, duration, letter)
 
@@ -336,7 +365,6 @@ class NetworkModel:
                                   duration, variance, letter, data_without_duplicates)
             else:
                 # Add a dummy activity (no duration, no letter, no data)
-                d  += 1
                 nd += 1 #One more dummy work
                 self._add_activity(0, int(net_src[i]), int(net_dst[i]), 0., 0., '#' + str(nd), {})
 
@@ -372,7 +400,7 @@ class NetworkModel:
 
         return data_copy
 
-    def _compute_all(self):
+    def _compute_time_params(self):
         self._compute_target('early')
 
         # Set late times starting from project completion
@@ -421,15 +449,16 @@ class NetworkModel:
         def _choise(old, new, delta):
             e = new[ERR] + old[ERR]
             if delta >= e:
-                return new
+                return new #Certain result
             elif delta >= -e:
+                #Uncertain result, use mixing
                 ret = np.zeros((3,), dtype=float)
                 ret[RES] = 0.5 * (new[RES] + old[RES])
                 ret[VAR] = max(old[VAR], new[VAR])
                 ret[ERR] = 0.5 * e
                 return ret
             else:
-                return old
+                return old #Certain result
 
         def _choise_early(old, new):
             return _choise(old, new, new[RES] - old[RES])
@@ -556,13 +585,15 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def __repr__(self):
         """String representation of the network model"""
-        _repr = 'NetworkModel:\n    Events:\n'
+        _repr = 'Events:{\n'
         for e in self.events:
             _repr += '        ' + str(e) + '\n'
+        _repr += '}\n'
 
-        _repr += '    Activities:\n'
+        _repr += 'Activities:\n'
         for a in self.activities:
             _repr += '        ' + str(a) + '\n'
+        _repr += '}\n'
 
         return _repr
 
@@ -643,11 +674,14 @@ class NetworkModel:
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style':'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
 
-        def _cl(res):
+        def _cl(res, p):
             """Choose color based on reserve (red for critical path)"""
             if abs(res[RES]) < res[ERR]:  # Absolute precision is nonsense
                 return '#ff0000'
-            return '#000000'
+            elif p < self.p:
+                return '#ffa000'
+            else:
+                return '#000000'
 
         # Add events/nodes
         for e in self.events:
@@ -657,7 +691,8 @@ class NetworkModel:
                                                     e.early[RES],
                                                     e.late[RES],
                                                     e.reserve[RES]),
-                     color=_cl(e.reserve))
+                     color=_cl(e.reserve, e.early_prob(e.late[RES])))
+
 
         # Add activities/edges
         for a in self.activities:
@@ -671,8 +706,8 @@ class NetworkModel:
 
             dot.edge(str(a.src.id), str(a.dst.id),
                      label=lbl,
-                     color=_cl(a.reserve),
-                     style='dashed' if a.duration[RES] == 0 else 'solid'
+                     color=_cl(a.reserve, a.early_end_prob(a.late_end[RES])),
+                     style='dashed' if a.duration[RES] == 0.0 else 'solid'
                     )
 
         # If output path is specified, render to that location
@@ -728,12 +763,12 @@ class NetworkModel:
 if __name__ == '__main__':
     # Example usage with all link formats
     wbs = {
-        1 :{'letter':'A', 'duration':1., 'variance':0.01, 'name':'Heating and frames study'                                },
+        1 :{'letter':'A', 'duration':3.84, 'variance':0.01, 'name':'Heating and frames study'                                },
         2 :{'letter':'B', 'duration':2., 'variance':0.01, 'name':'Scouring and installation of building site establishment'},
-        3 :{'letter':'C', 'duration':4., 'variance':0.01, 'name':'Earthwork and concrete well'                             },
+        3 :{'letter':'C', 'duration':3.8, 'variance':0.01, 'name':'Earthwork and concrete well'                             },
         4 :{'letter':'D', 'duration':4., 'variance':0.01, 'name':'Earthwork and concrete longitudinal beams'               },
         5 :{'letter':'E', 'duration':6., 'variance':0.01, 'name':'Frame construction'                                      },
-        6 :{'letter':'F', 'duration':2., 'variance':0.01, 'name':'Frame transport'                                         },
+        6 :{'letter':'F', 'duration':6., 'variance':0.01, 'name':'Frame transport'                                         },
         7 :{'letter':'G', 'duration':6., 'variance':0.01, 'name':'Assemblage'                                              },
         8 :{'letter':'H', 'duration':2., 'variance':0.01, 'name':'Earthwork and pose drains'                               },
         9 :{'letter':'I', 'duration':5., 'variance':0.01, 'name':'Heating provisioning and assembly'                       },
@@ -829,7 +864,9 @@ if __name__ == '__main__':
     # Demonstration of DataFrame export (if pandas is available)
     print("\n=== Demonstration of DataFrame export ===")
     try:
+        n_old.debug = True
         activities_df, events_df = n_old.to_dataframe()
+        n_old.debug = False
 
         print("\nActivities DataFrame:")
         print(f"Size: {activities_df.shape}")
@@ -872,15 +909,12 @@ if __name__ == '__main__':
     print(f"Visualization saved as '{file_path}.png'")
     print(f"Target directory: {target_dir}")
 
-
-
     print("Full dependency map for old format:")
     act_id = np.array(list(wbs.keys()))
     status, full_dep_map = _ccpm.make_full_map(act_id, src_old, dst_old)
     print(status)
     print(act_id)
     print(full_dep_map)
-
 
     src_old[0] = 12
     act_id = np.array(list(wbs.keys()))
