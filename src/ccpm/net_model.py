@@ -1,23 +1,39 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-    CrazyCPM
-    Copyright (C) 2025 anonimous
+CrazyCPM - Critical Path Method and PERT analysis library
+=========================================================
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+This module provides comprehensive CPM (Critical Path Method) and PERT
+(Program Evaluation and Review Technique) analysis capabilities for project
+management.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+Features:
+    - Multiple activity duration input formats (direct, PERT three-point, PERT two-point)
+    - Automatic network diagram generation using Graphviz
+    - Statistical analysis with variance propagation
+    - Multiple link format support
+    - Export to dictionaries and pandas DataFrames
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+Classes:
+    - NetworkModel: Main class for network analysis
+    - _Activity: Represents activities in the network (internal)
+    - _Event: Represents events/milestones in the network (internal)
 
-    Please contact with me by E-mail: shkolnick.kun@gmail.com
+Usage Example:
+    >>> wbs = {
+    ...     1: {'letter': 'A', 'duration': 5.0, 'variance': 1.0},
+    ...     2: {'letter': 'B', 'optimistic': 3.0, 'most_likely': 4.0, 'pessimistic': 8.0}
+    ... }
+    >>> links = [[1], [2]]
+    >>> model = NetworkModel(wbs, links=links)
+    >>> activities_df, events_df = model.to_dataframe()
+
+.. note::
+    This module uses a C++ extension (_ccpm) for performance-critical computations.
+
+Copyright (C) 2025 anonimous
+License: GNU GPL v3 or later
 """
 import graphviz
 import numpy as np
@@ -34,10 +50,40 @@ ERR = 2 # Computation error upper limit
 
 #==============================================================================
 def _p_quantile_estimate(tm, p):
+    """
+    Calculate quantile estimate for time with given probability.
+
+    Parameters
+    ----------
+    tm : numpy.ndarray
+        Time array with [RES, VAR, ERR] components
+    p : float
+        Probability value (0 < p < 1)
+
+    Returns
+    -------
+    float
+        Quantile estimate for the given probability
+    """
     return tm[RES] + np.sqrt(tm[VAR]) * st.norm.ppf(p)
 
 #==============================================================================
 def _prob_estimate(tm, val):
+    """
+    Estimate probability that time is less than given value.
+
+    Parameters
+    ----------
+    tm : numpy.ndarray
+        Time array with [RES, VAR, ERR] components
+    val : float
+        Value to compare against
+
+    Returns
+    -------
+    float
+        Probability P(tm < val)
+    """
     s = np.sqrt(tm[VAR])
     if s <= EPS * tm[RES]:
         return 1.0 if val > tm[RES] else 0.0
@@ -50,25 +96,55 @@ def _calculate_duration_params(work_data):
     Calculate mean duration and variance from various input formats.
 
     Supports three formats in order of priority:
-    1. Three-point PERT: optimistic, most_likely, pessimistic
-    2. Two-point PERT: optimistic, pessimistic
-    3. Direct parameters: duration, variance
 
-    Parameters:
-    -----------
+    1. **Three-point PERT**: Uses optimistic, most_likely, and pessimistic estimates
+       with formula: mean = (optimistic + 4*most_likely + pessimistic)/6,
+       variance = ((pessimistic - optimistic)/6)²
+
+    2. **Two-point PERT**: Uses optimistic and pessimistic estimates
+       with formula: mean = (optimistic + 4*pessimistic)/5,
+       variance = ((pessimistic - optimistic)/5)²
+
+    3. **Direct parameters**: Uses directly provided duration and variance
+
+    Parameters
+    ----------
     work_data : dict
-        Dictionary containing work data with one of the following combinations:
-        - optimistic, most_likely, pessimistic (three-point PERT)
-        - optimistic, pessimistic (two-point PERT)
-        - duration, variance (direct parameters)
+        Dictionary containing work data with one of these combinations:
 
-    Returns:
-    --------
-    tuple : (mean_duration, variance)
+        - For three-point PERT: ``optimistic``, ``most_likely``, ``pessimistic``
+        - For two-point PERT: ``optimistic``, ``pessimistic``
+        - For direct parameters: ``duration``, ``variance`` (optional)
 
-    Raises:
+    Returns
     -------
-    ValueError: If insufficient data is provided
+    tuple
+        (mean_duration, variance)
+
+    Raises
+    ------
+    ValueError
+        If insufficient data is provided or estimates are invalid
+
+    Examples
+    --------
+    >>> # Three-point PERT
+    >>> data = {'optimistic': 5, 'most_likely': 7, 'pessimistic': 12}
+    >>> mean, var = _calculate_duration_params(data)
+    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
+    Mean: 7.50, Variance: 1.36
+
+    >>> # Two-point PERT
+    >>> data = {'optimistic': 3, 'pessimistic': 8}
+    >>> mean, var = _calculate_duration_params(data)
+    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
+    Mean: 7.00, Variance: 1.00
+
+    >>> # Direct parameters
+    >>> data = {'duration': 6.5, 'variance': 0.5}
+    >>> mean, var = _calculate_duration_params(data)
+    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
+    Mean: 6.50, Variance: 0.50
     """
     # 1. Check for three-point PERT estimation (highest priority)
     if all(key in work_data for key in ['optimistic', 'most_likely', 'pessimistic']):
@@ -116,29 +192,68 @@ def _calculate_duration_params(work_data):
 
 #==============================================================================
 class _Activity:
-    def __init__(self, id, wbs_id, letter, model, src, dst, duration=0.0, variance = 0.0, data=None):
-        """
-        Activity class representing a task in the network
+    """
+    Represents an activity (task) in the network model.
 
-        Parameters:
-        -----------
-        id : int
-            Unique activity identifier
-        wbs_id : int
-            Work Breakdown Structure identifier
-        letter : str
-            Activity letter/code for visualization
-        model : NetworkModel
-            Parent network model
-        src : _Event
-            Source event
-        dst : _Event
-            Destination event
-        duration : float
-            Activity duration
-        data : dict
-            WBS data excluding fields stored as separate attributes
-        """
+    This class stores all information about a network activity including
+    timing parameters, statistical properties, and custom data.
+
+    Parameters
+    ----------
+    id : int
+        Unique activity identifier
+    wbs_id : int
+        Work Breakdown Structure identifier (0 for dummy activities)
+    letter : str
+        Activity letter/code for visualization
+    model : NetworkModel
+        Parent network model instance
+    src : _Event
+        Source event of the activity
+    dst : _Event
+        Destination event of the activity
+    duration : float
+        Activity duration (mathematical expectation)
+    variance : float
+        Activity duration variance
+    data : dict, optional
+        Additional activity data from WBS
+
+    Attributes
+    ----------
+    id : int
+        Unique activity identifier
+    wbs_id : int
+        WBS identifier
+    letter : str
+        Activity letter/code
+    model : NetworkModel
+        Parent network model
+    src : _Event
+        Source event
+    dst : _Event
+        Destination event
+    duration : numpy.ndarray
+        Array containing [duration, variance, error_bound]
+    data : dict
+        Additional activity data
+    early_start : numpy.ndarray
+        Early start time [value, variance, error_bound]
+    late_start : numpy.ndarray
+        Late start time [value, variance, error_bound]
+    early_end : numpy.ndarray
+        Early end time [value, variance, error_bound]
+    late_end : numpy.ndarray
+        Late end time [value, variance, error_bound]
+    reserve : numpy.ndarray
+        Time reserve [value, variance, error_bound]
+
+    Notes
+    -----
+    Time arrays follow the format: [RES (value), VAR (variance), ERR (error bound)]
+    """
+
+    def __init__(self, id, wbs_id, letter, model, src, dst, duration=0.0, variance=0.0, data=None):
         assert isinstance(id,       int)
         assert isinstance(wbs_id,   int)
         assert isinstance(letter,    str)
@@ -169,31 +284,91 @@ class _Activity:
 
     @property
     def early_start_pqe(self):
+        """
+        Get early start probabilistic quantile estimate.
+
+        Returns
+        -------
+        float
+            Early start time quantile for model's probability level
+        """
         return _p_quantile_estimate(self.early_start, self.model.p)
 
     def early_start_prob(self, val):
+        """
+        Get probability that early start is less than given value.
+
+        Parameters
+        ----------
+        val : float
+            Value to compare against
+
+        Returns
+        -------
+        float
+            P(early_start < val)
+        """
         return _prob_estimate(self.early_start, val)
 
     @property
     def early_end_pqe(self):
+        """
+        Get early end probabilistic quantile estimate.
+
+        Returns
+        -------
+        float
+            Early end time quantile for model's probability level
+        """
         return _p_quantile_estimate(self.early_end, self.model.p)
 
     def early_end_prob(self, val):
+        """
+        Get probability that early end is less than given value.
+
+        Parameters
+        ----------
+        val : float
+            Value to compare against
+
+        Returns
+        -------
+        float
+            P(early_end < val)
+        """
         return _prob_estimate(self.early_end, val)
 
     #----------------------------------------------------------------------------------------------
     def __repr__(self):
+        """String representation of the activity."""
         return str(self.to_dict())
 
     #----------------------------------------------------------------------------------------------
     def to_dict(self):
         """
-        Convert activity to dictionary representation
+        Convert activity to dictionary representation.
 
-        Returns:
-        --------
+        Returns
+        -------
         dict
-            Dictionary with activity data
+            Dictionary containing all activity data with structure:
+
+            - ``id``: Activity ID
+            - ``wbs_id``: WBS ID
+            - ``letter``: Activity letter
+            - ``src_id``: Source event ID
+            - ``dst_id``: Destination event ID
+            - ``duration``: Activity duration
+            - ``variance``: Activity duration variance
+            - ``early_start``, ``late_start``, ``early_end``, ``late_end``: Timing parameters
+            - ``reserve``: Time reserve
+            - ``data``: Additional activity data
+            - Additional PERT fields if applicable
+
+        Notes
+        -----
+        PERT-specific fields (early_start_var, early_end_var, early_start_pqe, early_end_pqe)
+        are only included when PERT analysis is enabled.
         """
         ret = {
             'id'         : self.id,
@@ -231,17 +406,36 @@ class _Activity:
 
 #==============================================================================
 class _Event:
-    def __init__(self, id, model):
-        """
-        Event class representing a milestone in the network
+    """
+    Represents an event (milestone) in the network model.
 
-        Parameters:
-        -----------
-        id : int
-            Unique event identifier
-        model : NetworkModel
-            Parent network model
-        """
+    Events mark the beginning or end of activities and are used to
+    calculate critical paths and timing parameters.
+
+    Parameters
+    ----------
+    id : int
+        Unique event identifier
+    model : NetworkModel
+        Parent network model instance
+
+    Attributes
+    ----------
+    id : int
+        Unique event identifier
+    model : NetworkModel
+        Parent network model
+    early : numpy.ndarray
+        Early time [value, variance, error_bound]
+    late : numpy.ndarray
+        Late time [value, variance, error_bound]
+    reserve : numpy.ndarray
+        Time reserve [value, variance, error_bound]
+    stage : int
+        Event stage in topological order
+    """
+
+    def __init__(self, id, model):
         assert isinstance(id, int)
         assert isinstance(model, NetworkModel)
 
@@ -256,34 +450,68 @@ class _Event:
 
     @property
     def in_activities(self):
-        """Get all activities entering this event"""
+        """Get all activities entering this event."""
         return [a for a in self.model.activities if a.dst == self]
 
     @property
     def out_activities(self):
-        """Get all activities leaving this event"""
+        """Get all activities leaving this event."""
         return [a for a in self.model.activities if a.src == self]
 
     @property
     def early_pqe(self):
+        """
+        Get early time probabilistic quantile estimate.
+
+        Returns
+        -------
+        float
+            Early time quantile for model's probability level
+        """
         return _p_quantile_estimate(self.early, self.model.p)
 
     def early_prob(self, val):
+        """
+        Get probability that early time is less than given value.
+
+        Parameters
+        ----------
+        val : float
+            Value to compare against
+
+        Returns
+        -------
+        float
+            P(early < val)
+        """
         return _prob_estimate(self.early, val)
 
     #--------------------------------------------------------------------------
     def __repr__(self):
+        """String representation of the event."""
         return str(self.to_dict())
 
     #--------------------------------------------------------------------------
     def to_dict(self):
         """
-        Convert event to dictionary representation
+        Convert event to dictionary representation.
 
-        Returns:
-        --------
+        Returns
+        -------
         dict
-            Dictionary with event data
+            Dictionary containing event data with structure:
+
+            - ``id``: Event ID
+            - ``stage``: Topological stage
+            - ``early``: Early time
+            - ``late``: Late time
+            - ``reserve``: Time reserve
+            - Additional PERT fields if applicable
+
+        Notes
+        -----
+        PERT-specific fields (early_var, early_pqe) are only included
+        when PERT analysis is enabled.
         """
         # Basic action (CPM)
         ret = {
@@ -297,10 +525,7 @@ class _Event:
         if self.model.is_pert:
             # PERT things
             ret['early_var'  ] = self.early[VAR]
-            #ret['late_var'   ] = self.late[VAR]
-            #ret['reserve_var'] = self.reserve[VAR]
             ret['early_pqe'] = self.early_pqe
-
 
         if self.model.debug:
             # CPM computation errors
@@ -311,32 +536,81 @@ class _Event:
 
 #==============================================================================
 class NetworkModel:
-    def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None, p=0.95, debug=False):
-        """
-        Initialize NetworkModel with multiple link formats support
+    """
+    Main class for CPM/PERT network analysis.
 
-        Parameters:
-        -----------
-        wbs_dict : dict
-            Work Breakdown Structure dictionary with activity data including:
-            - Standard format: 'duration' and optional 'variance'
-            - Three-point PERT: 'optimistic', 'most_likely', 'pessimistic'
-            - Two-point PERT: 'optimistic', 'pessimistic'
-            - 'letter': activity letter/code (required)
-            - 'name': activity description (optional)
-            - any other custom fields
-        lnk_src, lnk_dst : array-like, optional
-            Old format: separate source and destination arrays
-        links : various formats, optional
-            New formats:
-            - Format 1: two rows [[src1, src2, ...], [dst1, dst2, ...]]
-            - Format 2: two columns [[src1, dst1], [src2, dst2], ...]
-            - Format 3: dictionary {'src': [src1, src2, ...], 'dst': [dst1, dst2, ...]}
-        p : float, default=0.95
-            Probability quantile for PERT calculations
-        debug : bool, default=False
-            Enable debug mode for additional computation error information
-        """
+    This class constructs and analyzes network models using Critical Path
+    Method (CPM) and Program Evaluation and Review Technique (PERT).
+
+    Parameters
+    ----------
+    wbs_dict : dict
+        Work Breakdown Structure dictionary with activity data.
+        Each key is an activity ID and value is a dictionary containing:
+
+        - ``letter``: Activity letter/code (required)
+        - One of these duration specifications:
+            - Direct: ``duration`` and optional ``variance``
+            - Three-point PERT: ``optimistic``, ``most_likely``, ``pessimistic``
+            - Two-point PERT: ``optimistic``, ``pessimistic``
+        - ``name``: Activity description (optional)
+        - Any other custom fields
+
+    lnk_src : array-like, optional
+        Source activity IDs for dependencies (old format)
+    lnk_dst : array-like, optional
+        Destination activity IDs for dependencies (old format)
+    links : various, optional
+        Dependency links in various formats:
+
+        - Two rows: ``[[src1, src2, ...], [dst1, dst2, ...]]``
+        - Two columns: ``[[src1, dst1], [src2, dst2], ...]``
+        - Dictionary: ``{'src': [src1, src2, ...], 'dst': [dst1, dst2, ...]}``
+
+    p : float, default=0.95
+        Probability level for PERT quantile estimates
+    debug : bool, default=False
+        Enable debug mode to include computation error bounds
+
+    Raises
+    ------
+    ValueError
+        If insufficient link data is provided or links format is invalid
+    AssertionError
+        If network construction fails
+
+    Attributes
+    ----------
+    activities : list
+        List of _Activity objects in the network
+    events : list
+        List of _Event objects in the network
+    is_pert : bool
+        True if PERT analysis is enabled (variance > 0 for any activity)
+    debug : bool
+        Debug mode flag
+    p : float
+        Probability level for PERT
+
+    Examples
+    --------
+    >>> # Direct duration parameters
+    >>> wbs = {
+    ...     1: {'letter': 'A', 'duration': 5.0, 'variance': 1.0},
+    ...     2: {'letter': 'B', 'duration': 3.0}
+    ... }
+    >>> links = [[1], [2]]
+    >>> model = NetworkModel(wbs, links=links)
+    >>>
+    >>> # Three-point PERT estimates
+    >>> wbs_pert = {
+    ...     1: {'letter': 'A', 'optimistic': 3, 'most_likely': 5, 'pessimistic': 8},
+    ...     2: {'letter': 'B', 'optimistic': 2, 'pessimistic': 6}
+    ... }
+    >>> model_pert = NetworkModel(wbs_pert, links=links)
+    """
+
+    def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None, p=0.95, debug=False):
         assert isinstance(wbs_dict, dict)
 
         self.debug = debug
@@ -360,12 +634,26 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def _parse_links(self, lnk_src, lnk_dst, links):
         """
-        Parse links from various formats into standard lnk_src, lnk_dst arrays
+        Parse links from various formats into standard lnk_src, lnk_dst arrays.
 
-        Returns:
-        --------
-        lnk_src, lnk_dst : numpy.ndarray
-            Standardized source and destination arrays
+        Parameters
+        ----------
+        lnk_src : array-like, optional
+            Source activity IDs (old format)
+        lnk_dst : array-like, optional
+            Destination activity IDs (old format)
+        links : various, optional
+            Links in various new formats
+
+        Returns
+        -------
+        tuple
+            (lnk_src, lnk_dst) as numpy arrays
+
+        Raises
+        ------
+        ValueError
+            If links format is invalid or insufficient data provided
         """
         # Case 1: Old format (lnk_src and lnk_dst provided)
         if lnk_src is not None and lnk_dst is not None:
@@ -402,6 +690,27 @@ class NetworkModel:
 
     #--------------------------------------------------------------------------
     def _create_model(self, wbs_dict, lnk_src, lnk_dst):
+        """
+        Create network model from WBS data and links.
+
+        Internal method that constructs the network graph, creates events
+        and activities, and sets up the model for analysis.
+
+        Parameters
+        ----------
+        wbs_dict : dict
+            Work Breakdown Structure data
+        lnk_src : numpy.ndarray
+            Source activity IDs
+        lnk_dst : numpy.ndarray
+            Destination activity IDs
+
+        Notes
+        -----
+        This method uses the C++ extension _ccpm for efficient AOA
+        (Activity-on-Arrow) network generation and automatically creates
+        dummy activities where needed.
+        """
         assert len(lnk_src) == len(lnk_dst)
 
         act_ids = np.array(list(wbs_dict.keys()), dtype=int)
@@ -454,10 +763,10 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def _remove_duplicate_fields(self, wbs_data, duration, variance, letter):
         """
-        Remove fields from WBS data that are stored as separate activity attributes
+        Remove fields from WBS data that are stored as separate activity attributes.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         wbs_data : dict
             Complete WBS data for an activity
         duration : float
@@ -467,8 +776,8 @@ class NetworkModel:
         letter : str
             Activity letter (already extracted)
 
-        Returns:
-        --------
+        Returns
+        -------
         dict
             WBS data without fields stored as separate attributes
         """
@@ -485,6 +794,13 @@ class NetworkModel:
         return data_copy
 
     def _compute_time_params(self):
+        """
+        Compute all time parameters for events and activities.
+
+        This method performs both forward pass (early times) and
+        backward pass (late times) through the network, then calculates
+        time reserves for both events and activities.
+        """
         self._compute_target('early')
 
         # Set late times starting from project completion
@@ -522,14 +838,21 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def _compute_target(self, target=None):
         """
-        Compute CPM parameters for events and activities
+        Compute CPM parameters for events and activities.
 
-        Parameters:
-        -----------
+        This method performs topological sorting and computes either
+        early times (forward pass) or late times (backward pass).
+
+        Parameters
+        ----------
         target : str
             What to compute: 'stage', 'early', or 'late'
-        """
 
+        Raises
+        ------
+        ValueError
+            If target parameter is invalid
+        """
         def _choise(old, new, delta):
             e = new[ERR] + old[ERR]
             if delta >= e:
@@ -628,16 +951,16 @@ class NetworkModel:
 
     #--------------------------------------------------------------------------
     def _add_event(self, i):
-        """Add a new event to the network"""
+        """Add a new event to the network."""
         self.events.append(_Event(i, self))
 
     #--------------------------------------------------------------------------
     def _add_activity(self, wbs_id, src_id, dst_id, duration, variance, letter, data):
         """
-        Add a new activity to the network
+        Add a new activity to the network.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         wbs_id : int
             Work Breakdown Structure identifier (0 for dummy activities)
         src_id : int
@@ -668,7 +991,7 @@ class NetworkModel:
 
     #--------------------------------------------------------------------------
     def __repr__(self):
-        """String representation of the network model"""
+        """String representation of the network model."""
         _repr = 'Events:{\n'
         for e in self.events:
             _repr += '        ' + str(e) + '\n'
@@ -684,16 +1007,27 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def to_dict(self):
         """
-        Convert network model to dictionary representation
+        Convert network model to dictionary representation.
 
-        Returns:
-        --------
+        Returns
+        -------
         dict
             Dictionary with structure:
-            {
-                'activities': [list of activity dictionaries],
-                'events': [list of event dictionaries]
-            }
+
+            .. code-block:: python
+
+                {
+                    'activities': [
+                        {activity1_data},
+                        {activity2_data},
+                        ...
+                    ],
+                    'events': [
+                        {event1_data},
+                        {event2_data},
+                        ...
+                    ]
+                }
         """
         activities_data = [activity.to_dict() for activity in self.activities]
         events_data = [event.to_dict() for event in self.events]
@@ -706,14 +1040,18 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def to_dataframe(self):
         """
-        Convert network model to pandas DataFrames
+        Convert network model to pandas DataFrames.
 
-        Returns:
-        --------
+        Returns
+        -------
         tuple
             (activities_df, events_df) - pandas DataFrames for activities and events
-        """
 
+        Notes
+        -----
+        The activities DataFrame expands all custom data fields from the
+        'data' attribute into separate columns for easy analysis.
+        """
         # Convert to dictionaries first
         model_dict = self.to_dict()
 
@@ -742,18 +1080,26 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def viz(self, output_path=None):
         """
-        Create Graphviz visualization of the CPM network
+        Create Graphviz visualization of the CPM network.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         output_path : str, optional
             Custom output path for saving the visualization file.
             If None, uses default location.
 
-        Returns:
-        --------
+        Returns
+        -------
         graphviz.Digraph
             Graphviz object for rendering or saving
+
+        Notes
+        -----
+        The visualization uses the following color coding:
+        - Red: Critical path (zero reserve)
+        - Orange: Near-critical activities
+        - Black: Non-critical activities
+        - Dashed lines: Dummy activities
         """
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style':'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
@@ -804,15 +1150,15 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def get_activity_by_wbs_id(self, wbs_id):
         """
-        Get activity by WBS ID
+        Get activity by WBS ID.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         wbs_id : int
             WBS identifier
 
-        Returns:
-        --------
+        Returns
+        -------
         _Activity or None
             Activity with specified WBS ID or None if not found
         """
@@ -824,17 +1170,17 @@ class NetworkModel:
     #--------------------------------------------------------------------------
     def get_activities_by_data_field(self, field_name, field_value):
         """
-        Get activities by custom data field value
+        Get activities by custom data field value.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         field_name : str
             Name of the field in activity.data
         field_value : any
             Value to match
 
-        Returns:
-        --------
+        Returns
+        -------
         list
             List of activities with matching field value
         """
