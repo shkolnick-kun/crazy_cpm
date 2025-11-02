@@ -4,7 +4,7 @@ src/ccpm/*.png
 
 # Setup tools outputs #
 #######################
-src/ccpm/_ccpm.c
+src/crazy_cpm/_ccpm.c
 *.egg-*
 
 # Compiled Object files #
