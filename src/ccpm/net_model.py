@@ -673,6 +673,7 @@ class NetworkModel:
         """
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style':'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
+        dot.graph_attr['dpi'] = '300'
 
         def _cl(res, p):
             """Choose color based on reserve (red for critical path)"""
@@ -696,13 +697,13 @@ class NetworkModel:
 
         # Add activities/edges
         for a in self.activities:
+            lbl  = a.letter
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
                 # Format duration and reserve to 1 decimal place
-                lbl  = a.letter
                 lbl += '\n t=' + format(a.duration[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.1f')
             else:  # Dummy activity
-                lbl = '# \n r=' + format(a.reserve[RES], '.1f')
+                lbl += '\n r=' + format(a.reserve[RES], '.1f')
 
             dot.edge(str(a.src.id), str(a.dst.id),
                      label=lbl,
