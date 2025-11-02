@@ -45,6 +45,76 @@ def _prob_estimate(tm, val):
         return st.norm.cdf((val - tm[RES]) / s)
 
 #==============================================================================
+def _calculate_duration_params(work_data):
+    """
+    Calculate mean duration and variance from various input formats.
+
+    Supports three formats in order of priority:
+    1. Three-point PERT: optimistic, most_likely, pessimistic
+    2. Two-point PERT: optimistic, pessimistic
+    3. Direct parameters: duration, variance
+
+    Parameters:
+    -----------
+    work_data : dict
+        Dictionary containing work data with one of the following combinations:
+        - optimistic, most_likely, pessimistic (three-point PERT)
+        - optimistic, pessimistic (two-point PERT)
+        - duration, variance (direct parameters)
+
+    Returns:
+    --------
+    tuple : (mean_duration, variance)
+
+    Raises:
+    -------
+    ValueError: If insufficient data is provided
+    """
+    # 1. Check for three-point PERT estimation (highest priority)
+    if all(key in work_data for key in ['optimistic', 'most_likely', 'pessimistic']):
+        a = work_data['optimistic']
+        c = work_data['most_likely']
+        b = work_data['pessimistic']
+
+        # Validate inputs
+        if not (a <= c <= b):
+            raise ValueError(f"Invalid PERT estimates: must satisfy optimistic <= most_likely <= pessimistic. Got: {a}, {c}, {b}")
+
+        mean = (a + 4 * c + b) / 6
+        variance = ((b - a) / 6) ** 2
+        return mean, variance
+
+    # 2. Check for two-point PERT estimation (medium priority)
+    elif all(key in work_data for key in ['optimistic', 'pessimistic']):
+        a = work_data['optimistic']
+        b = work_data['pessimistic']
+
+        # Validate inputs
+        if not (a <= b):
+            raise ValueError(f"Invalid PERT estimates: must satisfy optimistic <= pessimistic. Got: {a}, {b}")
+
+        mean = (a + 4 * b) / 5
+        variance = ((b - a) / 5) ** 2
+        return mean, variance
+
+    # 3. Direct parameters (lowest priority - backward compatibility)
+    elif 'duration' in work_data:
+        mean = work_data['duration']
+        variance = work_data.get('variance', 0.0)
+
+        # Validate inputs
+        if mean < 0:
+            raise ValueError(f"Duration must be non-negative. Got: {mean}")
+        if variance < 0:
+            raise ValueError(f"Variance must be non-negative. Got: {variance}")
+
+        return mean, variance
+
+    # 4. Error - insufficient data
+    else:
+        raise ValueError(f"Insufficient data for determining work duration. Available keys: {list(work_data.keys())}")
+
+#==============================================================================
 class _Activity:
     def __init__(self, id, wbs_id, letter, model, src, dst, duration=0.0, variance = 0.0, data=None):
         """
@@ -249,7 +319,9 @@ class NetworkModel:
         -----------
         wbs_dict : dict
             Work Breakdown Structure dictionary with activity data including:
-            - 'duration': activity duration (required)
+            - Standard format: 'duration' and optional 'variance'
+            - Three-point PERT: 'optimistic', 'most_likely', 'pessimistic'
+            - Two-point PERT: 'optimistic', 'pessimistic'
             - 'letter': activity letter/code (required)
             - 'name': activity description (optional)
             - any other custom fields
@@ -260,6 +332,10 @@ class NetworkModel:
             - Format 1: two rows [[src1, src2, ...], [dst1, dst2, ...]]
             - Format 2: two columns [[src1, dst1], [src2, dst2], ...]
             - Format 3: dictionary {'src': [src1, src2, ...], 'dst': [dst1, dst2, ...]}
+        p : float, default=0.95
+            Probability quantile for PERT calculations
+        debug : bool, default=False
+            Enable debug mode for additional computation error information
         """
         assert isinstance(wbs_dict, dict)
 
@@ -350,16 +426,21 @@ class NetworkModel:
                 # Real activity - get data from WBS
                 act_id = act_ids[i]
                 wbs_data = wbs_dict[act_id]  # Get complete WBS data
-                duration = wbs_data.get('duration', 0.)
-                variance = wbs_data.get('variance', 0.)
+
+                # Calculate duration and variance using new unified function
+                try:
+                    duration, variance = _calculate_duration_params(wbs_data)
+                except ValueError as e:
+                    raise ValueError(f"Error processing activity {act_id} ({wbs_data.get('letter', 'unknown')}): {e}")
+
                 letter = wbs_data.get('letter', '')
 
-                # Even one wbs item with ninzero variance is enough to compute PERT`
+                # Even one wbs item with nonzero variance is enough to compute PERT
                 if variance > 0.0:
                     self.is_pert = True
 
                 # Create data dict without fields stored as separate attributes
-                data_without_duplicates = self._remove_duplicate_fields(wbs_data, duration, letter)
+                data_without_duplicates = self._remove_duplicate_fields(wbs_data, duration, variance, letter)
 
                 self._add_activity(int(act_id), int(net_src[i]), int(net_dst[i]),
                                   duration, variance, letter, data_without_duplicates)
@@ -371,7 +452,7 @@ class NetworkModel:
         #TODO: Высиавлять на длинную сторону треугольников работы с максимальной длительностью
 
     #--------------------------------------------------------------------------
-    def _remove_duplicate_fields(self, wbs_data, duration, letter):
+    def _remove_duplicate_fields(self, wbs_data, duration, variance, letter):
         """
         Remove fields from WBS data that are stored as separate activity attributes
 
@@ -381,6 +462,8 @@ class NetworkModel:
             Complete WBS data for an activity
         duration : float
             Activity duration (already extracted)
+        variance : float
+            Activity variance (already extracted)
         letter : str
             Activity letter (already extracted)
 
@@ -393,7 +476,8 @@ class NetworkModel:
         data_copy = wbs_data.copy()
 
         # Remove fields that are stored as separate attributes
-        fields_to_remove = ['duration', 'variance', 'letter']
+        fields_to_remove = ['duration', 'variance', 'letter',
+                           'optimistic', 'most_likely', 'pessimistic']
         for field in fields_to_remove:
             if field in data_copy:
                 del data_copy[field]
@@ -762,30 +846,72 @@ class NetworkModel:
 
 #==============================================================================
 if __name__ == '__main__':
-    # Example usage with all link formats
+    # Example usage with all link formats and new duration input methods
     wbs = {
-        1 :{'letter':'A', 'duration':3.84, 'variance':0.01, 'name':'Heating and frames study'                                },
-        2 :{'letter':'B', 'duration':2., 'variance':0.01, 'name':'Scouring and installation of building site establishment'},
-        3 :{'letter':'C', 'duration':3.8, 'variance':0.01, 'name':'Earthwork and concrete well'                             },
-        4 :{'letter':'D', 'duration':4., 'variance':0.01, 'name':'Earthwork and concrete longitudinal beams'               },
-        5 :{'letter':'E', 'duration':6., 'variance':0.01, 'name':'Frame construction'                                      },
-        6 :{'letter':'F', 'duration':6., 'variance':0.01, 'name':'Frame transport'                                         },
-        7 :{'letter':'G', 'duration':6., 'variance':0.01, 'name':'Assemblage'                                              },
-        8 :{'letter':'H', 'duration':2., 'variance':0.01, 'name':'Earthwork and pose drains'                               },
-        9 :{'letter':'I', 'duration':5., 'variance':0.01, 'name':'Heating provisioning and assembly'                       },
-        10:{'letter':'J', 'duration':5., 'variance':0.01, 'name':'Electric installation'                                   },
-        11:{'letter':'K', 'duration':2., 'variance':0.01, 'name':'Painting'                                                },
-        12:{'letter':'L', 'duration':1., 'variance':0.01, 'name':'Pavement'                                                }
+        # Standard format (backward compatibility)
+        1 :{'letter':'A', 'duration':3.84, 'variance':0.01, 'name':'Heating and frames study'},
+
+        # Three-point PERT format
+        2 :{'letter':'B', 'optimistic':1.5, 'most_likely':2.0, 'pessimistic':3.0, 'name':'Scouring and installation of building site establishment'},
+
+        # Two-point PERT format
+        3 :{'letter':'C', 'optimistic':3.0, 'pessimistic':5.0, 'name':'Earthwork and concrete well'},
+
+        # Standard format with zero variance
+        4 :{'letter':'D', 'duration':4., 'name':'Earthwork and concrete longitudinal beams'},
+
+        # Three-point PERT
+        5 :{'letter':'E', 'optimistic':5.0, 'most_likely':6.0, 'pessimistic':8.0, 'name':'Frame construction'},
+
+        # Standard format
+        6 :{'letter':'F', 'duration':6., 'variance':0.01, 'name':'Frame transport'},
+        7 :{'letter':'G', 'duration':6., 'variance':0.01, 'name':'Assemblage'},
+
+        # Two-point PERT
+        8 :{'letter':'H', 'optimistic':1.5, 'pessimistic':3.0, 'name':'Earthwork and pose drains'},
+
+        # Three-point PERT
+        9 :{'letter':'I', 'optimistic':4.0, 'most_likely':5.0, 'pessimistic':7.0, 'name':'Heating provisioning and assembly'},
+
+        # Standard format
+        10:{'letter':'J', 'duration':5., 'variance':0.01, 'name':'Electric installation'},
+        11:{'letter':'K', 'duration':2., 'variance':0.01, 'name':'Painting'},
+        12:{'letter':'L', 'duration':1., 'variance':0.01, 'name':'Pavement'}
         }
 
-    print("=== Demonstration of all link formats ===")
+    print("=== Demonstration of all link formats and new duration input methods ===")
 
     # Old format
-    print("\n1. Old format:")
+    print("\n1. Old format with new duration inputs:")
     src_old = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10])
     dst_old = np.array([5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
     n_old = NetworkModel(wbs, src_old, dst_old)
-    print("Successfully created model with old format")
+    print("Successfully created model with mixed duration input formats")
+
+    # Test the new duration calculation function
+    print("\n=== Testing duration calculation function ===")
+    test_cases = [
+        {'optimistic': 1, 'most_likely': 2, 'pessimistic': 3},
+        {'optimistic': 3, 'pessimistic': 5},
+        {'duration': 4.0, 'variance': 0.5},
+        {'duration': 2.0}  # variance defaults to 0
+    ]
+
+    for i, test_case in enumerate(test_cases):
+        try:
+            mean, var = _calculate_duration_params(test_case)
+            print(f"Test case {i+1}: {test_case} -> mean={mean:.3f}, variance={var:.3f}")
+        except ValueError as e:
+            print(f"Test case {i+1} error: {e}")
+
+    # Demonstration of the new data formats in activities
+    print("\n=== Demonstration of new duration formats in activities ===")
+    for i, activity in enumerate(n_old.activities[:8]):  # Show first 8 activities
+        if activity.wbs_id != 0:  # Skip dummy activities
+            print(f"Activity {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
+            print(f"  Duration: {activity.duration[RES]:.3f}, Variance: {activity.duration[VAR]:.3f}")
+            if activity.data:
+                print(f"  Data fields: {list(activity.data.keys())}")
 
     print("Full dependency map for old format:")
     act_id = np.array(list(wbs.keys()))
@@ -794,13 +920,12 @@ if __name__ == '__main__':
     print(act_id)
     print(full_dep_map)
 
-    # Demonstration of the new data attribute
-    print("\n=== Demonstration of the data attribute ===")
-    for i, activity in enumerate(n_old.activities[:5]):  # Show first 5 activities
-        if activity.wbs_id != 0:  # Skip dummy activities
-            print(f"Activity {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
-            print(f"  Data: {activity.data}")
-
+    src_old[0] = 12
+    act_id = np.array(list(wbs.keys()))
+    status, full_dep_map = _ccpm.make_full_map(act_id, src_old, dst_old)
+    print(status)
+    print(act_id)
+    print(full_dep_map)
 
     # New format 1 (two rows)
     print("\n2. New format 1 (two rows):")
@@ -837,12 +962,6 @@ if __name__ == '__main__':
     print(f"Old == New2: {len(n_old.activities) == len(n_new2.activities)}")
     print(f"Old == New3: {len(n_old.activities) == len(n_new3.activities)}")
 
-    # Demonstration of the letter attribute
-    print("\n=== Demonstration of the letter attribute ===")
-    for i, activity in enumerate(n_old.activities[:5]):  # Show first 5 activities
-        if activity.wbs_id != 0:  # Skip dummy activities
-            print(f"Activity {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}', duration={activity.duration}")
-
     print("\n=== Demonstration of dictionary export ===")
     model_dict = n_old.to_dict()
 
@@ -854,13 +973,11 @@ if __name__ == '__main__':
     if len(model_dict['activities']) > 0:
         first_activity = model_dict['activities'][0]
         print(f"Keys: {list(first_activity.keys())}")
-        print(f"Example activity: {first_activity}")
 
     print("\nEvent data structure:")
     if len(model_dict['events']) > 0:
         first_event = model_dict['events'][0]
         print(f"Keys: {list(first_event.keys())}")
-        print(f"Example event: {first_event}")
 
     # Demonstration of DataFrame export (if pandas is available)
     print("\n=== Demonstration of DataFrame export ===")
@@ -909,17 +1026,3 @@ if __name__ == '__main__':
     dot = n_old.viz(output_path=file_path)
     print(f"Visualization saved as '{file_path}.png'")
     print(f"Target directory: {target_dir}")
-
-    print("Full dependency map for old format:")
-    act_id = np.array(list(wbs.keys()))
-    status, full_dep_map = _ccpm.make_full_map(act_id, src_old, dst_old)
-    print(status)
-    print(act_id)
-    print(full_dep_map)
-
-    src_old[0] = 12
-    act_id = np.array(list(wbs.keys()))
-    status, full_dep_map = _ccpm.make_full_map(act_id, src_old, dst_old)
-    print(status)
-    print(act_id)
-    print(full_dep_map)
