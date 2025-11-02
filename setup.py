@@ -73,7 +73,7 @@ EXT_BASE  = "ccpm"
 EXT_NAME  = "_" + EXT_BASE
 SETUP_DIR = dirname(__file__)
 SRC_DIR   = join(SETUP_DIR, "src")
-EXT_DIR   = join(SRC_DIR, EXT_BASE)
+EXT_DIR   = join(SRC_DIR, "crazy_cpm")
 
 extensions = [
     Extension(EXT_NAME, [join(EXT_DIR, EXT_NAME + ".pyx")],
