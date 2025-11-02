@@ -524,7 +524,7 @@ class _Event:
 
         if self.model.is_pert:
             # PERT things
-            ret['early_var'  ] = self.early[VAR]
+            ret['early_var'] = self.early[VAR]
             ret['early_pqe'] = self.early_pqe
 
         if self.model.debug:
@@ -809,7 +809,7 @@ class NetworkModel:
             if e.early[RES] > late[RES]:
                 late = e.early.copy()
 
-        late[VAR] = 0.0 #Start back computation with zero variance
+        #late[VAR] = 0.0 #Start back computation with zero variance
 
         for e in self.events:
             e.late = late
