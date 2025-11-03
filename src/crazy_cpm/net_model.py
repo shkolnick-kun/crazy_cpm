@@ -77,18 +77,19 @@ def fit_mpert(M, D, a, b):
     if (b - M) < (2 *_tol * b):
         M *= 1 - 2 * _tol
 
-    g = (M - a) * (b - M) / D - 3
-
-    def _g(x):
-        return (a + b - 2 * M) / (M - x)
-
+    # compute g lower limit
     if M < (a + b) / 2:
-        gmin = _g(a * (1 + _tol))
+        ml = a * (1 + _tol)
     else:
-        gmin = _g(b * (1 - _tol))
+        ml = b * (1 - _tol)
 
+    gmin = (a + b - 2 * M) / (M - ml)
+
+    # compute g
+    g = (M - a) * (b - M) / D - 3
     g = g if g > gmin else gmin
 
+    # compute m
     m = ((2 + g) * M - a - b) / g
 
     return m, g
