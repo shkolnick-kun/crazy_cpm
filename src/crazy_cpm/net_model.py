@@ -1359,47 +1359,6 @@ class NetworkModel:
 
         return dot
 
-    def get_activity_by_wbs_id(self, wbs_id):
-        """
-        Get activity by WBS ID.
-
-        Parameters
-        ----------
-        wbs_id : int
-            WBS identifier
-
-        Returns
-        -------
-        _Activity or None
-            Activity with specified WBS ID or None if not found
-        """
-        for activity in self.activities:
-            if activity.wbs_id == wbs_id:
-                return activity
-        return None
-
-    def get_activities_by_data_field(self, field_name, field_value):
-        """
-        Get activities by custom data field value.
-
-        Parameters
-        ----------
-        field_name : str
-            Name of the field in activity.data
-        field_value : any
-            Value to match
-
-        Returns
-        -------
-        list
-            List of activities with matching field value
-        """
-        result = []
-        for activity in self.activities:
-            if activity.data.get(field_name) == field_value:
-                result.append(activity)
-        return result
-
 #==============================================================================
 if __name__ == '__main__':
     # Example usage with all link formats and new duration input methods
