@@ -838,7 +838,7 @@ class NetworkModel:
         Returns
         -------
         tuple
-            (lnk_src, lnk_dst) as numpy arrays
+            (lnk_src, lnk_dst) as lists
 
         Raises
         ------
@@ -847,7 +847,7 @@ class NetworkModel:
         """
         # Case 1: Old format (lnk_src and lnk_dst provided)
         if lnk_src is not None and lnk_dst is not None:
-            return np.asarray(lnk_src), np.asarray(lnk_dst)
+            return list(lnk_src), list(lnk_dst)
 
         # Case 2: New formats via links parameter
         if links is None:
@@ -857,7 +857,7 @@ class NetworkModel:
         if (isinstance(links, (list, tuple)) and len(links) == 2 and
                 isinstance(links[0], (list, tuple, np.ndarray)) and
                 isinstance(links[1], (list, tuple, np.ndarray))):
-            return np.asarray(links[0]), np.asarray(links[1])
+            return list(links[0]), list(links[1])
 
         # Format 2: Two columns [[src, dst], [src, dst], ...]
         elif (isinstance(links, (list, tuple, np.ndarray)) and
@@ -866,12 +866,12 @@ class NetworkModel:
               len(links[0]) == 2):
             src_list = [item[0] for item in links]
             dst_list = [item[1] for item in links]
-            return np.asarray(src_list), np.asarray(dst_list)
+            return src_list, dst_list
 
         # Format 3: Dictionary {'src': [...], 'dst': [...]}
         elif isinstance(links, dict):
             if 'src' in links and 'dst' in links:
-                return np.asarray(links['src']), np.asarray(links['dst'])
+                return list(links['src']), list(links['dst'])
             else:
                 raise ValueError("Dictionary links must contain 'src' and 'dst' keys")
 
@@ -904,10 +904,21 @@ class NetworkModel:
         """
         assert len(lnk_src) == len(lnk_dst)
 
-        act_ids = np.array(list(wbs_dict.keys()), dtype=int)
+        act_ids = list(wbs_dict.keys())
+
+        # Make sure that network graph has on final action
+        last_action = max(act_ids) + 1
+        last_evt = -1
+        lnk_src += act_ids
+        lnk_dst += [last_action] * len(act_ids)
+        act_ids.append(last_action)
+
+        act_ids = np.array(act_ids, dtype=np.uint16)
+        lnk_src = np.array(lnk_src, dtype=np.uint16)
+        lnk_dst = np.array(lnk_dst, dtype=np.uint16)
 
         # Generate network graph using C++ extension
-        status, net_src, net_dst, lnk_src, lnk_dst = _ccpm.compute_aoa(act_ids, lnk_src, lnk_dst)
+        status, net_src, net_dst, _, _ = _ccpm.compute_aoa(act_ids, lnk_src, lnk_dst)
         assert 0 == status
 
         self.events = []
@@ -921,10 +932,14 @@ class NetworkModel:
         # Create activities (real and dummy)
         na = len(act_ids)  # Number of actions
         nd = 0  # Number of dummy actions
+        dsrc = [] #Dumy event srcs
         for i in range(len(net_src)):
             if i < na:
                 # Real activity - get data from WBS
                 act_id = act_ids[i]
+                if act_id == last_action:
+                    last_evt = int(net_dst[i])
+                    continue
                 wbs_data = wbs_dict[act_id]  # Get complete WBS data
 
                 # Calculate duration and variance using new unified function
@@ -951,8 +966,48 @@ class NetworkModel:
                 nd += 1  # One more dummy work
                 self._add_activity(0, int(net_src[i]), int(net_dst[i]),
                                    0., 0., 0., 0., '#' + str(nd), {})
+                dsrc.append(int(net_src[i]))
 
-        # TODO: Make sure that longest action between two events gets scheduled without a dummy
+        # Network postprocessing
+        # Delete last event
+        if len(self.events[last_evt - 1].in_activities) > 0:
+            raise RuntimeError("Last event must have no incomoong actions!")
+        self.events.remove(self.events[last_evt - 1])
+
+        # Make sure that actions with longest durations are on straigth paths between events
+        grpoi = {}
+        # Find groups of triangles on dummies
+        for e in self.events:
+            # Watch only dummy src
+            if e.id not in dsrc:
+                continue
+
+            bck = e.in_activities
+            fwd = e.out_activities
+            # Watch only events with one incomming and one outgoing action
+            if 1 < len(bck) or 1 < len(fwd):
+                continue
+
+            key = (bck[0].src.id, fwd[0].dst.id)
+            if key not in grpoi.keys():
+                for a in bck[0].src.out_activities:
+                    if a.dst.id == fwd[0].dst.id:
+                        grpoi[key] = (a, [bck[0]])
+                        break
+            else:
+                grpoi[key][1].append(bck[0])
+
+        # Place maximum duration actions on long side of trianle groups
+        for k in grpoi.keys():
+            aoi = grpoi[k][1]
+            if len(aoi) < 1:
+                raise RuntimeError("Action of interest group must contain at lrast one action!")
+            #Maximum duration candidate
+            maxa = grpoi[k][0]
+            for a in aoi:
+                if a.duration[RES] > maxa.duration[RES]:
+                    a.dst, maxa.dst = maxa.dst, a.dst
+                    maxa = a
 
     def _remove_duplicate_fields(self, wbs_data, duration, variance, letter):
         """
@@ -1318,7 +1373,7 @@ class NetworkModel:
         """
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style': 'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
-        dot.graph_attr['dpi'] = '300'
+        #dot.graph_attr['dpi'] = '300'
 
         def _cl(res, p):
             """Choose color based on reserve (red for critical path)"""
