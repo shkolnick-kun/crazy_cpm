@@ -214,6 +214,8 @@ model = NetworkModel(
 
 ### Visualization
 
+![](doc/cpm_network.png)
+
 The library generates professional network diagrams using Graphviz:
 ```python
 
