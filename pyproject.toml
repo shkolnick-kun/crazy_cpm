@@ -1,3 +1,12 @@
 [build-system]
-requires = ["setuptools", "wheel", "Cython", "numpy", "betapert", "pandas", "graphviz"]
+requires = [
+            "betapert >= 0.1.5",
+            "Cython >= 0.29.21",
+            "graphviz >= 0.14.2",
+            "numpy >= 1.17, < 2.0",
+            "pandas >= 1.0",
+            "setuptools >= 51.0.0",
+            "wheel >= 0.36.2"
+            ]
+
 build-backend = "setuptools.build_meta"
