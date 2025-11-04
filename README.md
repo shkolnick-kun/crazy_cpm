@@ -227,7 +227,9 @@ model.viz(output_path='/path/to/project_network')
 ![](doc/cpm_network.png)
 
 The visualization includes:
- * Red nodes/edges: Critical path (zero time reserve)
+ * Nodes: events
+ * Edges: activities
+ * Red elements: Critical path (zero time reserve)
  * Orange elements: Near-critical activities and events
  * Black elements: Non-critical activities and events
  * Dashed lines: Dummy activities
