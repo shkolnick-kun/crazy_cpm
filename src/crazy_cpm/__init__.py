@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+CrazyCPM - Critical Path Method and PERT analysis library
+=========================================================
+
+This module provides comprehensive CPM (Critical Path Method) and PERT
+(Program Evaluation and Review Technique) analysis capabilities for project
+management.
+"""
+#==============================================================================
+"""
     CrazyCPM
     Copyright (C) 2025 anonimous
 
@@ -19,5 +28,7 @@
 
     Please contact with me by E-mail: shkolnick.kun@gmail.com
 """
+#==============================================================================
+
 from _ccpm import compute_aoa, make_full_map, EINVAL, ELOOP, ENOMEM, OK
 from .net_model import NetworkModel

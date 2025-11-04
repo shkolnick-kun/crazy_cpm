@@ -1,26 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-    CrazyCPM
-    Copyright (C) 2025 anonimous
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-    Please contact with me by E-mail: shkolnick.kun@gmail.com
-"""
-#==============================================================================
-"""
 CrazyCPM - Critical Path Method and PERT analysis library
 =========================================================
 
@@ -50,12 +30,34 @@ Usage Example:
     >>> activities_df, events_df = model.to_dataframe()
 
 .. note::
-    This module uses a C++ extension (_ccpm) for performance-critical computations.
+    This module uses a C extension (_ccpm) for performance-critical computations.
 """
+#==============================================================================
+"""
+    CrazyCPM
+    Copyright (C) 2025 anonimous
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    Please contact with me by E-mail: shkolnick.kun@gmail.com
+"""
+
+#==============================================================================
+from betapert import mpert
 import graphviz
 import numpy as np
 import pandas as pd
-from betapert import mpert
 import os
 import _ccpm
 
@@ -1364,7 +1366,7 @@ if __name__ == '__main__':
     # Example usage with all link formats and new duration input methods
     wbs = {
         # Standard format (backward compatibility)
-        1: {'letter': 'A', 'duration': 3.84, 'variance': 0.01, 'name': 'Heating and frames study'},
+        1: {'letter': 'A', 'duration': 3.84, 'variance': 0.00, 'name': 'Heating and frames study'},
 
         # Three-point PERT format
         2: {'letter': 'B', 'optimistic': 1.5, 'most_likely': 2.0, 'pessimistic': 3.0,

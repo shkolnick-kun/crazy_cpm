@@ -1,5 +1,29 @@
 # -*- coding: utf-8 -*-
 """
+Cython module for high-performance CPM/PERT computations.
+
+This module provides C-accelerated functions for network analysis,
+including Activity-on-Arrow (AoA) network generation and dependency
+mapping for Critical Path Method calculations.
+
+.. note::
+    This module requires Cython and a C compiler for building.
+    The C backend provides significant performance improvements
+    for large network models.
+
+Functions:
+    compute_aoa: Generate Activity-on-Arrow network from activity dependencies
+    make_full_map: Create complete dependency matrix for network analysis
+
+Constants:
+    OK: Operation completed successfully
+    EINVAL: Invalid input parameters
+    ENOMEM: Memory allocation failure
+    ELOOP: Circular dependency detected in network
+
+"""
+###############################################################################
+"""
     CrazyCPM
     Copyright (C) 2025 anonimous
 
@@ -19,30 +43,7 @@
     Please contact with me by E-mail: shkolnick.kun@gmail.com
 """
 ###############################################################################
-"""
-Cython module for high-performance CPM/PERT computations.
 
-This module provides C++-accelerated functions for network analysis,
-including Activity-on-Arrow (AoA) network generation and dependency
-mapping for Critical Path Method calculations.
-
-.. note::
-    This module requires Cython and a C++ compiler for building.
-    The C++ backend provides significant performance improvements
-    for large network models.
-
-Functions:
-    compute_aoa: Generate Activity-on-Arrow network from activity dependencies
-    make_full_map: Create complete dependency matrix for network analysis
-
-Constants:
-    OK: Operation completed successfully
-    EINVAL: Invalid input parameters
-    ENOMEM: Memory allocation failure
-    ELOOP: Circular dependency detected in network
-
-"""
-###############################################################################
 #cython: language_level=3
 #distutils: language=c
 

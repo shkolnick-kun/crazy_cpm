@@ -1,3 +1,3 @@
 [build-system]
-requires = ["setuptools", "wheel", "Cython", "numpy", "scipy", "pandas", "graphviz"]
+requires = ["setuptools", "wheel", "Cython", "numpy", "betapert", "pandas", "graphviz"]
 build-backend = "setuptools.build_meta"
