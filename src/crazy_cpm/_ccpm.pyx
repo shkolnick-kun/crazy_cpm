@@ -18,6 +18,31 @@
 
     Please contact with me by E-mail: shkolnick.kun@gmail.com
 """
+###############################################################################
+"""
+Cython module for high-performance CPM/PERT computations.
+
+This module provides C++-accelerated functions for network analysis,
+including Activity-on-Arrow (AoA) network generation and dependency
+mapping for Critical Path Method calculations.
+
+.. note::
+    This module requires Cython and a C++ compiler for building.
+    The C++ backend provides significant performance improvements
+    for large network models.
+
+Functions:
+    compute_aoa: Generate Activity-on-Arrow network from activity dependencies
+    make_full_map: Create complete dependency matrix for network analysis
+
+Constants:
+    OK: Operation completed successfully
+    EINVAL: Invalid input parameters
+    ENOMEM: Memory allocation failure
+    ELOOP: Circular dependency detected in network
+
+"""
+###############################################################################
 #cython: language_level=3
 #distutils: language=c
 
@@ -71,10 +96,10 @@ cdef extern from "ccpm.c":
                                          _uint16_t * lnk_src, _uint16_t * lnk_dst, _uint16_t n_lnk,
                         _bool * full_dep_map)
 
-import  numpy as np#WTF??
+import  numpy as np
 cimport numpy as np
 
-#Define constants
+# Define constants
 OK     = CCPM_OK
 EINVAL = CCPM_EINVAL
 ENOMEM = CCPM_ENOMEM
@@ -82,6 +107,55 @@ ELOOP  = CCPM_ELOOP
 
 ###############################################################################
 def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
+    """
+    Generate Activity-on-Arrow (AoA) network from activity dependencies.
+
+    This function converts activity dependencies into an Activity-on-Arrow
+    network representation, automatically creating dummy activities where
+    necessary to maintain proper network topology.
+
+    Parameters
+    ----------
+    act_id : numpy.ndarray
+        Array of activity IDs (dtype: uint16)
+    lnk_src : numpy.ndarray
+        Array of source activity IDs for dependencies (dtype: uint16)
+    lnk_dst : numpy.ndarray
+        Array of destination activity IDs for dependencies (dtype: uint16)
+
+    Returns
+    -------
+    tuple
+        (status, act_src, act_dst, lnk_src_clean, lnk_dst_clean) where:
+
+        - status: Operation result code (OK, EINVAL, ENOMEM, ELOOP)
+        - act_src: Array of source event IDs for all activities (real + dummy)
+        - act_dst: Array of destination event IDs for all activities (real + dummy)
+        - lnk_src_clean: Cleaned source activity IDs for dependencies
+        - lnk_dst_clean: Cleaned destination activity IDs for dependencies
+
+    Raises
+    ------
+    AssertionError
+        If lnk_src and lnk_dst arrays have different lengths
+
+    Notes
+    -----
+    The AoA network representation uses events (nodes) and activities (edges).
+    Dummy activities (zero duration) are automatically inserted to handle
+    complex dependency patterns and ensure proper network structure.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from _ccpm import compute_aoa
+    >>> act_id = np.array([1, 2, 3], dtype=np.uint16)
+    >>> lnk_src = np.array([1, 2], dtype=np.uint16)
+    >>> lnk_dst = np.array([2, 3], dtype=np.uint16)
+    >>> status, act_src, act_dst, lnk_src_clean, lnk_dst_clean = compute_aoa(act_id, lnk_src, lnk_dst)
+    >>> print(f"Status: {status}, Activities: {len(act_src)}")
+    Status: 0, Activities: 3
+    """
     #assert act_id.dtype  == np.uint16
     #assert lnk_src.dtype == np.uint16
     #assert lnk_dst.dtype == np.uint16
@@ -114,6 +188,56 @@ def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
 
 ###############################################################################
 def make_full_map(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
+    """
+    Create complete dependency matrix for network analysis.
+
+    Generates a boolean matrix representing all direct and transitive
+    dependencies between activities in the network.
+
+    Parameters
+    ----------
+    act_id : numpy.ndarray
+        Array of activity IDs (dtype: uint16)
+    lnk_src : numpy.ndarray
+        Array of source activity IDs for dependencies (dtype: uint16)
+    lnk_dst : numpy.ndarray
+        Array of destination activity IDs for dependencies (dtype: uint16)
+
+    Returns
+    -------
+    tuple
+        (status, full_dep_map) where:
+
+        - status: Operation result code (OK, EINVAL, ENOMEM, ELOOP)
+        - full_dep_map: 2D boolean array where full_dep_map[i, j] = True
+          indicates activity i depends on activity j (directly or transitively)
+
+    Raises
+    ------
+    AssertionError
+        If lnk_src and lnk_dst arrays have different lengths
+
+    Notes
+    -----
+    The dependency matrix includes both direct dependencies (specified in links)
+    and transitive dependencies (dependencies of dependencies). This is useful
+    for identifying all prerequisites for each activity and detecting circular
+    dependencies.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from _ccpm import make_full_map
+    >>> act_id = np.array([1, 2, 3], dtype=np.uint16)
+    >>> lnk_src = np.array([1, 2], dtype=np.uint16)
+    >>> lnk_dst = np.array([2, 3], dtype=np.uint16)
+    >>> status, dep_map = make_full_map(act_id, lnk_src, lnk_dst)
+    >>> print(f"Status: {status}, Dependency matrix shape: {dep_map.shape}")
+    Status: 0, Dependency matrix shape: (3, 3)
+    >>> # Activity 3 depends on both 2 and 1 (transitively)
+    >>> print(f"Dependencies for activity 3: {dep_map[2]}")
+    Dependencies for activity 3: [False  True  True]
+    """
     assert len(lnk_src) == len(lnk_dst)
 
     cdef _uint16_t n_act = len(act_id)
