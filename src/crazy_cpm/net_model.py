@@ -878,7 +878,7 @@ class NetworkModel:
                 self._add_activity(0, int(net_src[i]), int(net_dst[i]),
                                    0., 0., 0., 0., '#' + str(nd), {})
 
-        #TODO: Высиавлять на длинную сторону треугольников работы с максимальной длительностью
+        #TODO: Make shure that longest action between two events gets scheduled without a dummy
 
     #--------------------------------------------------------------------------
     def _remove_duplicate_fields(self, wbs_data, duration, variance, letter):
@@ -978,7 +978,7 @@ class NetworkModel:
         ValueError
             If target parameter is invalid
         """
-        def _choise(old, new, delta):
+        def _choice(old, new, delta):
             e = new[ERR] + old[ERR]
             if delta >= e:
                 return new #Certain result
@@ -992,11 +992,11 @@ class NetworkModel:
             else:
                 return old #Certain result
 
-        def _choise_early(old, new):
-            return _choise(old, new, new[RES] - old[RES])
+        def _choice_early(old, new):
+            return _choice(old, new, new[RES] - old[RES])
 
-        def _choise_late(old, new):
-            return _choise(old, new, old[RES] - new[RES])
+        def _choice_late(old, new):
+            return _choice(old, new, old[RES] - new[RES])
 
         def _delta_late(a):
             ret = a.duration.copy()
@@ -1018,7 +1018,7 @@ class NetworkModel:
             act_next     = 'dst'
             fwd          = 'out_activities'
             rev          = 'in_activities'
-            choise       = _choise_early
+            choise       = _choice_early
             delta        = lambda a : a.duration
 
         elif 'late' == target:
@@ -1027,7 +1027,7 @@ class NetworkModel:
             act_next     = 'src'
             fwd          = 'in_activities'
             rev          = 'out_activities'
-            choise       = _choise_late
+            choise       = _choice_late
             delta        = _delta_late
 
         elif 'optimistic' == target:
@@ -1254,9 +1254,9 @@ class NetworkModel:
         def _cl(res, p):
             """Choose color based on reserve (red for critical path)"""
             if abs(res[RES]) < res[ERR]:  # Absolute precision is nonsense
-                return '#ff0000'
+                return '#ff0000' # Critical path
             elif p < self.p:
-                return '#ffa000'
+                return '#ffa000' # May consume the time reserve before completion
             else:
                 return '#000000'
 
@@ -1264,7 +1264,7 @@ class NetworkModel:
         for e in self.events:
             # Format time values to 1 decimal place
             dot.node(str(e.id),
-                     '{{%d |{%.1f|%.1f}| %.3f}}' % (e.id,
+                     '{{%d |{%.1f|%.1f}| %.2f}}' % (e.id,
                                                     e.early[RES],
                                                     e.late[RES],
                                                     e.reserve[RES]),
@@ -1277,9 +1277,9 @@ class NetworkModel:
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
                 # Format duration and reserve to 1 decimal place
-                lbl += '\n t=' + format(a.duration[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.3f')
+                lbl += '\n t=' + format(a.duration[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
             else:  # Dummy activity
-                lbl += '\n r=' + format(a.reserve[RES], '.3f')
+                lbl += '\n r=' + format(a.reserve[RES], '.2f')
 
             dot.edge(str(a.src.id), str(a.dst.id),
                      label=lbl,
