@@ -167,15 +167,20 @@ def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
     cdef _uint16_t n_dum = 0
 
     _act_id  = act_id.astype(np.uint16)
-    _lnk_src = lnk_src.astype(np.uint16)
-    _lnk_dst = lnk_dst.astype(np.uint16)
+    #We may need som extra memory for dummies for unfinished works
+    _lnk_src = np.zeros((n_act + n_lnk,), dtype=np.uint16)
+    _lnk_dst = np.zeros((n_act + n_lnk,), dtype=np.uint16)
+
+    _lnk_src[:n_lnk] = lnk_src.astype(np.uint16)
+    _lnk_dst[:n_lnk] = lnk_dst.astype(np.uint16)
 
     cdef _uint16_t [::1] v_act_id  = _act_id
     cdef _uint16_t [::1] v_lnk_src = _lnk_src
     cdef _uint16_t [::1] v_lnk_dst = _lnk_dst
 
-    act_src = np.zeros((n_act + n_lnk,), dtype=np.uint16)
-    act_dst = np.zeros((n_act + n_lnk,), dtype=np.uint16)
+    #We may need som extra memory for dummies for unfinished works
+    act_src = np.zeros((2 * n_act + n_lnk,), dtype=np.uint16)
+    act_dst = np.zeros((2 * n_act + n_lnk,), dtype=np.uint16)
 
     cdef _uint16_t [::1] v_act_src = act_src
     cdef _uint16_t [::1] v_act_dst = act_dst

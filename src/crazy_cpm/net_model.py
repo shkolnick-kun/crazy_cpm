@@ -905,19 +905,11 @@ class NetworkModel:
         assert len(lnk_src) == len(lnk_dst)
 
         act_ids = list(wbs_dict.keys())
-
-        # Make sure that network graph has on final action
-        last_action = max(act_ids) + 1
-        last_evt = -1
-        lnk_src += act_ids
-        lnk_dst += [last_action] * len(act_ids)
-        act_ids.append(last_action)
-
         act_ids = np.array(act_ids, dtype=np.uint16)
         lnk_src = np.array(lnk_src, dtype=np.uint16)
         lnk_dst = np.array(lnk_dst, dtype=np.uint16)
 
-        # Generate network graph using C++ extension
+        # Generate network graph using C extension
         status, net_src, net_dst, _, _ = _ccpm.compute_aoa(act_ids, lnk_src, lnk_dst)
         assert 0 == status
 
@@ -937,9 +929,9 @@ class NetworkModel:
             if i < na:
                 # Real activity - get data from WBS
                 act_id = act_ids[i]
-                if act_id == last_action:
-                    last_evt = int(net_dst[i])
-                    continue
+                # if act_id == last_action:
+                #     last_evt = int(net_dst[i])
+                #     continue
                 wbs_data = wbs_dict[act_id]  # Get complete WBS data
 
                 # Calculate duration and variance using new unified function
@@ -969,11 +961,6 @@ class NetworkModel:
                 dsrc.append(int(net_src[i]))
 
         # Network postprocessing
-        # Delete last event
-        if len(self.events[last_evt - 1].in_activities) > 0:
-            raise RuntimeError("Last event must have no incomoong actions!")
-        self.events.remove(self.events[last_evt - 1])
-
         # Make sure that actions with longest durations are on straigth paths between events
         grpoi = {}
         # Find groups of triangles on dummies

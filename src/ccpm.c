@@ -821,9 +821,38 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
         }
     }
 
+    /*Wee need to add last dummies to unfinished works now if necessary*/
+    l = 0;
     for (i = 0; i < n_act; i++)
     {
-        /*Finish last works*/
+        if (act_dst[i])
+        {
+            continue;
+        }
+        for (j = i + 1; j < n_act; j++)
+        {
+            if (act_src[i] != act_src[j])
+            {
+                continue;
+            }
+            /*Found one more unfinished work with the current source, must add a dummy*/
+            /*Finish the work*/
+            act_dst[j] = evt_id;
+            /*Add a dummy*/
+            lnk_src[_n_dum + l++] = evt_id;
+            /*Next event id*/
+            evt_id++;
+        }
+    }
+    /*Finish last dummies*/
+    for (i = 0; i < l; i++)
+    {
+        lnk_dst[_n_dum + i] = evt_id;
+    }
+    _n_dum += l;
+    /*Finish last works*/
+    for (i = 0; i < n_act; i++)
+    {
         if (!act_dst[i])
         {
             act_dst[i] = evt_id;

@@ -80,6 +80,8 @@ if __name__ == '__main__':
         10: {'letter': 'K', 'duration': 4., 'name': 'A10'},
         11: {'letter': 'L', 'duration': 5., 'name': 'A11'},
         12: {'letter': 'M', 'duration': 5., 'name': 'A12'},
+        13: {'letter': 'O', 'duration': 5., 'name': 'A13'},
+        14: {'letter': 'P', 'duration': 5., 'name': 'A14'},
     }
 
     src_old = np.array([1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ])
