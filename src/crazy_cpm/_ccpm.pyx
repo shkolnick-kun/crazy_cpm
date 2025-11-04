@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
     CrazyCPM
-    Copyright (C) 2021 anonimous
+    Copyright (C) 2025 anonimous
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -35,19 +35,19 @@ cdef extern from "ccpm.c":
         CCPM_ELOOP
 
     cdef ccpmResultEn ccpm_check_act_ids(_uint16_t * act_id, _uint16_t n_act)
-    
+
     cdef ccpmResultEn ccpm_check_links(_uint16_t * lnk_src, _uint16_t * lnk_dst, \
                                        _uint16_t   n_lnk)
-    
+
     cdef ccpmResultEn ccpm_links_prepare(_uint16_t *  act_id, _uint16_t     n_act, \
                                          _uint16_t * lnk_src, _uint16_t * lnk_dst, \
                                          _uint16_t     n_lnk)
-    
+
     cdef ccpmResultEn ccpm_populate_dep_info(_uint16_t *  act_id, _uint16_t *     dep, \
                                              _uint16_t *   n_dep, _bool     * dep_map, \
                                              _uint16_t * lnk_src, _uint16_t * lnk_dst, \
                                              _uint16_t     n_lnk)
-        
+
     cdef ccpmResultEn ccpm_sort(_uint16_t * tmp, _uint16_t * key, \
                                 _uint16_t * val, _uint16_t     n)
 
@@ -120,13 +120,13 @@ def make_full_map(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
     cdef _uint16_t n_lnk = len(lnk_src)
 
     _act_id  = act_id.astype(np.uint16)
-    _lnk_src = lnk_src.astype(np.uint16) 
+    _lnk_src = lnk_src.astype(np.uint16)
     _lnk_dst = lnk_dst.astype(np.uint16)
 
     cdef _uint16_t [::1] v_act_id  = _act_id
     cdef _uint16_t [::1] v_lnk_src = _lnk_src
     cdef _uint16_t [::1] v_lnk_dst = _lnk_dst
-    
+
     full_dep_map = np.zeros((n_act, n_act), dtype=np.bool_)
     cdef _bool [:, ::1] full_dep_map_view = full_dep_map
 

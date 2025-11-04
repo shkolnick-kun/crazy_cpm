@@ -1,6 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+    CrazyCPM
+    Copyright (C) 2025 anonimous
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    Please contact with me by E-mail: shkolnick.kun@gmail.com
+"""
+#==============================================================================
+"""
 CrazyCPM - Critical Path Method and PERT analysis library
 =========================================================
 
@@ -31,9 +51,6 @@ Usage Example:
 
 .. note::
     This module uses a C++ extension (_ccpm) for performance-critical computations.
-
-Copyright (C) 2025 anonimous
-License: GNU GPL v3 or later
 """
 import graphviz
 import numpy as np
@@ -42,19 +59,48 @@ from betapert import mpert
 import os
 import _ccpm
 
+# Constants for array indexing in time computations
 EPS = np.finfo(float).eps
-
-RES = 0 # Result of time computation
-VAR = 1 # Result variance estimation (used for PERT)
-ERR = 2 # Computation error upper limit
+RES = 0  # Result of time computation
+VAR = 1  # Result variance estimation (used for PERT)
+ERR = 2  # Computation error upper limit
 
 #==============================================================================
 def fit_mpert(M, D, a, b):
     """
+    Fit modified PERT distribution parameters to match mean and variance.
+
+    This function calculates the most likely value and shape parameter
+    for a modified PERT distribution given target mean and variance.
+
+    Parameters
+    ----------
+    M : float
+        Target mean value
+    D : float
+        Target variance
+    a : float
+        Optimistic (minimum) value
+    b : float
+        Pessimistic (maximum) value
+
+    Returns
+    -------
+    tuple
+        (m, g) where:
+        - m: most likely value
+        - g: shape parameter (None for deterministic case)
+
+    Raises
+    ------
+    ValueError
+        If invalid bounds are provided or mean is outside [a,b] range
+
+    Notes
+    -----
+    The modified PERT distribution uses the formula:
     M = (a + g * m + b) / (2 + g)
     D = (M - a) * (b - M) / (3 + g)
-
-    return m, g
     """
     if a > b:
         raise ValueError(f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})")
@@ -74,29 +120,29 @@ def fit_mpert(M, D, a, b):
         # This is the chain of deterministic processes and D is computation error
         return M, None
 
-    # Make shure that M is in range of (a + _the, b - _thr)
+    # Make sure that M is in range of (a + _thr, b - _thr)
     if (M - a) < _thr:
         M = a + _thr
 
     if (b - M) < _thr:
         M = b - _thr
 
-    # Compute g lower limit, make shure that ml is far from M enough
+    # Compute g lower limit, make sure that ml is far from M enough
     if M < (a + b) / 2:
         ml = a + _thr / 2
     else:
         ml = b - _thr / 2
-    # Mow compute min safe g value
+    # Now compute min safe g value
     gmin = (a + b - 2 * M) / (M - ml)
 
-    # Compute g, make shure that computed m will be in range of (a,b)
+    # Compute g, make sure that computed m will be in range of (a,b)
     g = (M - a) * (b - M) / D - 3
     g = g if g > gmin else gmin
 
     # Compute m
     m = ((2 + g) * M - a - b) / g
 
-    # Make shure that m is in range of (a,b) even in case of dramatic roundoff errors
+    # Make sure that m is in range of (a,b) even in case of dramatic roundoff errors
     m = m if m >= a else (a + _thr / 2)
     m = m if m <= b else (b - _thr / 2)
 
@@ -109,10 +155,14 @@ def _p_quantile_estimate(p, tm, optimistic, pessimistic):
 
     Parameters
     ----------
-    tm : numpy.ndarray
-        Time array with [RES, VAR, ERR] components
     p : float
         Probability value (0 < p < 1)
+    tm : numpy.ndarray
+        Time array with [RES, VAR, ERR] components
+    optimistic : float
+        Optimistic time estimate
+    pessimistic : float
+        Pessimistic time estimate
 
     Returns
     -------
@@ -140,10 +190,14 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
 
     Parameters
     ----------
-    tm : numpy.ndarray
-        Time array with [RES, VAR, ERR] components
     val : float
         Value to compare against
+    tm : numpy.ndarray
+        Time array with [RES, VAR, ERR] components
+    optimistic : float
+        Optimistic time estimate
+    pessimistic : float
+        Pessimistic time estimate
 
     Returns
     -------
@@ -188,11 +242,13 @@ def _calculate_duration_params(work_data, default_risk=0.3):
         - For three-point PERT: ``optimistic``, ``most_likely``, ``pessimistic``
         - For two-point PERT: ``optimistic``, ``pessimistic``
         - For direct parameters: ``duration``, ``variance`` (optional)
+    default_risk : float, default=0.3
+        Default risk factor for duration estimation when variance is provided
 
     Returns
     -------
     tuple
-        (mean_duration, variance)
+        (mean_duration, variance, optimistic, most_likely, pessimistic)
 
     Raises
     ------
@@ -203,19 +259,19 @@ def _calculate_duration_params(work_data, default_risk=0.3):
     --------
     >>> # Three-point PERT
     >>> data = {'optimistic': 5, 'most_likely': 7, 'pessimistic': 12}
-    >>> mean, var = _calculate_duration_params(data)
+    >>> mean, var, a, m, b = _calculate_duration_params(data)
     >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
     Mean: 7.50, Variance: 1.36
 
     >>> # Two-point PERT
     >>> data = {'optimistic': 3, 'pessimistic': 8}
-    >>> mean, var = _calculate_duration_params(data)
+    >>> mean, var, a, m, b = _calculate_duration_params(data)
     >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
     Mean: 7.00, Variance: 1.00
 
     >>> # Direct parameters
     >>> data = {'duration': 6.5, 'variance': 0.5}
-    >>> mean, var = _calculate_duration_params(data)
+    >>> mean, var, a, m, b = _calculate_duration_params(data)
     >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
     Mean: 6.50, Variance: 0.50
     """
@@ -305,6 +361,10 @@ class _Activity:
         Activity duration (mathematical expectation)
     variance : float
         Activity duration variance
+    optimistic : float
+        Optimistic duration estimate
+    pessimistic : float
+        Pessimistic duration estimate
     data : dict, optional
         Additional activity data from WBS
 
@@ -336,6 +396,18 @@ class _Activity:
         Late end time [value, variance, error_bound]
     reserve : numpy.ndarray
         Time reserve [value, variance, error_bound]
+    optimistic : float
+        Optimistic duration estimate
+    pessimistic : float
+        Pessimistic duration estimate
+    opt_start : float
+        Optimistic start time
+    opt_end : float
+        Optimistic end time
+    pes_start : float
+        Pessimistic start time
+    pes_end : float
+        Pessimistic end time
 
     Notes
     -----
@@ -344,43 +416,41 @@ class _Activity:
 
     def __init__(self, id, wbs_id, letter, model, src, dst, duration=0.0,
                  variance=0.0, optimistic=0.0, pessimistic=0.0, data=None):
-        assert isinstance(id,       int)
-        assert isinstance(wbs_id,   int)
-        assert isinstance(letter,    str)
-        assert isinstance(model,    NetworkModel)
-        assert isinstance(src,      _Event)
-        assert isinstance(dst,      _Event)
+        assert isinstance(id, int)
+        assert isinstance(wbs_id, int)
+        assert isinstance(letter, str)
+        assert isinstance(model, NetworkModel)
+        assert isinstance(src, _Event)
+        assert isinstance(dst, _Event)
         assert isinstance(duration, float)
         assert duration >= 0.0
         assert variance >= 0.0
         assert data is None or isinstance(data, dict)
 
-        self.id       = id
-        self.wbs_id   = wbs_id
-        self.letter   = letter
-        self.model    = model
-        self.src      = src
-        self.dst      = dst
+        self.id = id
+        self.wbs_id = wbs_id
+        self.letter = letter
+        self.model = model
+        self.src = src
+        self.dst = dst
         #                            RES      VAR           ERR
         self.duration = np.array([duration, variance, EPS * duration], dtype=float)
-        self.data     = data if data is not None else {}
+        self.data = data if data is not None else {}
 
         # CPM/PERT parameters
         self.early_start = np.zeros_like(self.duration)
-        self.late_start  = np.zeros_like(self.duration)
-        self.early_end   = np.zeros_like(self.duration)
-        self.late_end    = np.zeros_like(self.duration)
-        self.reserve     = np.zeros_like(self.duration)
+        self.late_start = np.zeros_like(self.duration)
+        self.early_end = np.zeros_like(self.duration)
+        self.late_end = np.zeros_like(self.duration)
+        self.reserve = np.zeros_like(self.duration)
 
         self.optimistic = optimistic
-        self.opt_start  = 0
-        self.opt_end    = 0
+        self.opt_start = 0
+        self.opt_end = 0
 
         self.pessimistic = pessimistic
-        self.pes_start  = 0
-        self.pes_end    = 0
-
-
+        self.pes_start = 0
+        self.pes_end = 0
 
     @property
     def early_start_pqe(self):
@@ -438,12 +508,10 @@ class _Activity:
         """
         return _prob_estimate(val, self.early_end, self.opt_end, self.pes_end)
 
-    #----------------------------------------------------------------------------------------------
     def __repr__(self):
         """String representation of the activity."""
         return str(self.to_dict())
 
-    #----------------------------------------------------------------------------------------------
     def to_dict(self):
         """
         Convert activity to dictionary representation.
@@ -471,46 +539,46 @@ class _Activity:
         are only included when PERT analysis is enabled.
         """
         ret = {
-            'id'         : self.id,
-            'wbs_id'     : self.wbs_id,
-            'letter'     : self.letter,
-            'src_id'     : self.src.id,
-            'dst_id'     : self.dst.id,
-            'duration'   : self.duration[RES],
-            'variance'   : self.duration[VAR],
+            'id': self.id,
+            'wbs_id': self.wbs_id,
+            'letter': self.letter,
+            'src_id': self.src.id,
+            'dst_id': self.dst.id,
+            'duration': self.duration[RES],
+            'variance': self.duration[VAR],
             # CPM things
             'early_start': self.early_start[RES],
-            'late_start' : self.late_start[RES],
-            'early_end'  : self.early_end[RES],
-            'late_end'   : self.late_end[RES],
-            'reserve'    : self.reserve[RES],
-            #Additional data copy
-            'data'       : self.data.copy() # Return a copy to avoid modifying original
+            'late_start': self.late_start[RES],
+            'early_end': self.early_end[RES],
+            'late_end': self.late_end[RES],
+            'reserve': self.reserve[RES],
+            # Additional data copy
+            'data': self.data.copy()  # Return a copy to avoid modifying original
         }
 
         if self.model.is_pert:
             # PERT things
-            ret['optimistic'     ] = self.optimistic
-            ret['opt_start'      ] = self.opt_start
-            ret['opt_end'        ] = self.opt_end
+            ret['optimistic'] = self.optimistic
+            ret['opt_start'] = self.opt_start
+            ret['opt_end'] = self.opt_end
 
-            ret['pessimistic'    ] = self.pessimistic
-            ret['pes_start'      ] = self.pes_start
-            ret['pes_end'        ] = self.pes_end
+            ret['pessimistic'] = self.pessimistic
+            ret['pes_start'] = self.pes_start
+            ret['pes_end'] = self.pes_end
 
             ret['early_start_var'] = self.early_start[VAR]
-            ret['early_end_var'  ] = self.early_end[VAR]
+            ret['early_end_var'] = self.early_end[VAR]
             ret['early_start_pqe'] = self.early_start_pqe
-            ret['early_end_pqe'  ] = self.early_end_pqe
+            ret['early_end_pqe'] = self.early_end_pqe
 
-            ret['late_end_prob'  ] = self.early_end_prob(self.late_end[RES])
+            ret['late_end_prob'] = self.early_end_prob(self.late_end[RES])
 
         if self.model.debug:
             # CPM computation errors
             ret['early_start_err'] = self.early_start[ERR]
-            ret['late_start_err' ] = self.late_start[ERR]
-            ret['early_end_err'  ] = self.early_end[ERR]
-            ret['late_end_err'   ] = self.late_end[ERR]
+            ret['late_start_err'] = self.late_start[ERR]
+            ret['early_end_err'] = self.early_end[ERR]
+            ret['late_end_err'] = self.late_end[ERR]
 
         return ret
 
@@ -543,6 +611,10 @@ class _Event:
         Time reserve [value, variance, error_bound]
     stage : int
         Event stage in topological order
+    optimistic : float
+        Optimistic time estimate
+    pessimistic : float
+        Pessimistic time estimate
     """
 
     def __init__(self, id, model):
@@ -553,12 +625,12 @@ class _Event:
         self.model = model
 
         # CPM time parameters (calculated later)
-        self.early   = np.zeros((3,), dtype=float)
-        self.late    = np.zeros((3,), dtype=float)
+        self.early = np.zeros((3,), dtype=float)
+        self.late = np.zeros((3,), dtype=float)
         self.reserve = np.zeros((3,), dtype=float)
-        self.stage   = 0
+        self.stage = 0
 
-        self.optimistic  = 0.0
+        self.optimistic = 0.0
         self.pessimistic = 0.0
 
     @property
@@ -599,12 +671,10 @@ class _Event:
         """
         return _prob_estimate(val, self.early, self.optimistic, self.pessimistic)
 
-    #--------------------------------------------------------------------------
     def __repr__(self):
         """String representation of the event."""
         return str(self.to_dict())
 
-    #--------------------------------------------------------------------------
     def to_dict(self):
         """
         Convert event to dictionary representation.
@@ -628,25 +698,25 @@ class _Event:
         """
         # Basic action (CPM)
         ret = {
-            'id'     : self.id,
-            'stage'  : self.stage,
-            'early'  : self.early[RES],
-            'late'   : self.late[RES],
+            'id': self.id,
+            'stage': self.stage,
+            'early': self.early[RES],
+            'late': self.late[RES],
             'reserve': self.reserve[RES],
         }
 
         if self.model.is_pert:
             # PERT things
-            ret['optimistic' ] = self.optimistic
+            ret['optimistic'] = self.optimistic
             ret['pessimistic'] = self.pessimistic
-            ret['early_var'  ] = self.early[VAR]
-            ret['early_pqe'  ] = self.early_pqe
-            ret['late_prob'  ] = self.early_prob(self.late[RES])
+            ret['early_var'] = self.early[VAR]
+            ret['early_pqe'] = self.early_pqe
+            ret['late_prob'] = self.early_prob(self.late[RES])
 
         if self.model.debug:
             # CPM computation errors
             ret['early_err'] = self.early[ERR]
-            ret['late_err' ] = self.late[ERR]
+            ret['late_err'] = self.late[ERR]
 
         return ret
 
@@ -685,6 +755,8 @@ class NetworkModel:
 
     p : float, default=0.95
         Probability level for PERT quantile estimates
+    default_risk : float, default=0.3
+        Default risk factor for duration estimation
     debug : bool, default=False
         Enable debug mode to include computation error bounds
 
@@ -748,7 +820,6 @@ class NetworkModel:
         # Compute Event and Activity time parameters
         self._compute_time_params()
 
-    #--------------------------------------------------------------------------
     def _parse_links(self, lnk_src, lnk_dst, links):
         """
         Parse links from various formats into standard lnk_src, lnk_dst arrays.
@@ -782,8 +853,8 @@ class NetworkModel:
 
         # Format 1: Two rows [[src...], [dst...]]
         if (isinstance(links, (list, tuple)) and len(links) == 2 and
-            isinstance(links[0], (list, tuple, np.ndarray)) and
-            isinstance(links[1], (list, tuple, np.ndarray))):
+                isinstance(links[0], (list, tuple, np.ndarray)) and
+                isinstance(links[1], (list, tuple, np.ndarray))):
             return np.asarray(links[0]), np.asarray(links[1])
 
         # Format 2: Two columns [[src, dst], [src, dst], ...]
@@ -805,7 +876,6 @@ class NetworkModel:
         else:
             raise ValueError(f"Unsupported links format: {type(links)}")
 
-    #--------------------------------------------------------------------------
     def _create_model(self, wbs_dict, lnk_src, lnk_dst, default_risk):
         """
         Create network model from WBS data and links.
@@ -821,6 +891,8 @@ class NetworkModel:
             Source activity IDs
         lnk_dst : numpy.ndarray
             Destination activity IDs
+        default_risk : float
+            Default risk factor for duration estimation
 
         Notes
         -----
@@ -836,8 +908,8 @@ class NetworkModel:
         status, net_src, net_dst, lnk_src, lnk_dst = _ccpm.compute_aoa(act_ids, lnk_src, lnk_dst)
         assert 0 == status
 
-        self.events     = []
-        self.next_act   = 1
+        self.events = []
+        self.next_act = 1
         self.activities = []
 
         # Create events
@@ -845,8 +917,8 @@ class NetworkModel:
             self._add_event(int(i + 1))
 
         # Create activities (real and dummy)
-        na = len(act_ids)    # Number of actions
-        nd = 0               # Number of dunny actions
+        na = len(act_ids)  # Number of actions
+        nd = 0  # Number of dummy actions
         for i in range(len(net_src)):
             if i < na:
                 # Real activity - get data from WBS
@@ -870,17 +942,16 @@ class NetworkModel:
                 data_without_duplicates = self._remove_duplicate_fields(wbs_data, duration, variance, letter)
 
                 self._add_activity(int(act_id), int(net_src[i]), int(net_dst[i]),
-                                  duration, variance, optimistic, pessimistic,
-                                  letter, data_without_duplicates)
+                                   duration, variance, optimistic, pessimistic,
+                                   letter, data_without_duplicates)
             else:
                 # Add a dummy activity (no duration, no letter, no data)
-                nd += 1 #One more dummy work
+                nd += 1  # One more dummy work
                 self._add_activity(0, int(net_src[i]), int(net_dst[i]),
                                    0., 0., 0., 0., '#' + str(nd), {})
 
-        #TODO: Make shure that longest action between two events gets scheduled without a dummy
+        # TODO: Make sure that longest action between two events gets scheduled without a dummy
 
-    #--------------------------------------------------------------------------
     def _remove_duplicate_fields(self, wbs_data, duration, variance, letter):
         """
         Remove fields from WBS data that are stored as separate activity attributes.
@@ -906,7 +977,7 @@ class NetworkModel:
 
         # Remove fields that are stored as separate attributes
         fields_to_remove = ['duration', 'variance', 'letter',
-                           'optimistic', 'most_likely', 'pessimistic']
+                            'optimistic', 'most_likely', 'pessimistic']
         for field in fields_to_remove:
             if field in data_copy:
                 del data_copy[field]
@@ -929,7 +1000,7 @@ class NetworkModel:
             if e.early[RES] > late[RES]:
                 late = e.early.copy()
 
-        #late[VAR] = 0.0 #Start back computation with zero variance
+        # late[VAR] = 0.0 #Start back computation with zero variance
 
         for e in self.events:
             e.late = late
@@ -959,8 +1030,6 @@ class NetworkModel:
             self._compute_target('optimistic')
             self._compute_target('pessimistic')
 
-
-    #--------------------------------------------------------------------------
     def _compute_target(self, target=None):
         """
         Compute CPM parameters for events and activities.
@@ -971,7 +1040,7 @@ class NetworkModel:
         Parameters
         ----------
         target : str
-            What to compute: 'stage', 'early', or 'late'
+            What to compute: 'stage', 'early', 'late', 'optimistic', or 'pessimistic'
 
         Raises
         ------
@@ -981,16 +1050,16 @@ class NetworkModel:
         def _choice(old, new, delta):
             e = new[ERR] + old[ERR]
             if delta >= e:
-                return new #Certain result
+                return new  # Certain result
             elif delta >= -e:
-                #Uncertain result, use mixing
+                # Uncertain result, use mixing
                 ret = np.zeros((3,), dtype=float)
                 ret[RES] = 0.5 * (new[RES] + old[RES])
                 ret[VAR] = max(old[VAR], new[VAR])
                 ret[ERR] = 0.5 * e
                 return ret
             else:
-                return old #Certain result
+                return old  # Certain result
 
         def _choice_early(old, new):
             return _choice(old, new, new[RES] - old[RES])
@@ -1004,62 +1073,62 @@ class NetworkModel:
             return ret
 
         if 'stage' == target:
-            act_base     = None
-            act_new      = None
-            act_next     = 'dst'
-            fwd          = 'out_activities'
-            rev          = 'in_activities'
-            choise       = max
-            delta        = lambda a : 1
+            act_base = None
+            act_new = None
+            act_next = 'dst'
+            fwd = 'out_activities'
+            rev = 'in_activities'
+            choise = max
+            delta = lambda a: 1
 
         elif 'early' == target:
-            act_base     = 'early_start'
-            act_new      = 'early_end'
-            act_next     = 'dst'
-            fwd          = 'out_activities'
-            rev          = 'in_activities'
-            choise       = _choice_early
-            delta        = lambda a : a.duration
+            act_base = 'early_start'
+            act_new = 'early_end'
+            act_next = 'dst'
+            fwd = 'out_activities'
+            rev = 'in_activities'
+            choise = _choice_early
+            delta = lambda a: a.duration
 
         elif 'late' == target:
-            act_base     = 'late_end'
-            act_new      = 'late_start'
-            act_next     = 'src'
-            fwd          = 'in_activities'
-            rev          = 'out_activities'
-            choise       = _choice_late
-            delta        = _delta_late
+            act_base = 'late_end'
+            act_new = 'late_start'
+            act_next = 'src'
+            fwd = 'in_activities'
+            rev = 'out_activities'
+            choise = _choice_late
+            delta = _delta_late
 
         elif 'optimistic' == target:
-            act_base     = 'opt_start'
-            act_new      = 'opt_end'
-            act_next     = 'dst'
-            fwd          = 'out_activities'
-            rev          = 'in_activities'
-            choise       = max
-            delta        = lambda a : a.optimistic
+            act_base = 'opt_start'
+            act_new = 'opt_end'
+            act_next = 'dst'
+            fwd = 'out_activities'
+            rev = 'in_activities'
+            choise = max
+            delta = lambda a: a.optimistic
 
         elif 'pessimistic' == target:
-            act_base     = 'pes_start'
-            act_new      = 'pes_end'
-            act_next     = 'dst'
-            fwd          = 'out_activities'
-            rev          = 'in_activities'
-            choise       = max
-            delta        = lambda a : a.pessimistic
+            act_base = 'pes_start'
+            act_new = 'pes_end'
+            act_next = 'dst'
+            fwd = 'out_activities'
+            rev = 'in_activities'
+            choise = max
+            delta = lambda a: a.pessimistic
         else:
             raise ValueError("Unknown 'target' value!!!")
 
         if target != 'stage':
             for a in self.activities:
                 setattr(a, act_base, -1)
-                setattr(a, act_new,  -1)
+                setattr(a, act_new, -1)
 
         # Count dependencies for topological sorting
         n_dep = [len(getattr(e, rev)) for e in self.events]
 
         # Find starting events (no dependencies)
-        evt = [i for i,n in enumerate(n_dep) if 0 == n]
+        evt = [i for i, n in enumerate(n_dep) if 0 == n]
         assert 1 == len(evt)
 
         # Process events in topological order
@@ -1078,7 +1147,7 @@ class NetworkModel:
                     setattr(a, act_new, new_val)
 
                 next_evt = getattr(a, act_next)
-                next_i   = self.events.index(next_evt)
+                next_i = self.events.index(next_evt)
 
                 setattr(next_evt, target, choise(getattr(next_evt, target), new_val))
 
@@ -1091,12 +1160,10 @@ class NetworkModel:
             if i >= len(evt):
                 break
 
-    #--------------------------------------------------------------------------
     def _add_event(self, i):
         """Add a new event to the network."""
         self.events.append(_Event(i, self))
 
-    #--------------------------------------------------------------------------
     def _add_activity(self, wbs_id, src_id, dst_id, duration, variance,
                       optimistic, pessimistic, letter, data):
         """
@@ -1114,28 +1181,31 @@ class NetworkModel:
             Activity duration
         variance : float
             Activity duration variance
+        optimistic : float
+            Optimistic duration estimate
+        pessimistic : float
+            Pessimistic duration estimate
         letter : str
             Activity letter/code for visualization
         data : dict
             WBS data excluding fields stored as separate attributes
         """
-        assert isinstance(wbs_id,      int)
-        assert isinstance(src_id,      int)
-        assert isinstance(dst_id,      int)
-        assert isinstance(duration,    float)
-        assert isinstance(variance,    float)
-        assert isinstance(optimistic,  float)
+        assert isinstance(wbs_id, int)
+        assert isinstance(src_id, int)
+        assert isinstance(dst_id, int)
+        assert isinstance(duration, float)
+        assert isinstance(variance, float)
+        assert isinstance(optimistic, float)
         assert isinstance(pessimistic, float)
-        assert isinstance(letter,      str)
-        assert isinstance(data,        dict)
+        assert isinstance(letter, str)
+        assert isinstance(data, dict)
 
         act = _Activity(self.next_act, wbs_id, letter, self,
-                        self.events[src_id-1], self.events[dst_id-1],
+                        self.events[src_id - 1], self.events[dst_id - 1],
                         duration, variance, optimistic, pessimistic, data)
         self.activities.append(act)
         self.next_act += 1
 
-    #--------------------------------------------------------------------------
     def __repr__(self):
         """String representation of the network model."""
         _repr = 'Events:{\n'
@@ -1150,7 +1220,6 @@ class NetworkModel:
 
         return _repr
 
-    #--------------------------------------------------------------------------
     def to_dict(self):
         """
         Convert network model to dictionary representation.
@@ -1183,7 +1252,6 @@ class NetworkModel:
             'events': events_data
         }
 
-    #--------------------------------------------------------------------------
     def to_dataframe(self):
         """
         Convert network model to pandas DataFrames.
@@ -1223,7 +1291,6 @@ class NetworkModel:
 
         return activities_df, events_df
 
-    #--------------------------------------------------------------------------
     def viz(self, output_path=None):
         """
         Create Graphviz visualization of the CPM network.
@@ -1247,16 +1314,16 @@ class NetworkModel:
         - Black: Non-critical activities
         - Dashed lines: Dummy activities
         """
-        dot = graphviz.Digraph(node_attr={'shape': 'record', 'style':'rounded'})
+        dot = graphviz.Digraph(node_attr={'shape': 'record', 'style': 'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
         dot.graph_attr['dpi'] = '300'
 
         def _cl(res, p):
             """Choose color based on reserve (red for critical path)"""
             if abs(res[RES]) < res[ERR]:  # Absolute precision is nonsense
-                return '#ff0000' # Critical path
+                return '#ff0000'  # Critical path
             elif p < self.p:
-                return '#ffa000' # May consume the time reserve before completion
+                return '#ffa000'  # May consume the time reserve before completion
             else:
                 return '#000000'
 
@@ -1265,15 +1332,14 @@ class NetworkModel:
             # Format time values to 1 decimal place
             dot.node(str(e.id),
                      '{{%d |{%.1f|%.1f}| %.2f}}' % (e.id,
-                                                    e.early[RES],
-                                                    e.late[RES],
-                                                    e.reserve[RES]),
+                                                     e.early[RES],
+                                                     e.late[RES],
+                                                     e.reserve[RES]),
                      color=_cl(e.reserve, e.early_prob(e.late[RES])))
-
 
         # Add activities/edges
         for a in self.activities:
-            lbl  = a.letter
+            lbl = a.letter
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
                 # Format duration and reserve to 1 decimal place
@@ -1285,7 +1351,7 @@ class NetworkModel:
                      label=lbl,
                      color=_cl(a.reserve, a.early_end_prob(a.late_end[RES])),
                      style='dashed' if a.duration[RES] == 0.0 else 'solid'
-                    )
+                     )
 
         # If output path is specified, render to that location
         if output_path is not None:
@@ -1293,7 +1359,6 @@ class NetworkModel:
 
         return dot
 
-    #--------------------------------------------------------------------------
     def get_activity_by_wbs_id(self, wbs_id):
         """
         Get activity by WBS ID.
@@ -1313,7 +1378,6 @@ class NetworkModel:
                 return activity
         return None
 
-    #--------------------------------------------------------------------------
     def get_activities_by_data_field(self, field_name, field_value):
         """
         Get activities by custom data field value.
@@ -1341,42 +1405,44 @@ if __name__ == '__main__':
     # Example usage with all link formats and new duration input methods
     wbs = {
         # Standard format (backward compatibility)
-        1 :{'letter':'A', 'duration':3.84, 'variance':0.01, 'name':'Heating and frames study'},
+        1: {'letter': 'A', 'duration': 3.84, 'variance': 0.01, 'name': 'Heating and frames study'},
 
         # Three-point PERT format
-        2 :{'letter':'B', 'optimistic':1.5, 'most_likely':2.0, 'pessimistic':3.0, 'name':'Scouring and installation of building site establishment'},
+        2: {'letter': 'B', 'optimistic': 1.5, 'most_likely': 2.0, 'pessimistic': 3.0,
+            'name': 'Scouring and installation of building site establishment'},
 
         # Two-point PERT format
-        3 :{'letter':'C', 'optimistic':3.0, 'pessimistic':5.0, 'name':'Earthwork and concrete well'},
+        3: {'letter': 'C', 'optimistic': 3.0, 'pessimistic': 5.0, 'name': 'Earthwork and concrete well'},
 
         # Standard format with zero variance
-        4 :{'letter':'D', 'duration':4., 'name':'Earthwork and concrete longitudinal beams'},
+        4: {'letter': 'D', 'duration': 4., 'name': 'Earthwork and concrete longitudinal beams'},
 
         # Three-point PERT
-        5 :{'letter':'E', 'optimistic':5.0, 'most_likely':6.0, 'pessimistic':8.0, 'name':'Frame construction'},
+        5: {'letter': 'E', 'optimistic': 5.0, 'most_likely': 6.0, 'pessimistic': 8.0, 'name': 'Frame construction'},
 
         # Standard format
-        6 :{'letter':'F', 'duration':6., 'variance':0.01, 'name':'Frame transport'},
-        7 :{'letter':'G', 'duration':6., 'variance':0.01, 'name':'Assemblage'},
+        6: {'letter': 'F', 'duration': 6., 'variance': 0.01, 'name': 'Frame transport'},
+        7: {'letter': 'G', 'duration': 6., 'variance': 0.01, 'name': 'Assemblage'},
 
         # Two-point PERT
-        8 :{'letter':'H', 'optimistic':1.5, 'pessimistic':3.0, 'name':'Earthwork and pose drains'},
+        8: {'letter': 'H', 'optimistic': 1.5, 'pessimistic': 3.0, 'name': 'Earthwork and pose drains'},
 
         # Three-point PERT
-        9 :{'letter':'I', 'optimistic':4.0, 'most_likely':5.0, 'pessimistic':7.0, 'name':'Heating provisioning and assembly'},
+        9: {'letter': 'I', 'optimistic': 4.0, 'most_likely': 5.0, 'pessimistic': 7.0,
+            'name': 'Heating provisioning and assembly'},
 
         # Standard format
-        10:{'letter':'J', 'duration':5., 'variance':0.01, 'name':'Electric installation'},
-        11:{'letter':'K', 'duration':2., 'variance':0.01, 'name':'Painting'},
-        12:{'letter':'L', 'duration':1., 'variance':0.01, 'name':'Pavement'}
-        }
+        10: {'letter': 'J', 'duration': 5., 'variance': 0.01, 'name': 'Electric installation'},
+        11: {'letter': 'K', 'duration': 2., 'variance': 0.01, 'name': 'Painting'},
+        12: {'letter': 'L', 'duration': 1., 'variance': 0.01, 'name': 'Pavement'}
+    }
 
     print("=== Demonstration of all link formats and new duration input methods ===")
 
     # Old format
     print("\n1. Old format with new duration inputs:")
-    src_old = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10])
-    dst_old = np.array([5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
+    src_old = np.array([1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10])
+    dst_old = np.array([5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12])
     n_old = NetworkModel(wbs, src_old, dst_old)
     print("Successfully created model with mixed duration input formats")
 
@@ -1391,16 +1457,16 @@ if __name__ == '__main__':
 
     for i, test_case in enumerate(test_cases):
         try:
-            mean, var = _calculate_duration_params(test_case)
-            print(f"Test case {i+1}: {test_case} -> mean={mean:.3f}, variance={var:.3f}")
+            mean, var, a, m, b = _calculate_duration_params(test_case)
+            print(f"Test case {i + 1}: {test_case} -> mean={mean:.3f}, variance={var:.3f}")
         except ValueError as e:
-            print(f"Test case {i+1} error: {e}")
+            print(f"Test case {i + 1} error: {e}")
 
     # Demonstration of the new data formats in activities
     print("\n=== Demonstration of new duration formats in activities ===")
     for i, activity in enumerate(n_old.activities[:8]):  # Show first 8 activities
         if activity.wbs_id != 0:  # Skip dummy activities
-            print(f"Activity {i+1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
+            print(f"Activity {i + 1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
             print(f"  Duration: {activity.duration[RES]:.3f}, Variance: {activity.duration[VAR]:.3f}")
             if activity.data:
                 print(f"  Data fields: {list(activity.data.keys())}")
@@ -1422,8 +1488,8 @@ if __name__ == '__main__':
     # New format 1 (two rows)
     print("\n2. New format 1 (two rows):")
     links_format1 = [
-        [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10],
-        [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
+        [1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10],
+        [5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12]
     ]
     n_new1 = NetworkModel(wbs, links=links_format1)
     print("Successfully created model with format 1")
@@ -1431,10 +1497,10 @@ if __name__ == '__main__':
     # New format 2 (two columns)
     print("\n3. New format 2 (two columns):")
     links_format2 = [
-        [1,5], [2,5], [3,5], [2,6], [3,6], [3,7], [4,7],
-        [1,8], [6,8], [7,8], [5,9], [6,9], [7,9], [3,10],
-        [6,10], [7,10], [6,11], [8,11], [9,11], [7,12],
-        [8,12], [9,12], [10,12]
+        [1, 5], [2, 5], [3, 5], [2, 6], [3, 6], [3, 7], [4, 7],
+        [1, 8], [6, 8], [7, 8], [5, 9], [6, 9], [7, 9], [3, 10],
+        [6, 10], [7, 10], [6, 11], [8, 11], [9, 11], [7, 12],
+        [8, 12], [9, 12], [10, 12]
     ]
     n_new2 = NetworkModel(wbs, links=links_format2)
     print("Successfully created model with format 2")
@@ -1442,8 +1508,8 @@ if __name__ == '__main__':
     # New format 3 (dictionary)
     print("\n4. New format 3 (dictionary):")
     links_format3 = {
-        'src': [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7, 3, 6, 7,  6, 8, 9,  7, 8, 9, 10],
-        'dst': [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
+        'src': [1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10],
+        'dst': [5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12]
     }
     n_new3 = NetworkModel(wbs, links=links_format3)
     print("Successfully created model with format 3")
