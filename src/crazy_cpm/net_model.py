@@ -57,40 +57,48 @@ def fit_mpert(M, D, a, b):
     return m, g
     """
     if a > b:
-        raise ValueError()
+        raise ValueError(f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})")
 
     if not (a <= M <= b):
-        raise ValueError()
+        raise ValueError(f"Mean ({M}) must be between optimistic ({a}) and pessimistic ({b})")
 
     _tol = np.sqrt(EPS)
 
-    if b - a < 4 * _tol * b:
-        print("Warning: a and b are too close!")
+    if b - a < 2 * _tol * (a + b):
+        # This is the chain of deterministic processes, use M without g computation
         return M, None
 
-    if D <= _tol:
+    _thr = _tol * (b - a)
+
+    if np.sqrt(D) < _thr:
+        # This is the chain of deterministic processes and D is computation error
         return M, None
 
-    if (M - a) < (2 *_tol * M):
-        M *= 1 + 2 * _tol
+    # Make shure that M is in range of (a + _the, b - _thr)
+    if (M - a) < _thr:
+        M = a + _thr
 
-    if (b - M) < (2 *_tol * b):
-        M *= 1 - 2 * _tol
+    if (b - M) < _thr:
+        M = b - _thr
 
-    # compute g lower limit
+    # Compute g lower limit, make shure that ml is far from M enough
     if M < (a + b) / 2:
-        ml = a * (1 + _tol)
+        ml = a + _thr / 2
     else:
-        ml = b * (1 - _tol)
-
+        ml = b - _thr / 2
+    # Mow compute min safe g value
     gmin = (a + b - 2 * M) / (M - ml)
 
-    # compute g
+    # Compute g, make shure that computed m will be in range of (a,b)
     g = (M - a) * (b - M) / D - 3
     g = g if g > gmin else gmin
 
-    # compute m
+    # Compute m
     m = ((2 + g) * M - a - b) / g
+
+    # Make shure that m is in range of (a,b) even in case of dramatic roundoff errors
+    m = m if m >= a else (a + _thr / 2)
+    m = m if m <= b else (b - _thr / 2)
 
     return m, g
 
