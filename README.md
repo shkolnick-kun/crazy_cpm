@@ -214,8 +214,6 @@ model = NetworkModel(
 
 ### Visualization
 
-![](doc/cpm_network.png)
-
 The library generates professional network diagrams using Graphviz:
 ```python
 
@@ -225,6 +223,8 @@ dot = model.viz('my_project')
 # Customize output path
 model.viz(output_path='/path/to/project_network')
 ```
+
+![](doc/cpm_network.png)
 
 The visualization includes:
  * Red nodes/edges: Critical path (zero time reserve)
