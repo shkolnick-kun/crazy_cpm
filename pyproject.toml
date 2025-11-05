@@ -1,12 +1,68 @@
 [build-system]
 requires = [
-            "betapert >= 0.1.5",
-            "Cython >= 0.29.21",
-            "graphviz >= 0.14.2",
-            "numpy >= 1.17, < 2.0",
-            "pandas >= 1.0",
-            "setuptools >= 51.0.0",
-            "wheel >= 0.36.2"
-            ]
-
+    "setuptools >= 51.0.0",
+    "wheel >= 0.36.2",
+    "Cython >= 0.29.21",
+    "numpy >= 1.17, < 2.0",
+]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "crazy_cpm"
+version = "0.99.0"
+description = "Crazy Critical Path Method"
+readme = {file = "README.md", content-type = "text/markdown"}
+license = {file = "LICENSE"}
+authors = [
+    {name = "anonimous", email = "shkolnick-kun@gmail.com"},
+]
+keywords = ["cpm", "scheduling", "critical-path"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: C",
+    "Programming Language :: Cython",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+requires-python = ">=3.9,<4"
+dependencies = [
+    "betapert >= 0.1.5",
+    "graphviz >= 0.14.2",
+    "numpy >= 1.17, < 2.0",
+    "pandas >= 1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    # добавьте сюда зависимости из requirements-dev.txt
+]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+]
+
+[project.urls]
+Homepage = "https://github.com/shkolnick-kun/crazy_cpm"
+Documentation = "https://github.com/shkolnick-kun/crazy_cpm"
+Repository = "https://github.com/shkolnick-kun/crazy_cpm"
+Issues = "https://github.com/shkolnick-kun/crazy_cpm/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+zip-safe = false
+
+[tool.setuptools.packages.find]
+where = ["src"]

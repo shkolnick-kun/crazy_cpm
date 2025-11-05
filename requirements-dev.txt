@@ -1,7 +1,0 @@
-betapert
-Cython >= 0.29.21
-graphviz >= 0.14.2
-numpy >= 1.17, <2.0
-pandas >= 1.0
-setuptools >= 51.0.0
-wheel >= 0.36.2

@@ -53,7 +53,7 @@
 #==============================================================================
 import numpy
 import os
-from os.path import dirname, isfile, join, splitext
+from os.path import abspath, dirname, isfile, join, relpath, splitext
 from setuptools import Extension, setup
 
 try:
@@ -79,17 +79,26 @@ def no_cythonize(extensions, **_ignore):
 
 EXT_BASE  = "ccpm"
 EXT_NAME  = "_" + EXT_BASE
-SETUP_DIR = dirname(__file__)
-SRC_DIR   = join(SETUP_DIR, "src")
-EXT_DIR   = join(SRC_DIR, "crazy_cpm")
+SETUP_DIR = abspath(dirname(__file__))
+
+src_dir   = join(SETUP_DIR, "src")
+ext_dir   = join(src_dir, "crazy_cpm")
+pyx_file  = join(ext_dir, EXT_NAME + ".pyx")
+ext_file  = join(ext_dir, EXT_NAME + ".c")
+
+#Nowadays setup needs relative paths
+src_dir   = relpath(src_dir,  SETUP_DIR)
+ext_dir   = relpath(ext_dir,  SETUP_DIR)
+pyx_file  = relpath(pyx_file, SETUP_DIR)
+ext_file  = relpath(ext_file, SETUP_DIR)
 
 extensions = [
-    Extension(EXT_NAME, [join(EXT_DIR, EXT_NAME + ".pyx")],
-        include_dirs=[numpy.get_include(), SRC_DIR, EXT_DIR],
+    Extension(EXT_NAME, [pyx_file],
+        include_dirs=[numpy.get_include(), src_dir, ext_dir],
         define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")])
     ]
 
-if not isfile(join(EXT_DIR, EXT_NAME + ".c")):
+if not isfile(ext_file):
     CYTHONIZE = cythonize is not None
 else:
     CYTHONIZE = bool(int(os.getenv("CYTHONIZE", 0))) and cythonize is not None
@@ -100,17 +109,5 @@ if CYTHONIZE:
 else:
     extensions = no_cythonize(extensions)
 
-with open("requirements.txt") as fp:
-    install_requires = fp.read().strip().split("\n")
-
-with open("requirements-dev.txt") as fp:
-    dev_requires = fp.read().strip().split("\n")
-
-setup(
-    ext_modules=extensions,
-    install_requires=install_requires,
-    extras_require={
-        "dev": dev_requires,
-        "docs": ["sphinx", "sphinx-rtd-theme"]
-    },
-)
+# Все метаданные теперь в pyproject.toml, здесь только Cython расширения
+setup(ext_modules=extensions)
