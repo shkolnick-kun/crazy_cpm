@@ -36,7 +36,7 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
 ## Installation
 
 ### Prerequisites
- * Python 3.7 or higher
+ * Python 3.9 or higher
  * C++ compiler (GCC, Clang, or MSVC)
  * Graphviz system installation
 
@@ -233,4 +233,3 @@ The visualization includes:
  * Orange elements: Near-critical activities and events
  * Black elements: Non-critical activities and events
  * Dashed lines: Dummy activities
-
