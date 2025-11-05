@@ -109,5 +109,4 @@ if CYTHONIZE:
 else:
     extensions = no_cythonize(extensions)
 
-# Все метаданные теперь в pyproject.toml, здесь только Cython расширения
 setup(ext_modules=extensions)

@@ -1,7 +1,5 @@
-include src/* src/crazy_cpm/* requirements.txt requirements-dev.txt
+include src/* src/crazy_cpm/*
 include LICENSE
 include README.md
-include requirements.txt
-include requirements-dev.txt
 include pyproject.toml
 include doc/*.pdf doc/*.md
