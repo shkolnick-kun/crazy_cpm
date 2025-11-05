@@ -84,6 +84,7 @@ if __name__ == '__main__':
         14: {'letter': 'P', 'duration': 5., 'name': 'A14'},
     }
 
-    src_old = np.array([1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ])
-    dst_old = np.array([2, 3, 4,  5, 5, 5,  6, 7, 8,  9, 9, 9,  10, 11, 12 ])
-    n_old = NetworkModel(wbs, src_old, dst_old)
+    src = np.array([1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ])
+    dst = np.array([2, 3, 4,  5, 5, 5,  6, 7, 8,  9, 9, 9,  10, 11, 12 ])
+    net = NetworkModel(wbs, src, dst)
+    a,e = net.to_dataframe()

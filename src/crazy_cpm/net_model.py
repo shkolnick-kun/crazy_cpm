@@ -819,6 +819,11 @@ class NetworkModel:
         # Compute stages of project
         self._compute_target('stage')
 
+        # Renumerate events according to the rools of network modeling
+        self.events.sort(key=lambda e: e.stage)
+        for i, e in enumerate(self.events, 1):
+            e.id = i
+
         # Compute Event and Activity time parameters
         self._compute_time_params()
 
