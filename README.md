@@ -3,7 +3,7 @@
 **Critical Path Method and PERT Analysis Library**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-![Python Version](https://img.shields.io/badge/python-3.7%2B-blue)
+![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 
 A comprehensive Python library for project management analysis using Critical Path Method (CPM) and Program Evaluation and Review Technique (PERT). CrazyCPM provides network analysis capabilities with statistical modeling and professional visualization.
 
@@ -37,7 +37,7 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
 
 ### Prerequisites
  * Python 3.9 or higher
- * C++ compiler (GCC, Clang, or MSVC)
+ * C compiler (GCC, Clang, or MSVC)
  * Graphviz system installation
 
 ### Install from GitHub
@@ -200,17 +200,19 @@ model = NetworkModel(
 
 
 ### Output Examples
+
 #### Activities DataFrame
 |  id  | wbs_id |letter |duration |variance | early_start | late_start  | reserve  |     name       |
 | :--- | :----: | :---: | :-----: | :-----: | :---------: | :---------: | :------: | -------------: |
 | 1    | 1      | A     | 5.0     | 1.0     | 0.0         | 0.0         | 0.0      | Design         |
-| 2    | 2      | B     | 3.0     | 0.0     | 5.0         | 5.0         | 0.0	   | Development    |
+| 2    | 2      | B     | 3.0     | 0.0     | 5.0         | 5.0         | 0.0      | Development    |
+
 #### Events DataFrame
 |  id  |  stage  |  early  |  late   | reserve  |
 | :--- | :-----: | :-----: | :-----: | -------: |
-|1     | 0       | 0.0     | 0.0     | 0.0      |
-|2     | 1       | 5.0     | 5.0     | 0.0      |
-|3     | 2       | 8.0     | 8.0     | 0.0      |
+| 1    | 0       | 0.0     | 0.0     | 0.0      |
+| 2    | 1       | 5.0     | 5.0     | 0.0      |
+| 3    | 2       | 8.0     | 8.0     | 0.0      |
 
 ### Visualization
 
