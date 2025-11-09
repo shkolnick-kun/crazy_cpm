@@ -1,5 +1,7 @@
 # CrazyCPM
 
+Dedicated to Dmitry Gerget, my scientific advisor at the [Higher School of Economics](https://www.hse.ru).
+
 **Critical Path Method and PERT Analysis Library**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
