@@ -16,9 +16,9 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
  * **Critical Path Method (CPM)** - Identify critical activities and project duration
  * **PERT Analysis** - Statistical modeling with uncertainty quantification
  * **Multiple Duration Formats** - Support for various input methods:
-  * Direct duration and variance
-  * Three-point PERT estimates (optimistic, most likely, pessimistic)
-  * Two-point PERT estimates (optimistic, pessimistic)
+   * Direct duration and variance
+   * Three-point PERT estimates (optimistic, most likely, pessimistic)
+   * Two-point PERT estimates (optimistic, pessimistic)
 
 ### Advanced Capabilities
  * **Variance Propagation** - Statistical analysis of project completion times
