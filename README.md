@@ -8,6 +8,7 @@
 A comprehensive Python library for project management analysis using Critical Path Method (CPM) and Program Evaluation and Review Technique (PERT). CrazyCPM provides network analysis capabilities with statistical modeling and professional visualization.
 
 **Acknolegments**
+
 This piece of work is dedicated to Dmitry Gerget, my scientific advisor at the [Higher School of Economics](https://www.hse.ru).
 
 ## License
