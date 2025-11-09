@@ -114,8 +114,6 @@ typedef enum
     CCPM_WRK_NUM /*Number of works*/
 }ccpmWrkEn;
 
-//uint16_t wrk_src[CCPM_WRK_NUM];
-//uint16_t wrk_dst[CCPM_WRK_NUM];
 uint16_t wrk_pos[CCPM_WRK_NUM];
 uint16_t tmp[CCPM_WRK_NUM];
 /*===========================================================================*/
@@ -141,17 +139,20 @@ static const uint16_t link_num[] = {
 /*Pool of works*/
 /*Number of works + number of links*/
 #define X(id, ...) +CCPM_ARRAY_SZ(_ccpm_dep_buf##id)
-uint16_t link_src[0 WBS];
-uint16_t link_dst[0 WBS];
-uint16_t wrk_src[CCPM_WRK_NUM WBS];
-uint16_t wrk_dst[CCPM_WRK_NUM WBS];
+/*Compile time calculation of CCPM_LINK_NUM*/
+const uint16_t links_total = 0 WBS;
+/*Memories*/
+uint16_t link_src[CCPM_WRK_NUM WBS];
+uint16_t link_dst[CCPM_WRK_NUM WBS];
+uint16_t wrk_src[2 * CCPM_WRK_NUM WBS];
+uint16_t wrk_dst[2 * CCPM_WRK_NUM WBS];
 #undef X
 
 /*===========================================================================*/
 int main(void)
 {
-    printf("Link num: %d\n", (int)CCPM_ARRAY_SZ(link_src));
-    uint16_t l = CCPM_ARRAY_SZ(link_src) - 1;
+    printf("Link num: %d\n", (int)links_total);
+    uint16_t l = links_total - 1;
     for (uint16_t s = 0; s < CCPM_WRK_NUM; s++)
     {
         for (uint16_t d = 0; d < link_num[s]; d++)
@@ -163,7 +164,7 @@ int main(void)
         }
     }
 
-    uint16_t n_lnk = CCPM_ARRAY_SZ(link_src);
+    uint16_t n_lnk = links_total;
     uint16_t n_dum = 0;
 
     ccpm_make_aoa(wrk_index, wrk_src, wrk_dst, CCPM_WRK_NUM, &n_dum, link_src, link_dst, &n_lnk);
