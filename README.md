@@ -13,6 +13,7 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
 ## Features
 
 ### Core Analysis
+ * **Activity on Arrow** - Most of CPM software use Activity on Node networks CrazyCPM implements Activiy on Arrow network modeling
  * **Critical Path Method (CPM)** - Identify critical activities and project duration
  * **PERT Analysis** - Statistical modeling with uncertainty quantification
  * **Multiple Duration Formats** - Support for various input methods:
@@ -21,17 +22,16 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
    * Two-point PERT estimates (optimistic, pessimistic)
 
 ### Advanced Capabilities
- * **Variance Propagation** - Statistical analysis of project completion times
+ * **Network Optimization** - Automatic (sub)optimal dummy activity generation
+ * **Statistical analysis** - Computation of project statistical parameters using propagation techniques
  * **Probabilistic Estimates** - Quantile estimates and completion probabilities
- * **Network Optimization** - Automatic dummy activity generation
- * **Topological Sorting** - Efficient network traversal algorithms
+ * **Ready for large and small projects** - The modified PERT distribution is used in probabilistic computations which enables correct estimates even for small projects
 
 ### Technical Features
  * **High Performance** - C backend for computational efficiency
  * **Flexible Input Formats** - Multiple link dependency formats
  * **Comprehensive Export** - Dictionary and pandas DataFrame output
- * **Professional Visualization** - Graphviz-based network diagrams
- * **Error Handling** - Robust validation and error reporting
+ * **Visualization** - Graphviz-based network diagrams
 
 ## Installation
 
@@ -216,7 +216,7 @@ model = NetworkModel(
 
 ### Visualization
 
-The library generates professional network diagrams using Graphviz:
+The library generates network diagrams using Graphviz:
 ```python
 
 # Generate and save visualization
