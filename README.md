@@ -1,15 +1,15 @@
 # CrazyCPM
 
+**Acknolegments**
+
+This piece of work is dedicated to Dmitry Gerget, my scientific advisor at the [Higher School of Economics](https://www.hse.ru).
+
 **Critical Path Method and PERT Analysis Library**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 ![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 
 A comprehensive Python library for project management analysis using Critical Path Method (CPM) and Program Evaluation and Review Technique (PERT). CrazyCPM provides network analysis capabilities with statistical modeling and professional visualization.
-
-**Acknolegments**
-
-This piece of work is dedicated to Dmitry Gerget, my scientific advisor at the [Higher School of Economics](https://www.hse.ru).
 
 ## License
 This project is licensed under the GNU General Public License v3.0 - see the LICENSE file for details.
