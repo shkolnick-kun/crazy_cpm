@@ -1,7 +1,5 @@
 # CrazyCPM
 
-**Acknolegments**
-
 This piece of work is dedicated to Dmitry Gerget, my scientific advisor at the [Higher School of Economics](https://www.hse.ru).
 
 **Critical Path Method and PERT Analysis Library**
