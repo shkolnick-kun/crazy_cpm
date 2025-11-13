@@ -712,6 +712,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
             uint16_t n_added_dummys = 0;
             uint16_t n_new_sg       = 0;
             uint16_t n_old_sg       = 0;
+            bool bump_evt = false;
 
             for (l = 0; l < n_act * 2; l++)
             {
@@ -803,6 +804,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
             for (l = 0; l < n_added_dummys; l++)
             {
                 lnk_dst[_n_dum + l] = evt_id;
+                bump_evt = true;
                 CCPM_LOG_PRINTF("%5d %5d\n", lnk_src[_n_dum + l], lnk_dst[_n_dum + l]);
             }
             _n_dum += n_added_dummys;
@@ -814,10 +816,14 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
                 i = new_sg_act[l];
                 CCPM_LOG_PRINTF("%5d", act_id[i]);
                 act_dst[i] = evt_id;
+                bump_evt = true;
             }
             CCPM_LOG_PRINTF("\n");
 
-            evt_id++;
+            if(bump_evt)
+            {
+                evt_id++;
+            }
         }
     }
 
@@ -831,6 +837,11 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
         }
         for (j = i + 1; j < n_act; j++)
         {
+            if (act_dst[j])
+            {
+                continue;
+            }
+
             if (act_src[i] != act_src[j])
             {
                 continue;
@@ -850,6 +861,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
         lnk_dst[_n_dum + i] = evt_id;
     }
     _n_dum += l;
+
     /*Finish last works*/
     for (i = 0; i < n_act; i++)
     {
