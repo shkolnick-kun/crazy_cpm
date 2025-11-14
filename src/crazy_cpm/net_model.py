@@ -1064,7 +1064,8 @@ class NetworkModel:
             r = e.late[RES] - e.early[RES]
             e.reserve[RES] = r if abs(r) > e.reserve[ERR] else 0.0
             # Check for programming errors
-            assert r > -e.reserve[ERR]
+            if r < -e.reserve[ERR]:
+                raise RuntimeError("Events can not have negative time reserves!!!")
 
         for a in self.activities:
             a.reserve[VAR] = a.late_start[VAR] + a.early_start[VAR]
@@ -1073,7 +1074,8 @@ class NetworkModel:
             r = a.late_start[RES] - a.early_start[RES]
             a.reserve[RES] = r if abs(r) > a.reserve[ERR] else 0.0
             # Check for programming errors
-            assert r > -a.reserve[ERR]
+            if r < -a.reserve[ERR]:
+                raise RuntimeError("Actions can not have negative time reserves!!!")
 
         if self.is_pert:
             self._compute_target('optimistic')
@@ -1178,7 +1180,9 @@ class NetworkModel:
 
         # Find starting events (no dependencies)
         evt = [i for i, n in enumerate(n_dep) if 0 == n]
-        assert 1 == len(evt)
+        # Check for programming errors
+        if 1 != len(evt):
+            raise RuntimeError("The project can not have more than one starting event!!!")
 
         # Process events in topological order
         i = 0
