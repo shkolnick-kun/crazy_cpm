@@ -568,8 +568,10 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
     /*--------------------------------------------------------------------------------------*/
     CCPM_MEM_ALLOC(uint16_t   ,new_sg_act   ,n_act              ); /*Array of works with no dummies successors*/
     CCPM_MEM_ALLOC(uint16_t   ,dummy_pos    ,_n_lnk             ); /*Dummy work index*/
-    CCPM_MEM_ALLOC(uint16_t   ,old_sg_map   ,n_act * 2          ); /*Dummy work map*/
-    CCPM_MEM_ALLOC(uint16_t   ,new_sg_map   ,n_act * 2          ); /*Work subgroup map*/
+    CCPM_MEM_ALLOC(uint16_t   ,old_sg_map   ,n_act * 2          ); /*Finished works subgroup map (stores indices, actual map is in tmp array)*/
+    CCPM_MEM_ALLOC(uint16_t   ,new_sg_map   ,n_act * 2          ); /*Unfinished works subgroup map*/
+    /*--------------------------------------------------------------------------------------*/
+
 
     /*Temporary array for sortings*/
     CCPM_MEM_ALLOC(uint16_t,tmp,((n_act > _n_lnk) ? n_act : _n_lnk));
@@ -747,14 +749,14 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
                 }
                 else if (_CCPM_SG_LIM == new_sg_map[act_src[i]])
                 {
-                    /*Create new subgroup*/
+                    /*Create new subgroup (actions in a subgroup have common source event)*/
                     act_sg_id[i] = sg_id++;
                     new_sg_map[act_src[i]] = i;
                     new_sg_act[n_new_sg++] = i;
                 }
                 else
                 {
-                    /*Assign a work to some old subgroup*/
+                    /*Assign a work to some existing subgroup*/
                     act_sg_id[i] = act_sg_id[new_sg_map[act_src[i]]];
                     act_dst[i]   = evt_id;
 
@@ -778,6 +780,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
                     if (_CCPM_SG_LIM == old_sg_map[act_dst[i]])
                     {
                         old_sg_map[act_dst[i]] = 1;
+                        //Here we a can try to detect a trouble
                         lnk_src[_n_dum + n_added_dummys++] = act_dst[i];
                         CCPM_LOG_PRINTF("Added dummy: %d %d\n", _n_dum + n_added_dummys, act_dst[i]);
                     }
@@ -808,12 +811,13 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act
             _n_dum += n_added_dummys;
             CCPM_LOG_PRINTF("\n");
 
+
             CCPM_LOG_PRINTF("No dummy works:");
             for (l = 0; l < n_new_sg; l++)
             {
                 i = new_sg_act[l];
                 CCPM_LOG_PRINTF("%5d", act_id[i]);
-                act_dst[i] = evt_id;
+                act_dst[i] = evt_id; //Here we create a trouble
             }
             CCPM_LOG_PRINTF("\n");
             evt_id++;
