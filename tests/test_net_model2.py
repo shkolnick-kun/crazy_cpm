@@ -1,39 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CrazyCPM - Critical Path Method and PERT analysis library
-=========================================================
-
-This module provides comprehensive CPM (Critical Path Method) and PERT
-(Program Evaluation and Review Technique) analysis capabilities for project
-management.
-
-Features:
-    - Multiple activity duration input formats (direct, PERT three-point, PERT two-point)
-    - Automatic network diagram generation using Graphviz
-    - Statistical analysis with variance propagation
-    - Multiple link format support
-    - Export to dictionaries and pandas DataFrames
-
-Classes:
-    - NetworkModel: Main class for network analysis
-    - _Activity: Represents activities in the network (internal)
-    - _Event: Represents events/milestones in the network (internal)
-
-Usage Example:
-    >>> wbs = {
-    ...     1: {'letter': 'A', 'duration': 5.0, 'variance': 1.0},
-    ...     2: {'letter': 'B', 'optimistic': 3.0, 'most_likely': 4.0, 'pessimistic': 8.0}
-    ... }
-    >>> links = [[1], [2]]
-    >>> model = NetworkModel(wbs, links=links)
-    >>> activities_df, events_df = model.to_dataframe()
-
-.. note::
-    This module uses a C extension (_ccpm) for performance-critical computations.
-"""
-#==============================================================================
-"""
     CrazyCPM
     Copyright (C) 2025 anonimous
 
@@ -163,7 +130,7 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
 
 
     def _add_a_dummy(full_deps, min_deps):
-        act_ids.append(0)
+        act_ids.append(65535)
         act_pos.append(n_mix)
         # Set dummmy information if needed
         min_act_dep[n_mix] = min_deps.copy()
@@ -317,9 +284,44 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
             j += 1
         i += 1
 
-    #act_pos = sorted(act_pos, key=lambda i: len(full_act_dep[i]))
+    # Now build aoa network
+    started = [False for i in act_ids]
+    num_dep = [len(i) for i in min_act_dep]
+    act_src = [0 for i in range(nf)]
+    act_dst = [0 for i in range(nf)]
 
-    return True, act_ids, act_pos, min_dep_map, min_act_dep, full_dep_map, full_act_dep
+    evt = 1
+    def _find_started():
+        group = []
+        for i in range(len(started)):
+            if (0 == num_dep[i]) and (not started[i]):
+                started[i] = True
+                act_src[i] = evt
+                group.append(i)
+        return group
+
+    chk = _find_started()
+    evt += 1
+    dum = len(act_ids)
+    i = 0
+    while i < len(chk):
+        for j in range(len(min_act_dep)):
+            if chk[i] in min_act_dep[j]:
+                num_dep[j] -= 1
+        #
+        start = _find_started()
+        if len(start):
+            for a in min_act_dep[start[0]]:
+                act_dst[a] = evt
+            evt += 1
+        chk += start
+        i += 1
+
+    for i in range(dum):
+        if 0 == act_dst[i]:
+            act_dst[i] = evt
+
+    return True, act_src[:dum].copy(), act_dst[:dum].copy(), act_ids, act_pos
 
 #==============================================================================
 if __name__ == '__main__':
@@ -341,13 +343,13 @@ if __name__ == '__main__':
     #dst = [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
 
     #
-    #src = [1, 1, 1, 2, 2, 3,]
-    #dst = [4, 5, 6, 5, 6, 6,]
+    src = [1, 1, 1, 2, 2, 3,]
+    dst = [4, 5, 6, 5, 6, 6,]
 
-    src = [1,2,3, 2,3, 3, 4, 5, 6,  4, 5, 6,  0, 7,  0, 8,10, 0, 9, 10]
-    dst = [4,4,4, 5,5, 6, 7, 8, 9, 10,10,10, 11,11, 12,12,12, 13,13,13]
+    #src = [1,2,3, 2,3, 3, 4, 5, 6,  4, 5, 6,  0, 7,  0, 8,10, 0, 9, 10]
+    #dst = [4,4,4, 5,5, 6, 7, 8, 9, 10,10,10, 11,11, 12,12,12, 13,13,13]
 
     uni = set(src + dst)
     act = list(range(min(uni), max(uni) + 1))
 
-    status, act_ids, act_pos, min_dep_map, min_act_dep, full_dep_map, full_act_dep = reduce_dependencies(act, src, dst)
+    status, act_src, act_dst, act_ids, act_pos = reduce_dependencies(act, src, dst)
