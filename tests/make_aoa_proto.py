@@ -21,14 +21,9 @@
 """
 
 #==============================================================================
-from betapert import mpert
-import graphviz
 import numpy as np
-import pandas as pd
-import os
-from crazy_cpm import NetworkModel
 
-def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
+def make_aoa(_act_ids, _lnk_src, _lnk_dst):
     assert isinstance(_act_ids, list)
     assert isinstance(_lnk_src, list)
     assert isinstance(_lnk_dst, list)
@@ -74,7 +69,7 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
                     continue
                 full_dep_map[i, k] = True
                 if i == k:
-                    return False, act_ids, None, None, None, None, None
+                    return False, act_ids, None, None
                 full_act_dep[i].append(k)
             j += 1
 
@@ -109,6 +104,7 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
     act_pos = sorted(act_pos, key=lambda i: len(min_dep_map[i]))
     act_pos = sorted(act_pos, key=lambda i: len(full_act_dep[i]))
 
+    #==========================================================================
     # Reduce common action dependencies by adding dummies
     n_mix = n_act
     #
@@ -284,6 +280,7 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
             j += 1
         i += 1
 
+    #==========================================================================
     # Now build aoa network
     started = [False for i in act_ids]
     num_dep = [len(i) for i in min_act_dep]
@@ -300,9 +297,10 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
                 group.append(i)
         return group
 
+    dum = len(act_ids)
     chk = _find_started()
     evt += 1
-    dum = len(act_ids)
+
     i = 0
     while i < len(chk):
         for j in range(len(min_act_dep)):
@@ -311,17 +309,62 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
         #
         start = _find_started()
         if len(start):
-            for a in min_act_dep[start[0]]:
-                act_dst[a] = evt
+            finish = min_act_dep[start[0]]
+            act_dst[finish[0]] = evt
+            if len(finish) > 1:
+                pivot = evt
+                for a in finish[1:]:
+                    evt += 1
+                    act_dst[a] = evt
+
+                    act_pos.append(dum)
+                    act_ids.append(65535)
+                    act_src[dum] = evt
+                    act_dst[dum] = pivot
+                    dum += 1
+            else:
+                act_dst[finish[0]] = evt
+
             evt += 1
         chk += start
         i += 1
 
-    for i in range(dum):
-        if 0 == act_dst[i]:
+
+    # Constuct result
+    act_pos = sorted(act_pos, key=lambda i: act_src[i])
+
+    pivot = evt
+    last_src = 0
+    d = dum
+    for p in range(d):
+        i = act_pos[p]
+        if act_dst[i] > 0:
+            continue
+        #
+        if act_src[i] != last_src:
+            last_src   = act_src[i]
+            act_dst[i] = pivot
+        else:
+            evt += 1
             act_dst[i] = evt
 
-    return True, act_src[:dum].copy(), act_dst[:dum].copy(), act_ids, act_pos
+            act_pos.append(dum)
+            act_ids.append(65535)
+            act_src[dum] = evt
+            act_dst[dum] = pivot
+            dum += 1
+
+    # Constuct result
+    res_pos = sorted(act_pos, key=lambda i: act_ids[i])
+    res_src = []
+    res_dst = []
+    for p in res_pos:
+        res_src.append(act_src[p])
+        res_dst.append(act_dst[p])
+
+    res_ids = [i for i in act_ids if i != 65535]
+
+    return True, res_ids, res_src, res_dst
 
 #==============================================================================
 if __name__ == '__main__':
@@ -352,4 +395,4 @@ if __name__ == '__main__':
     uni = set(src + dst)
     act = list(range(min(uni), max(uni) + 1))
 
-    status, act_src, act_dst, act_ids, act_pos = reduce_dependencies(act, src, dst)
+    status, act_ids, act_src, act_dst = make_aoa(act, src, dst)
