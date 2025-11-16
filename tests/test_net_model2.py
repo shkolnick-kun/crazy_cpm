@@ -247,21 +247,19 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
     # Next reduce overlaping lists of dependencies
     #
     n_rnl = n_mix
-    p = 0
-    while p < n_rnl:
-        i = act_pos[p]
+    i = 0
+    while i < n_rnl:
         #
         if not len(full_act_dep[i]):
-            p += 1
+            i += 1
             continue
         # Search for overlapping lists
         min_com_deps  = []
-        q = 0
-        while q < n_rnl:
-            j = act_pos[q]
+        j = 0
+        while j < n_rnl:
             #
             if not len(full_act_dep[j]):
-                q += 1
+                j += 1
                 continue
             #
             min_com_deps = []
@@ -272,7 +270,7 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
             if 0 == len(min_com_deps) or len(min_act_dep[i]) == len(min_com_deps):
                 # Skip equal or nonoverlapping lists
                 min_com_deps = []
-                q += 1
+                j += 1
                 continue
             #
             # Reduce first two actions dependencies overlap
@@ -288,14 +286,13 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
             _handle_deps(min_com_deps, j)
             _add_a_dummy(full_com_deps, min_com_deps)
             n_mix += 1
-            q += 1
+            j += 1
             break
         #
-        while q < n_rnl:
-            j = act_pos[q]
+        while j < n_rnl:
             #
             if not len(full_act_dep[j]):
-                q += 1
+                j += 1
                 continue
             #
             com_deps = []
@@ -305,7 +302,7 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
             #
             if 0 == len(com_deps) or len(min_act_dep[i]) == len(com_deps):
                 # Skip equal or nonoverlapping lists
-                q += 1
+                j += 1
                 continue
             #
             # Reduce remaining action dependencies overlap
@@ -317,8 +314,8 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
             _handle_deps(min_com_deps, j)
             _add_a_dummy(full_com_deps, min_com_deps)
             n_mix += 1
-            q += 1
-        p += 1
+            j += 1
+        i += 1
 
     #act_pos = sorted(act_pos, key=lambda i: len(full_act_dep[i]))
 
