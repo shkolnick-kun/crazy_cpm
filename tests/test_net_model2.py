@@ -77,14 +77,14 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
     n_act = len(act_ids)
 
     # Full size
-    n = max(n_act, len(lnk_src)) + len(lnk_src)
+    nf = max(n_act, len(lnk_src)) + len(lnk_src)
 
     # Dependenci lists
     full_act_dep = []
-    for i in range(n):
+    for i in range(nf):
         full_act_dep.append([])
 
-    full_dep_map = np.zeros((n, n), dtype=bool)
+    full_dep_map = np.zeros((nf, nf), dtype=bool)
 
     for i in range(len(lnk_src)):
         # Raplace action ids by positions
@@ -103,9 +103,11 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
         while j < len(full_act_dep[i]):
             d = full_act_dep[i][j]
             for k in full_act_dep[d]:
+                if full_dep_map[i, k]:
+                    continue
                 full_dep_map[i, k] = True
                 if i == k:
-                    return False #############################################
+                    return False, act_ids, None, None, None, None, None
                 full_act_dep[i].append(k)
             j += 1
 
@@ -114,12 +116,12 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
 
     # Compute minimal dependency map
     min_dep_map = full_dep_map.copy()
-    for m in range(n_act-1, -1, -1):
-        i = act_pos[m]
-        for p in range(len(full_act_dep[i])):
-            j = full_act_dep[i][p]
-            for q in range(len(full_act_dep[i])):
-                k = full_act_dep[i][q]
+    for p in range(n_act-1, -1, -1):
+        i = act_pos[p]
+        for l in range(len(full_act_dep[i])):
+            j = full_act_dep[i][l]
+            for m in range(len(full_act_dep[i])):
+                k = full_act_dep[i][m]
                 if k == j:
                     continue
                 if full_dep_map[k, j]:
@@ -127,41 +129,228 @@ def reduce_dependencies(_act_ids, _lnk_src, _lnk_dst):
 
     # Compute minimal dependency lists
     min_act_dep = []
-    for m in range(n):
+    for m in range(nf):
         min_act_dep.append([])
 
     for m in range(n_act):
         i = act_pos[m]
-        for j in range(n):
+        for j in range(nf):
             if min_dep_map[i, j]:
                 min_act_dep[i].append(j)
 
-    # Reduce work dependencies
+    # We need succesors to go later and action with shorter dep lists to go earlier
+    act_pos = sorted(act_pos, key=lambda i: len(min_dep_map[i]))
+    act_pos = sorted(act_pos, key=lambda i: len(full_act_dep[i]))
 
-    return True
+    # Reduce common action dependencies by adding dummies
+    n_mix = n_act
+    #
+    def _handle_deps(min_deps, target):
+        #
+        # Append to target predeceptors
+        full_dep_map[target, n_mix] = True
+        full_act_dep[target].append(n_mix)
+        #
+        # Replace target min dependeoncies with dummy action
+        for d in min_deps:
+            min_dep_map[target, d] = False
+            min_dep_map[target, n_mix] = True
+            # Recompute target min deps
+        min_act_dep[target] = []
+        for d in range(nf):
+            if min_dep_map[target,  d]:
+                min_act_dep[target].append(d)
+
+
+    def _add_a_dummy(full_deps, min_deps):
+        act_ids.append(0)
+        act_pos.append(n_mix)
+        # Set dummmy information if needed
+        min_act_dep[n_mix] = min_deps.copy()
+        for d in min_deps:
+            min_dep_map[n_mix,  d] = True
+
+        full_act_dep[n_mix] = full_deps.copy()
+        for d in full_deps:
+            full_dep_map[n_mix, d] = True
+
+    # Firsh reduce nested list of dependencies
+    p = 0
+    while p < n_act:
+        i = act_pos[p]
+        if not len(full_act_dep[i]):
+            p += 1
+            continue
+        #
+        # Searching for nested list
+        min_com_deps  = []
+        q = p + 1
+        while q < n_act:
+            j = act_pos[q]
+            #
+            if 0 == len(full_act_dep[j]):
+                q += 1
+                continue
+            #
+            min_com_deps = []
+            for d in min_act_dep[i]:
+                if min_dep_map[j,  d]:
+                    min_com_deps.append(d)
+            #
+            if 0 == len(min_com_deps):
+                q += 1
+                continue
+            #
+            if len(min_act_dep[i]) == len(min_com_deps):
+                #Skip equal lists
+                if len(min_act_dep[j]) == len(min_com_deps):
+                    min_com_deps = []
+                    q += 1
+                    continue
+                # Found nested list
+                _handle_deps(min_com_deps, j)
+                q += 1
+                break
+            #
+            min_com_deps = []
+            q += 1
+        #
+        # Now handle deps for next actions with the same deps nested
+        while q < n_act:
+            j = act_pos[q]
+            #
+            com_deps = []
+            for d in min_com_deps:
+                if min_dep_map[j,  d]:
+                    com_deps.append(d)
+            #
+            if 0 == len(com_deps):
+                q += 1
+                continue
+            #
+            if len(min_com_deps) == len(com_deps):
+                #Skip equal lists
+                if len(min_com_deps) == len(min_act_dep[j]):
+                    q += 1
+                    continue
+                # Found nested list
+                _handle_deps(min_com_deps, j)
+            #
+            q += 1
+        # Now we may add s new dummy
+        if 0 < len(min_com_deps):
+            _add_a_dummy(full_act_dep[i], min_com_deps)
+            n_mix += 1
+
+        p += 1
+
+    # Next reduce overlaping lists of dependencies
+    #
+    n_rnl = n_mix
+    p = 0
+    while p < n_rnl:
+        i = act_pos[p]
+        #
+        if not len(full_act_dep[i]):
+            p += 1
+            continue
+        # Search for overlapping lists
+        min_com_deps  = []
+        q = 0
+        while q < n_rnl:
+            j = act_pos[q]
+            #
+            if not len(full_act_dep[j]):
+                q += 1
+                continue
+            #
+            min_com_deps = []
+            for d in min_act_dep[i]:
+                if min_dep_map[j,  d]:
+                    min_com_deps.append(d)
+            #
+            if 0 == len(min_com_deps) or len(min_act_dep[i]) == len(min_com_deps):
+                # Skip equal or nonoverlapping lists
+                min_com_deps = []
+                q += 1
+                continue
+            #
+            # Reduce first two actions dependencies overlap
+            full_com_deps = []
+            for d in full_act_dep[i]:
+                if full_dep_map[j,  d]:
+                    full_com_deps.append(d)
+
+            _handle_deps(min_com_deps, i)
+            _add_a_dummy(full_com_deps, min_com_deps)
+            n_mix += 1
+
+            _handle_deps(min_com_deps, j)
+            _add_a_dummy(full_com_deps, min_com_deps)
+            n_mix += 1
+            q += 1
+            break
+        #
+        while q < n_rnl:
+            j = act_pos[q]
+            #
+            if not len(full_act_dep[j]):
+                q += 1
+                continue
+            #
+            com_deps = []
+            for d in min_com_deps:
+                if min_dep_map[j,  d]:
+                    com_deps.append(d)
+            #
+            if 0 == len(com_deps) or len(min_act_dep[i]) == len(com_deps):
+                # Skip equal or nonoverlapping lists
+                q += 1
+                continue
+            #
+            # Reduce remaining action dependencies overlap
+            full_com_deps = []
+            for d in full_act_dep[i]:
+                if full_dep_map[j,  d]:
+                    full_com_deps.append(d)
+
+            _handle_deps(min_com_deps, j)
+            _add_a_dummy(full_com_deps, min_com_deps)
+            n_mix += 1
+            q += 1
+        p += 1
+
+    #act_pos = sorted(act_pos, key=lambda i: len(full_act_dep[i]))
+
+    return True, act_ids, act_pos, min_dep_map, min_act_dep, full_dep_map, full_act_dep
 
 #==============================================================================
 if __name__ == '__main__':
-    # Example usage with all link formats and new duration input methods
-    wbs = {
-        # Standard format (backward compatibility)
-         1: {'letter': 'A', 'duration': 1., 'name': 'A1'},
-         2: {'letter': 'B', 'duration': 1., 'name': 'A2'},
-         3: {'letter': 'C', 'duration': 2., 'name': 'A3'},
+    act = list(range(14))
 
-         4: {'letter': 'D', 'duration': 3., 'name': 'A4'},
+    #src = []
+    #dst = []
 
-         5: {'letter': 'E', 'duration': 1., 'name': 'A5'},
-         6: {'letter': 'F', 'duration': 1., 'name': 'A6'},
-         7: {'letter': 'G', 'duration': 2., 'name': 'A7'},
+    #src = [1, 2, 3,  5, 6, 7,   4, 4, 4 ]
+    #dst = [5, 6, 7,  8, 9, 10,  8, 9, 10]
 
-         8: {'letter': 'H', 'duration': 3., 'name': 'A8'},
-         9: {'letter': 'J', 'duration': 1., 'name': 'A9'},
-        10: {'letter': 'K', 'duration': 4., 'name': 'A10'},
-    }
+    #src = [1, 2, 3,  5, 6, 7,   4, 4, 4, 10,]
+    #dst = [5, 6, 7,  8, 9, 10,  8, 9, 10, 3,]
 
-    act = list(wbs.keys())
-    src = [1, 2, 3,  5, 6, 7,   4, 4, 4 ]
-    dst = [5, 6, 7,  8, 9, 10,  8, 9, 10]
+    #src = [1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ]
+    #dst = [2, 3, 4,  5, 5, 5,  6, 7, 8,  9, 9, 9,  10, 11, 12 ]
 
-    reduce_dependencies(act, src, dst)
+    #src = [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7,  3, 6, 7,  6, 8, 9,  7, 8, 9,10]
+    #dst = [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
+
+    #
+    #src = [1, 1, 1, 2, 2, 3,]
+    #dst = [4, 5, 6, 5, 6, 6,]
+
+    src = [1,2,3, 2,3, 3, 4, 5, 6,  4, 5, 6,  0, 7,  0, 8,10, 0, 9, 10]
+    dst = [4,4,4, 5,5, 6, 7, 8, 9, 10,10,10, 11,11, 12,12,12, 13,13,13]
+
+    uni = set(src + dst)
+    act = list(range(min(uni), max(uni) + 1))
+
+    status, act_ids, act_pos, min_dep_map, min_act_dep, full_dep_map, full_act_dep = reduce_dependencies(act, src, dst)
