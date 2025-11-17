@@ -23,6 +23,8 @@
 #==============================================================================
 import numpy as np
 
+CCPM_FAKE = 65535
+
 def make_aoa(_act_ids, _lnk_src, _lnk_dst):
     assert isinstance(_act_ids, list)
     assert isinstance(_lnk_src, list)
@@ -126,7 +128,7 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
 
 
     def _add_a_dummy(full_deps, min_deps):
-        act_ids.append(65535)
+        act_ids.append(CCPM_FAKE)
         act_pos.append(n_mix)
         # Set dummmy information if needed
         min_act_dep[n_mix] = min_deps.copy()
@@ -286,6 +288,7 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
     num_dep = [len(i) for i in min_act_dep]
     act_src = [0 for i in range(nf)]
     act_dst = [0 for i in range(nf)]
+    events  = []
 
     evt = 1
     def _find_started():
@@ -299,6 +302,8 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
 
     dum = len(act_ids)
     chk = _find_started()
+    #
+    events.append(evt)
     evt += 1
 
     i = 0
@@ -310,9 +315,20 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
         start = _find_started()
         if len(start):
             for a in min_act_dep[start[0]]:
-                act_dst[a] = evt
-
+                if act_dst[a]:
+                    # Now we have to add an extra dummy
+                    act_pos.append(dum)
+                    act_ids.append(CCPM_FAKE)
+                    act_src[dum] = act_dst[a]
+                    act_dst[dum] = evt
+                    started.append(True)
+                    dum += 1
+                else:
+                    act_dst[a] = evt
+            #
+            events.append(evt)
             evt += 1
+        #
         chk += start
         i += 1
 
@@ -320,9 +336,121 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
         if 0 == act_dst[i]:
             act_dst[i] = evt;
 
-    # Add more dummies
-    act_pos = sorted(act_pos, key=lambda i: act_dst[i])
-    act_pos = sorted(act_pos, key=lambda i: act_src[i])
+    #Append last event
+    events.append(evt)
+
+    #==========================================================================
+    # OK, we have a basic network now
+    # Let us try to optimize it
+    evt_deps = [[] for e in events]
+    evt_dums = [[] for e in events]
+    evt_real = [False for e in events]
+    evt_pos  = [i for i in range(len(events))]
+
+    for i in range(nf):
+        for j in range(nf):
+            full_dep_map[i,j] = False
+    #
+    for k in range(dum):
+        i = act_dst[k] - 1
+        j = act_src[k] - 1
+        #
+        if CCPM_FAKE != act_ids[k]:
+            evt_real[i] = True
+            continue
+        #
+        evt_dums[i].append(k)
+        evt_deps[i].append(j)
+        full_dep_map[i,j] = True
+
+    # Work with redundant events and dummies (part 1)
+    # If some events have only dummy inputs and have equal dependencies
+    # (earlier events) then we can "glue" them together
+    for i in range(len(events)):
+        if evt_real[i]:
+            continue
+        if not len(evt_deps[i]):
+            continue
+        #
+        for j in range(i + 1, len(events)):
+            if evt_real[j]:
+                continue
+            if not len(evt_deps[i]):
+                continue
+            #
+            if len(evt_deps[i]) != len(evt_deps[j]):
+                continue
+            #
+            s = 0
+            for d in evt_deps[i]:
+                if full_dep_map[j, d]:
+                    s += 1
+
+            # Will redirect act_src later
+            # (events[i] != (i + 1)) is feature of redundant event
+            if len(evt_deps[i]) == s:
+                events[j] = events[i]
+
+                for d in evt_dums[j]:
+                    # Don't need these dummies anymore
+                    act_src[d] = CCPM_FAKE
+                    act_dst[d] = CCPM_FAKE
+
+    # Redirect outputs of redundant events
+    for i in range(dum):
+        # Skip redundant dummies
+        if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
+            continue
+        act_src[i] = events[act_src[i] - 1]
+
+
+    #==========================================================================
+    # Renumerate events
+    evt = 1
+    for i in range(len(events)):
+        if events[i] != (i + 1):
+            events[i] = CCPM_FAKE
+            continue
+        events[i] = evt
+        evt += 1
+
+    for i in range(dum):
+        # Skip redundant dummies
+        if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
+            continue
+        act_src[i] = events[act_src[i] - 1]
+        act_dst[i] = events[act_dst[i] - 1]
+
+    #==========================================================================
+    # Remove redundant dummies
+    j = 0
+    rm = 0
+    rm_src = []
+    rm_dst = []
+    rm_ids = []
+    rm_pos = []
+
+    for p in range(dum):
+        i = act_pos[p]
+        if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
+            rm += 1
+            continue
+        rm_src.append(act_src[i])
+        rm_dst.append(act_dst[i])
+        rm_ids.append(act_ids[i])
+        rm_pos.append(j)
+        j += 1
+    dum -= rm
+
+    act_src = rm_src.copy()
+    act_dst = rm_dst.copy()
+    act_ids = rm_ids.copy()
+    act_pos = rm_pos.copy()
+
+    #==========================================================================
+    # Add needed dummies
+    act_pos = sorted(act_pos[:dum], key=lambda i: act_dst[i])
+    act_pos = sorted(act_pos[:dum], key=lambda i: act_src[i])
     d = dum
     for i in range(d):
         if not started[i]:
@@ -336,7 +464,7 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
                 act_dst[j] = evt
 
                 act_pos.append(dum)
-                act_ids.append(65535)
+                act_ids.append(CCPM_FAKE)
                 act_src[dum] = evt
                 act_dst[dum] = act_dst[i]
                 dum += 1
@@ -349,7 +477,7 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
         res_src.append(act_src[p])
         res_dst.append(act_dst[p])
 
-    res_ids = [i for i in act_ids if i != 65535]
+    res_ids = [i for i in act_ids if i != CCPM_FAKE]
 
     return True, res_ids, res_src, res_dst
 
@@ -369,15 +497,15 @@ if __name__ == '__main__':
     #src = [1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ]
     #dst = [2, 3, 4,  5, 5, 5,  6, 7, 8,  9, 9, 9,  10, 11, 12 ]
 
-    #src = [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7,  3, 6, 7,  6, 8, 9,  7, 8, 9,10]
-    #dst = [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
+    src = [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7,  3, 6, 7,  6, 8, 9,  7, 8, 9,10]
+    dst = [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
 
     #
     #src = [1, 1, 1, 2, 2, 3,]
     #dst = [4, 5, 6, 5, 6, 6,]
 
-    src = [1,2,3, 2,3, 3, 4, 5, 6,  4, 5, 6,  0, 7,  0, 8,10, 0, 9, 10]
-    dst = [4,4,4, 5,5, 6, 7, 8, 9, 10,10,10, 11,11, 12,12,12, 13,13,13]
+    #src = [1,2,3, 2,3, 3, 4, 5, 6,  4, 5, 6,  0, 7,  0, 8,10, 0, 9, 10]
+    #dst = [4,4,4, 5,5, 6, 7, 8, 9, 10,10,10, 11,11, 12,12,12, 13,13,13]
 
     uni = set(src + dst)
     act = list(range(min(uni), max(uni) + 1))
