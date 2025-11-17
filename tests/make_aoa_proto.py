@@ -342,10 +342,11 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
     #==========================================================================
     # OK, we have a basic network now
     # Let us try to optimize it
-    evt_deps = [[] for e in events]
-    evt_dums = [[] for e in events]
-    evt_real = [False for e in events]
-    evt_pos  = [i for i in range(len(events))]
+
+    evt_deps  = [[] for e in events]
+    evt_dins  = [[] for e in events]
+    evt_real  = [False for e in events]
+    evt_pos   = [i for i in range(len(events))]
 
     for i in range(nf):
         for j in range(nf):
@@ -354,16 +355,17 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
     for k in range(dum):
         i = act_dst[k] - 1
         j = act_src[k] - 1
+
         #
         if CCPM_FAKE != act_ids[k]:
             evt_real[i] = True
             continue
         #
-        evt_dums[i].append(k)
+        evt_dins[i].append(k)
         evt_deps[i].append(j)
         full_dep_map[i,j] = True
 
-    # Work with redundant events and dummies (part 1)
+
     # If some events have only dummy inputs and have equal dependencies
     # (earlier events) then we can "glue" them together
     for i in range(len(events)):
@@ -375,7 +377,7 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
         for j in range(i + 1, len(events)):
             if evt_real[j]:
                 continue
-            if not len(evt_deps[i]):
+            if len(evt_deps[i]) < 2:
                 continue
             #
             if len(evt_deps[i]) != len(evt_deps[j]):
@@ -391,18 +393,67 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
             if len(evt_deps[i]) == s:
                 events[j] = events[i]
 
-                for d in evt_dums[j]:
+                for d in evt_dins[j]:
                     # Don't need these dummies anymore
                     act_src[d] = CCPM_FAKE
                     act_dst[d] = CCPM_FAKE
 
-    # Redirect outputs of redundant events
-    for i in range(dum):
-        # Skip redundant dummies
-        if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
-            continue
-        act_src[i] = events[act_src[i] - 1]
 
+    # Work with redundant events and dummies (part 2)
+    # "Glue" events each of which has only one input which is dummy
+    # to their predeceptors
+    for i in range(len(events)):
+        if evt_real[i]:
+            continue
+        if 1 == len(evt_deps[i]):
+            d = evt_dins[i][0]
+            events[i] = act_src[d]
+            # Don't need this dummy anymore
+            act_src[d] = CCPM_FAKE
+            act_dst[d] = CCPM_FAKE
+
+    #Do "Glue": Redirect IOs of redundant events
+    def _do_glue():
+        for i in range(dum):
+            # Skip redundant dummies
+            if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
+                continue
+            act_src[i] = events[act_src[i] - 1]
+            act_dst[i] = events[act_dst[i] - 1]
+
+    _do_glue()
+
+    # Work with redundant events and dummies (part 3)
+    # "Glue" events each of which has only one output which is dummy
+    # to their successors
+    evt_douts = [[] for e in events]
+    evt_nout  = [0 for e in events]
+    for k in range(dum):
+        if CCPM_FAKE == act_src[k] or CCPM_FAKE == act_dst[k]:
+            continue
+        #
+        j = act_src[k] - 1
+        #
+        evt_nout[j] += 1
+        #
+        if CCPM_FAKE != act_ids[k]:
+            continue
+        #
+        evt_douts[j].append(k)
+
+    for i in range(len(events)):
+        if evt_nout[i] > 1:
+            continue
+        if len(evt_douts[i]) < 1:
+            continue
+        d = evt_douts[i][0]
+        events[i] = act_dst[d]
+        # Don't need this dummy anymore
+        act_src[d] = CCPM_FAKE
+        act_dst[d] = CCPM_FAKE
+
+
+    _do_glue()
 
     #==========================================================================
     # Renumerate events

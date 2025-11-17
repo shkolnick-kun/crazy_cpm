@@ -781,7 +781,6 @@ class NetworkModel:
 
         # Create network model
         self._create_model(wbs_dict, lnk_src, lnk_dst, default_risk)
-
         assert 0 < len(self.events)
 
         # Compute stages of project
@@ -1379,27 +1378,39 @@ class NetworkModel:
 
 #==============================================================================
 if __name__ == '__main__':
-    # Example usage with all link formats and new duration input methods
     wbs = {
         # Standard format (backward compatibility)
-         1: {'letter': 'A', 'duration': 1., 'name': 'A1'},
-         2: {'letter': 'B', 'duration': 1., 'name': 'A2'},
-         3: {'letter': 'C', 'duration': 2., 'name': 'A3'},
-         4: {'letter': 'D', 'duration': 3., 'name': 'A4'},
-         5: {'letter': 'E', 'duration': 1., 'name': 'A5'},
-         6: {'letter': 'F', 'duration': 1., 'name': 'A6'},
-         7: {'letter': 'G', 'duration': 2., 'name': 'A7'},
-         8: {'letter': 'H', 'duration': 3., 'name': 'A8'},
-         9: {'letter': 'J', 'duration': 1., 'name': 'A9'},
-        10: {'letter': 'K', 'duration': 4., 'name': 'A10'},
-        11: {'letter': 'L', 'duration': 5., 'name': 'A11'},
-        12: {'letter': 'M', 'duration': 5., 'name': 'A12'},
-        #13: {'letter': 'O', 'duration': 5., 'name': 'A13'},
-        #14: {'letter': 'P', 'duration': 5., 'name': 'A14'},
-    }
+        1: {'letter': 'A', 'duration': 3.84, 'variance': 0.00, 'name': 'Heating and frames study'},
 
-    #src = [1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ]
-    #dst = [2, 3, 4,  5, 5, 5,  6, 7, 8,  9, 9, 9,  10, 11, 12 ]
+        # Three-point PERT format
+        2: {'letter': 'B', 'optimistic': 1.5, 'most_likely': 2.0, 'pessimistic': 3.0,
+            'name': 'Scouring and installation of building site establishment'},
+
+        # Two-point PERT format
+        3: {'letter': 'C', 'optimistic': 3.0, 'pessimistic': 5.0, 'name': 'Earthwork and concrete well'},
+
+        # Standard format with zero variance
+        4: {'letter': 'D', 'duration': 4., 'name': 'Earthwork and concrete longitudinal beams'},
+
+        # Three-point PERT
+        5: {'letter': 'E', 'optimistic': 5.0, 'most_likely': 6.0, 'pessimistic': 8.0, 'name': 'Frame construction'},
+
+        # Standard format
+        6: {'letter': 'F', 'duration': 6., 'variance': 0.01, 'name': 'Frame transport'},
+        7: {'letter': 'G', 'duration': 6., 'variance': 0.01, 'name': 'Assemblage'},
+
+        # Two-point PERT
+        8: {'letter': 'H', 'optimistic': 1.5, 'pessimistic': 3.0, 'name': 'Earthwork and pose drains'},
+
+        # Three-point PERT
+        9: {'letter': 'I', 'optimistic': 4.0, 'most_likely': 5.0, 'pessimistic': 7.0,
+            'name': 'Heating provisioning and assembly'},
+
+        # Standard format
+        10: {'letter': 'J', 'duration': 5., 'variance': 0.01, 'name': 'Electric installation'},
+        11: {'letter': 'K', 'duration': 2., 'variance': 0.01, 'name': 'Painting'},
+        12: {'letter': 'L', 'duration': 1., 'variance': 0.01, 'name': 'Pavement'}
+    }
 
     src = [1,2,3, 2,3, 3,4, 1,6,7, 5,6,7,  3, 6, 7,  6, 8, 9,  7, 8, 9,10]
     dst = [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
