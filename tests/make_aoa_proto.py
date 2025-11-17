@@ -309,50 +309,37 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
         #
         start = _find_started()
         if len(start):
-            finish = min_act_dep[start[0]]
-            act_dst[finish[0]] = evt
-            if len(finish) > 1:
-                pivot = evt
-                for a in finish[1:]:
-                    evt += 1
-                    act_dst[a] = evt
-
-                    act_pos.append(dum)
-                    act_ids.append(65535)
-                    act_src[dum] = evt
-                    act_dst[dum] = pivot
-                    dum += 1
-            else:
-                act_dst[finish[0]] = evt
+            for a in min_act_dep[start[0]]:
+                act_dst[a] = evt
 
             evt += 1
         chk += start
         i += 1
 
+    for i in range(dum):
+        if 0 == act_dst[i]:
+            act_dst[i] = evt;
 
-    # Constuct result
+    # Add more dummies
+    act_pos = sorted(act_pos, key=lambda i: act_dst[i])
     act_pos = sorted(act_pos, key=lambda i: act_src[i])
-
-    pivot = evt
-    last_src = 0
     d = dum
-    for p in range(d):
-        i = act_pos[p]
-        if act_dst[i] > 0:
+    for i in range(d):
+        if not started[i]:
             continue
-        #
-        if act_src[i] != last_src:
-            last_src   = act_src[i]
-            act_dst[i] = pivot
-        else:
-            evt += 1
-            act_dst[i] = evt
 
-            act_pos.append(dum)
-            act_ids.append(65535)
-            act_src[dum] = evt
-            act_dst[dum] = pivot
-            dum += 1
+        for j in range(i + 1, d):
+            if act_dst[i] == act_dst[j] and act_src[i] == act_src[j]:
+                started[j] = False
+
+                evt += 1
+                act_dst[j] = evt
+
+                act_pos.append(dum)
+                act_ids.append(65535)
+                act_src[dum] = evt
+                act_dst[dum] = act_dst[i]
+                dum += 1
 
     # Constuct result
     res_pos = sorted(act_pos, key=lambda i: act_ids[i])
@@ -386,11 +373,11 @@ if __name__ == '__main__':
     #dst = [5,5,5, 6,6, 7,7, 8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12]
 
     #
-    src = [1, 1, 1, 2, 2, 3,]
-    dst = [4, 5, 6, 5, 6, 6,]
+    #src = [1, 1, 1, 2, 2, 3,]
+    #dst = [4, 5, 6, 5, 6, 6,]
 
-    #src = [1,2,3, 2,3, 3, 4, 5, 6,  4, 5, 6,  0, 7,  0, 8,10, 0, 9, 10]
-    #dst = [4,4,4, 5,5, 6, 7, 8, 9, 10,10,10, 11,11, 12,12,12, 13,13,13]
+    src = [1,2,3, 2,3, 3, 4, 5, 6,  4, 5, 6,  0, 7,  0, 8,10, 0, 9, 10]
+    dst = [4,4,4, 5,5, 6, 7, 8, 9, 10,10,10, 11,11, 12,12,12, 13,13,13]
 
     uni = set(src + dst)
     act = list(range(min(uni), max(uni) + 1))
