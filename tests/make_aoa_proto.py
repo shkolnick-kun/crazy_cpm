@@ -456,58 +456,19 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
     _do_glue()
 
     #==========================================================================
-    # Renumerate events
-    evt = 1
-    for i in range(len(events)):
-        if events[i] != (i + 1):
-            events[i] = CCPM_FAKE
-            continue
-        events[i] = evt
-        evt += 1
-
-    for i in range(dum):
-        # Skip redundant dummies
-        if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
-            continue
-        act_src[i] = events[act_src[i] - 1]
-        act_dst[i] = events[act_dst[i] - 1]
-
-    #==========================================================================
-    # Remove redundant dummies
-    j = 0
-    rm = 0
-    rm_src = []
-    rm_dst = []
-    rm_ids = []
-    rm_pos = []
-
-    for p in range(dum):
-        i = act_pos[p]
-        if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
-            rm += 1
-            continue
-        rm_src.append(act_src[i])
-        rm_dst.append(act_dst[i])
-        rm_ids.append(act_ids[i])
-        rm_pos.append(j)
-        j += 1
-    dum -= rm
-
-    act_src = rm_src.copy()
-    act_dst = rm_dst.copy()
-    act_ids = rm_ids.copy()
-    act_pos = rm_pos.copy()
-
-    #==========================================================================
     # Add needed dummies
-    act_pos = sorted(act_pos[:dum], key=lambda i: act_dst[i])
-    act_pos = sorted(act_pos[:dum], key=lambda i: act_src[i])
+    act_pos = sorted(act_pos, key=lambda i: act_dst[i])
+    act_pos = sorted(act_pos, key=lambda i: act_src[i])
     d = dum
     for i in range(d):
+        if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
+            continue
         if not started[i]:
             continue
 
         for j in range(i + 1, d):
+            if CCPM_FAKE == act_src[j] or CCPM_FAKE == act_dst[j]:
+                continue
             if act_dst[i] == act_dst[j] and act_src[i] == act_src[j]:
                 started[j] = False
 
@@ -519,12 +480,36 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
                 act_src[dum] = evt
                 act_dst[dum] = act_dst[i]
                 dum += 1
+                events.append(evt)
+
+    #==========================================================================
+    # Renumerate events
+    evt = 1
+    for i in range(len(events)):
+        if events[i] != (i + 1):
+            events[i] = CCPM_FAKE
+            continue
+        events[i] = evt
+        evt += 1
+
+    for i in range(dum):
+        # Skip redundant dummies and events
+        if CCPM_FAKE == act_src[i] or CCPM_FAKE == act_dst[i]:
+            continue
+        if CCPM_FAKE == events[act_src[i] - 1] or \
+            CCPM_FAKE == events[act_dst[i] - 1]:
+            continue
+        #
+        act_src[i] = events[act_src[i] - 1]
+        act_dst[i] = events[act_dst[i] - 1]
 
     # Constuct result
     res_pos = sorted(act_pos, key=lambda i: act_ids[i])
     res_src = []
     res_dst = []
     for p in res_pos:
+        if CCPM_FAKE == act_src[p] or CCPM_FAKE == act_dst[p]:
+            continue
         res_src.append(act_src[p])
         res_dst.append(act_dst[p])
 
