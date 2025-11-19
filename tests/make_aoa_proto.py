@@ -103,13 +103,14 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
                 min_act_dep[i].append(j)
 
     # We need succesors to go later and action with shorter dep lists to go earlier
-    act_pos = sorted(act_pos, key=lambda i: len(min_dep_map[i]))
+    act_pos = sorted(act_pos, key=lambda i: len(min_act_dep[i]))
     act_pos = sorted(act_pos, key=lambda i: len(full_act_dep[i]))
 
     #==========================================================================
     # Reduce common action dependencies by adding dummies
     n_mix = n_act
-    #
+
+    #--------------------------------------------------------------------------
     def _handle_deps(min_deps, target):
         #
         # Append to target predeceptors
@@ -126,8 +127,8 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
             if min_dep_map[target,  d]:
                 min_act_dep[target].append(d)
 
-
-    def _add_a_dummy(full_deps, min_deps):
+    #--------------------------------------------------------------------------
+    def _add_a_dummy(min_deps, deps, dep_map):
         act_ids.append(CCPM_FAKE)
         act_pos.append(n_mix)
         # Set dummmy information if needed
@@ -135,15 +136,37 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
         for d in min_deps:
             min_dep_map[n_mix,  d] = True
 
-        full_act_dep[n_mix] = full_deps.copy()
-        for d in full_deps:
-            full_dep_map[n_mix, d] = True
+        full_act_dep[n_mix] = deps.copy()
+        full_dep_map[n_mix] = dep_map.copy()
 
+    #--------------------------------------------------------------------------
+    def _full_deps(min_deps):
+        deps    = min_deps.copy()
+        dep_map = np.zeros((nf,), dtype=bool)
+        #
+        i = 0
+        while i < len(deps):
+            j = deps[i]
+            for k in full_act_dep[j]:
+                if dep_map[k]:
+                    continue
+                #
+                dep_map[k] = True
+                #
+                if k == j:
+                    raise RuntimeError("FFFFUUUUUU~")
+                #
+                deps.append(k)
+            i += 1
+        #
+        return deps, dep_map
+
+    #==========================================================================
     # Firsh reduce nested list of dependencies
     p = 0
     while p < n_act:
         i = act_pos[p]
-        if not len(full_act_dep[i]):
+        if not len(min_act_dep[i]):
             p += 1
             continue
         #
@@ -153,7 +176,7 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
         while q < n_act:
             j = act_pos[q]
             #
-            if 0 == len(full_act_dep[j]):
+            if 0 == len(min_act_dep[j]):
                 q += 1
                 continue
             #
@@ -161,70 +184,70 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
             for d in min_act_dep[i]:
                 if min_dep_map[j,  d]:
                     min_com_deps.append(d)
-            #
-            if 0 == len(min_com_deps):
-                q += 1
-                continue
-            #
-            if len(min_act_dep[i]) == len(min_com_deps):
-                #Skip equal lists
-                if len(min_act_dep[j]) == len(min_com_deps):
-                    min_com_deps = []
-                    q += 1
-                    continue
-                # Found nested list
-                _handle_deps(min_com_deps, j)
-                q += 1
-                break
-            #
-            min_com_deps = []
+
+            lcd = len(min_com_deps)
+            if len(min_act_dep[i]) == lcd or len(min_act_dep[j]) == lcd:
+                if len(min_act_dep[i]) != len(min_act_dep[j]):
+                    # Nested lists, will reduce nesting lists
+                    break
+
+            # end while
             q += 1
-        #
-        # Now handle deps for next actions with the same deps nested
+
+        if 0 == len(min_com_deps):
+            # No nested lists found, continue
+            p += 1
+            continue
+
+        # Found nested lists will reduce them
+        lmcd = len(min_com_deps)
+        deps, dep_map = _full_deps(min_com_deps)
+        q = p + 1
         while q < n_act:
             j = act_pos[q]
             #
+            lmad = len(min_act_dep[j])
+            if 0 == lmad or lmad == lmcd:
+                # Skip empty, equal, non nested lists
+                q += 1
+                continue
+            #
             com_deps = []
             for d in min_com_deps:
                 if min_dep_map[j,  d]:
                     com_deps.append(d)
             #
-            if 0 == len(com_deps):
+            if len(com_deps) != lmcd:
+                # Skip non nested lists
                 q += 1
                 continue
-            #
-            if len(min_com_deps) == len(com_deps):
-                #Skip equal lists
-                if len(min_com_deps) == len(min_act_dep[j]):
-                    q += 1
-                    continue
-                # Found nested list
-                _handle_deps(min_com_deps, j)
-            #
-            q += 1
-        # Now we may add s new dummy
-        if 0 < len(min_com_deps):
-            _add_a_dummy(full_act_dep[i], min_com_deps)
-            n_mix += 1
 
+            # Reduce nested lists
+            _handle_deps(min_com_deps, j)
+            _add_a_dummy(min_com_deps, deps, dep_map)
+            n_mix += 1
+            # End while
+            q += 1
+        # End while
         p += 1
 
     # Next reduce overlaping lists of dependencies
-    #
     n_rnl = n_mix
-    i = 0
-    while i < n_rnl:
+    p = 0
+    while p < n_rnl:
         #
-        if not len(full_act_dep[i]):
-            i += 1
+        i = act_pos[p]
+        if not len(min_act_dep[i]):
+            p += 1
             continue
         # Search for overlapping lists
         min_com_deps  = []
-        j = 0
-        while j < n_rnl:
+        q = 0
+        while q < n_rnl:
             #
-            if not len(full_act_dep[j]):
-                j += 1
+            j = act_pos[q]
+            if not len(min_act_dep[j]):
+                q += 1
                 continue
             #
             min_com_deps = []
@@ -232,32 +255,26 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
                 if min_dep_map[j,  d]:
                     min_com_deps.append(d)
             #
-            if 0 == len(min_com_deps) or len(min_act_dep[i]) == len(min_com_deps):
-                # Skip equal or nonoverlapping lists
-                min_com_deps = []
-                j += 1
-                continue
-            #
-            # Reduce first two actions dependencies overlap
-            full_com_deps = []
-            for d in full_act_dep[i]:
-                if full_dep_map[j,  d]:
-                    full_com_deps.append(d)
-
-            _handle_deps(min_com_deps, i)
-            _add_a_dummy(full_com_deps, min_com_deps)
-            n_mix += 1
-
-            _handle_deps(min_com_deps, j)
-            _add_a_dummy(full_com_deps, min_com_deps)
-            n_mix += 1
-            j += 1
-            break
+            lmcd = len(min_com_deps)
+            if 0 < lmcd and len(min_act_dep[j]) != lmcd and len(min_act_dep[i]) != lmcd:
+                # Found overlapping lists
+                break
+            # End while
+            q += 1
         #
-        while j < n_rnl:
+        if 0 == len(min_com_deps):
+            n_rnl = n_mix
+            p += 1
+            continue
+        #
+        lmcd = len(min_com_deps)
+        deps, dep_map = _full_deps(min_com_deps)
+        q = 0
+        while q < n_rnl:
             #
-            if not len(full_act_dep[j]):
-                j += 1
+            j = act_pos[q]
+            if not len(min_act_dep[j]):
+                q += 1
                 continue
             #
             com_deps = []
@@ -265,22 +282,16 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
                 if min_dep_map[j,  d]:
                     com_deps.append(d)
             #
-            if 0 == len(com_deps) or len(min_act_dep[i]) == len(com_deps):
-                # Skip equal or nonoverlapping lists
-                j += 1
-                continue
-            #
-            # Reduce remaining action dependencies overlap
-            full_com_deps = []
-            for d in full_act_dep[i]:
-                if full_dep_map[j,  d]:
-                    full_com_deps.append(d)
-
-            _handle_deps(min_com_deps, j)
-            _add_a_dummy(full_com_deps, min_com_deps)
-            n_mix += 1
-            j += 1
-        i += 1
+            if lmcd == len(com_deps) and len(min_act_dep[j]) != lmcd:
+                # Reduce action dependencies overlap
+                _handle_deps(min_com_deps, j)
+                _add_a_dummy(min_com_deps, deps, dep_map)
+                n_mix += 1
+            # End while
+            q += 1
+        # End while
+        n_rnl = n_mix
+        p += 1
 
     #==========================================================================
     # Now build aoa network
@@ -451,7 +462,6 @@ def make_aoa(_act_ids, _lnk_src, _lnk_dst):
         # Don't need this dummy anymore
         act_src[d] = CCPM_FAKE
         act_dst[d] = CCPM_FAKE
-
 
     _do_glue()
 
