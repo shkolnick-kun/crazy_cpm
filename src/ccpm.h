@@ -42,32 +42,11 @@ typedef enum {
 static const uint16_t _ccpm_dep_buf##id[] = {__VA_ARGS__};
 
 /*===========================================================================*/
-ccpmResultEn ccpm_check_act_ids(uint16_t * act_id, uint16_t n_act);
-
-/*===========================================================================*/
-ccpmResultEn ccpm_check_links(uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk);
-
-/*===========================================================================*/
-ccpmResultEn ccpm_links_prepare(uint16_t * act_id, uint16_t n_act, uint16_t * lnk_src, \
-                                uint16_t * lnk_dst, uint16_t n_lnk);
-
-/*===========================================================================*/
-ccpmResultEn ccpm_populate_dep_info(uint16_t * act_id,  uint16_t * dep, \
-                                    uint16_t * n_dep,   bool     * dep_map, uint16_t n_act, \
-                                    uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk);
-
-/*===========================================================================*/
 ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n);
 
 /*===========================================================================*/
-ccpmResultEn ccpm_build_dep(uint16_t    n_act, int16_t     map_len,
-                            uint16_t *    tmp, uint16_t *   act_id, uint16_t * act_pos, \
-                            uint16_t * full_n, uint16_t * full_dep, bool     * full_map, \
-                            uint16_t *  opt_n, uint16_t *  opt_dep, bool     * opt_map);
-
-/*===========================================================================*/
 ccpmResultEn ccpm_make_aoa(uint16_t * act_id, uint16_t * act_src, uint16_t * act_dst, \
-                           uint16_t n_act, uint16_t * n_dum, \
+                           uint16_t * n_dum, \
                            uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t * n_lnk);
 
 /*===========================================================================*/

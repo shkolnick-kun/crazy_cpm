@@ -111,13 +111,6 @@ X(9,  4,6               )\
 X(10, 4,7               )
 
 /*===========================================================================*/
-/*Work index*/
-uint16_t wrk_index[] = {
-#   define X(id, ...) id,
-    WBS
-#   undef X
-};
-/*===========================================================================*/
 /*Compile time calculation of CCPM_WRK_NUM and work_pool size*/
 typedef enum
 {
@@ -126,6 +119,15 @@ typedef enum
 #   undef X
     CCPM_WRK_NUM /*Number of works*/
 }ccpmWrkEn;
+
+/*===========================================================================*/
+/*Work index*/
+uint16_t wrk_index[] = {
+    CCPM_WRK_NUM,
+#   define X(id, ...) id,
+    WBS
+#   undef X
+};
 
 uint16_t wrk_pos[CCPM_WRK_NUM];
 uint16_t tmp[CCPM_WRK_NUM];
@@ -164,6 +166,7 @@ uint16_t wrk_dst[2 * CCPM_WRK_NUM WBS];
 /*===========================================================================*/
 int main(void)
 {
+    printf("Work num: %d\n", (int)CCPM_WRK_NUM);
     printf("Link num: %d\n", (int)links_total);
     uint16_t l = links_total - 1;
     for (uint16_t s = 0; s < CCPM_WRK_NUM; s++)
@@ -171,8 +174,8 @@ int main(void)
         for (uint16_t d = 0; d < link_num[s]; d++)
         {
             link_src[l] = link_initializer[s][d];
-            link_dst[l] = wrk_index[s];
-            printf("Link[%d] = (%d, %d)\n", l, link_src[l], link_dst[l]);
+            link_dst[l] = wrk_index[s + 1];
+            printf("%d: (%d, %d)\n", l, link_src[l], link_dst[l]);
             l--;
         }
     }
@@ -180,29 +183,29 @@ int main(void)
     uint16_t n_lnk = links_total;
     uint16_t n_dum = 0;
 
-    ccpm_make_aoa(wrk_index, wrk_src, wrk_dst, CCPM_WRK_NUM, &n_dum, link_src, link_dst, &n_lnk);
+    ccpm_make_aoa(wrk_index, wrk_src, wrk_dst, &n_dum, link_src, link_dst, &n_lnk);
 
-    for (uint16_t i = 0; i < CCPM_WRK_NUM; i++)
-    {
-        wrk_pos[i] = i;
-    }
+//    for (uint16_t i = 0; i < CCPM_WRK_NUM; i++)
+//    {
+//        wrk_pos[i] = i;
+//    }
 
-    ccpm_sort(tmp, wrk_pos, wrk_dst, CCPM_WRK_NUM);
-    ccpm_sort(tmp, wrk_pos, wrk_src, CCPM_WRK_NUM);
-
-    printf("Scheduled works: \n");
-    for (uint16_t i = 0; i < CCPM_WRK_NUM; i++)
-    {
-        printf("%5d: %5d %5d\n", wrk_index[wrk_pos[i]], wrk_src[wrk_pos[i]], wrk_dst[wrk_pos[i]]);
-    }
-
-    printf("Scheduled dummy works: \n");
-    for (uint16_t i = 0; i < n_dum; i++)
-    {
-        printf("%5d: %5d %5d\n", i + 1, wrk_src[CCPM_WRK_NUM + i], wrk_dst[CCPM_WRK_NUM + i]);
-    }
-
-    printf("Optimized links: %d", n_lnk);
+//    ccpm_sort(tmp, wrk_pos, wrk_dst, CCPM_WRK_NUM);
+//    ccpm_sort(tmp, wrk_pos, wrk_src, CCPM_WRK_NUM);
+//
+//    printf("Scheduled works: \n");
+//    for (uint16_t i = 0; i < CCPM_WRK_NUM; i++)
+//    {
+//        printf("%5d: %5d %5d\n", wrk_index[wrk_pos[i]], wrk_src[wrk_pos[i]], wrk_dst[wrk_pos[i]]);
+//    }
+//
+//    printf("Scheduled dummy works: \n");
+//    for (uint16_t i = 0; i < n_dum; i++)
+//    {
+//        printf("%5d: %5d %5d\n", i + 1, wrk_src[CCPM_WRK_NUM + i], wrk_dst[CCPM_WRK_NUM + i]);
+//    }
+//
+//    printf("Optimized links: %d", n_lnk);
 
     return 0;
 }
