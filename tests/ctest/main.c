@@ -181,7 +181,6 @@ int main(void)
     }
 
     uint16_t n_lnk = links_total;
-    uint16_t n_dum = 0;
 
     ccpm_make_aoa(wrk_index, link_src, link_dst, n_lnk, wrk_src, wrk_dst);
 
