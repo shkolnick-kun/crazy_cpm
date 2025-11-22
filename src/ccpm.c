@@ -389,7 +389,7 @@ ccpmResultEn ccpm_populate_dep_info(size_t   n_max,
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_build_full_act_deps(size_t     n_act,    size_t  n_max,
+ccpmResultEn ccpm_build_full_deps(size_t     n_act,    size_t  n_max,
                                   uint16_t * full_act_dep, bool *  full_map)
 {
     uint16_t i;
@@ -598,8 +598,8 @@ ccpmResultEn ccpm_add_a_dummy(uint16_t * min_deps, uint16_t * deps, bool * dep_m
     for (i = 0; i < CCPM_LLEN(min_deps); i++)
     {
         d = CCPM_LITEM(min_deps, i);
-        min_dep_map[n_max * n_cur + d] = true;
-        CCPM_LAPP(min_act_dep + n_max * n_cur, d);
+        CCPM_LAPP(min_act_dep + n_max * n_cur, d); /*Copy deps to new dummy*/
+        min_dep_map[n_max * n_cur + d] = true;     /*Set dep map*/
     }
 
     /* Set dummy full dependencies */
@@ -635,24 +635,18 @@ ccpmResultEn ccpm_full_act_deps(uint16_t * min_deps,
 
     CCPM_LOG_PRINTF("Building full dependencies for given minimal dependencies\n");
 
-    /* Initialize output lists */
+    /* Copy minimal dependencies to deps list */
     CCPM_LCLR(deps);
+    for (i = 0; i < CCPM_LLEN(min_deps); i++)
+    {
+        j = CCPM_LITEM(min_deps, i);
+        CCPM_LAPP(deps, j);
+    }
 
     /* Initialize dependency map */
     for (i = 0; i < n_max; i++)
     {
         dep_map[i] = false;
-    }
-
-    /* Copy minimal dependencies to deps list */
-    for (i = 0; i < CCPM_LLEN(min_deps); i++)
-    {
-        j = CCPM_LITEM(min_deps, i);
-        if (!dep_map[j])
-        {
-            dep_map[j] = true;
-            CCPM_LAPP(deps, j);
-        }
     }
 
     /* Build transitive closure of dependencies */
@@ -670,10 +664,11 @@ ccpmResultEn ccpm_full_act_deps(uint16_t * min_deps,
                 continue;
             }
 
+            dep_map[d] = true;
+
             /* Check for loop */
             CCPM_CHECK_RETURN(j != d, CCPM_ELOOP);
 
-            dep_map[d] = true;
             CCPM_LAPP(deps, d);
         }
     }
@@ -688,6 +683,7 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
                                       uint16_t * full_act_dep, bool * full_dep_map,
                                       uint16_t * act_ids,
                                       size_t * n_cur,
+                                      uint16_t * min_com_deps,
                                       uint16_t * tmp_deps, bool * tmp_dep_map)
 {
     uint16_t p, q, i, j, k;
@@ -710,22 +706,20 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
     {
         i = CCPM_LITEM(act_pos, p);
 
-        /* Skip if no minimal dependencies */
+        /* Skip activities without dependencies */
         if (0 == CCPM_LLEN(min_act_dep + n_max * i))
         {
             continue;
         }
 
         /* Search for nested list */
-        uint16_t min_com_deps[n_max];
         CCPM_LCLR(min_com_deps);
 
-        bool found_nested = false;
         for (q = p + 1; q < n_act; q++)
         {
             j = CCPM_LITEM(act_pos, q);
 
-            /* Skip if no minimal dependencies */
+            /* Skip activities without dependencies */
             if (0 == CCPM_LLEN(min_act_dep + n_max * j))
             {
                 continue;
@@ -748,13 +742,12 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
 
             if ((len_i == lcd || len_j == lcd) && (len_i != len_j))
             {
-                /* Nested lists found, will reduce nesting lists */
-                found_nested = true;
+                /* Nested lists found, will reduce nested lists */
                 break;
             }
         }
 
-        if (!found_nested || 0 == CCPM_LLEN(min_com_deps))
+        if (0 == CCPM_LLEN(min_com_deps))
         {
             /* No nested lists found, continue */
             continue;
@@ -821,6 +814,7 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
                                           uint16_t * full_act_dep, bool * full_dep_map,
                                           uint16_t * act_ids,
                                           size_t * n_cur,
+                                          uint16_t * min_com_deps,
                                           uint16_t * tmp_deps, bool * tmp_dep_map)
 {
     uint16_t p, q, i, j, k;
@@ -844,23 +838,20 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
     {
         i = CCPM_LITEM(act_pos, p);
 
-        /* Skip if no minimal dependencies */
+        /* Skip activities without dependencies */
         if (0 == CCPM_LLEN(min_act_dep + n_max * i))
         {
             continue;
         }
 
         /* Search for overlapping lists */
-        uint16_t min_com_deps[n_max];
         CCPM_LCLR(min_com_deps);
-
-        bool found_overlap = false;
 
         for (q = 0; q < n_last; q++)
         {
             j = CCPM_LITEM(act_pos, q);
 
-            /* Skip if no minimal dependencies */
+            /* Skip activities without dependencies */
             if (0 == CCPM_LLEN(min_act_dep + n_max * j))
             {
                 continue;
@@ -884,12 +875,11 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
             if (lmcd > 0 && len_i != lmcd && len_j != lmcd)
             {
                 /* Found overlapping lists */
-                found_overlap = true;
                 break;
             }
         }
 
-        if (!found_overlap || 0 == CCPM_LLEN(min_com_deps))
+        if (0 == CCPM_LLEN(min_com_deps))
         {
             n_last = *n_cur;
             continue;
@@ -906,7 +896,7 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
         {
             j = CCPM_LITEM(act_pos, q);
 
-            /* Skip if no minimal dependencies */
+            /* Skip activities without dependencies */
             if (0 == CCPM_LLEN(min_act_dep + n_max * j))
             {
                 continue;
@@ -947,17 +937,18 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_build_network(size_t n_cur, size_t n_max,
+ccpmResultEn ccpm_build_network(size_t n_max, size_t * n_cur,
                                uint16_t * act_ids, uint16_t * act_pos,
                                uint16_t * min_act_dep, bool * min_dep_map,
                                uint16_t * full_act_dep, bool * full_dep_map,
                                uint16_t * act_src, uint16_t * act_dst,
                                uint16_t * started, uint16_t * num_dep,
-                               uint16_t * events, uint16_t * chk)
+                               uint16_t * events, uint16_t * chk,
+                               uint16_t * start)
 {
     uint16_t i, j, k;
     uint16_t evt = 1;
-    uint16_t dum = n_cur;
+    uint16_t dum = *n_cur;
 
     CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_pos, CCPM_EINVAL);
@@ -971,7 +962,7 @@ ccpmResultEn ccpm_build_network(size_t n_cur, size_t n_max,
     CCPM_CHECK_RETURN(num_dep, CCPM_EINVAL);
     CCPM_CHECK_RETURN(events, CCPM_EINVAL);
 
-    CCPM_LOG_PRINTF("Building network with %d activities\n", (int)n_cur);
+    CCPM_LOG_PRINTF("Building network with %d activities\n", (int)dum);
 
     /* Initialize arrays as lists */
     CCPM_LCLR(started);
@@ -982,7 +973,7 @@ ccpmResultEn ccpm_build_network(size_t n_cur, size_t n_max,
     CCPM_LCLR(chk);
 
     /* Initialize started and num_dep lists */
-    for (i = 0; i < n_cur; i++)
+    for (i = 0; i < dum; i++)
     {
         CCPM_LAPP(started, false);
         CCPM_LAPP(num_dep, CCPM_LLEN(min_act_dep + n_max * i));
@@ -993,7 +984,7 @@ ccpmResultEn ccpm_build_network(size_t n_cur, size_t n_max,
     /* Find initial activities without dependencies */
     CCPM_LCLR(chk);
 
-    for (i = 0; i < n_cur; i++)
+    for (i = 0; i < dum; i++)
     {
         if ((0 == CCPM_LITEM(num_dep, i)) && (!CCPM_LITEM(started, i)))
         {
@@ -1015,7 +1006,7 @@ ccpmResultEn ccpm_build_network(size_t n_cur, size_t n_max,
         uint16_t current_act = CCPM_LITEM(chk, i);
 
         /* Decrement dependency counters for activities that depend on current activity */
-        for (j = 0; j < n_cur; j++)
+        for (j = 0; j < dum; j++)
         {
             if (min_dep_map[n_max * j + current_act])
             {
@@ -1025,10 +1016,9 @@ ccpmResultEn ccpm_build_network(size_t n_cur, size_t n_max,
         }
 
         /* Find newly started activities */
-        uint16_t start[n_max];
         CCPM_LCLR(start);
 
-        for (j = 0; j < n_cur; j++)
+        for (j = 0; j < dum; j++)
         {
             if ((0 == CCPM_LITEM(num_dep, j)) && (!CCPM_LITEM(started, j)))
             {
@@ -1079,7 +1069,7 @@ ccpmResultEn ccpm_build_network(size_t n_cur, size_t n_max,
         }
     }
 
-    /* Set destination for activities without one */
+    /* Set destination for last started  activities*/
     for (i = 0; i < dum; i++)
     {
         if (0 == CCPM_LITEM(act_dst, i))
@@ -1091,208 +1081,23 @@ ccpmResultEn ccpm_build_network(size_t n_cur, size_t n_max,
     /* Add final event */
     CCPM_LAPP(events, evt);
 
+    *n_cur = dum;
+
     return CCPM_OK;
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_optimize_network_stage_1(size_t n_cur, size_t n_max,
-                                          uint16_t * act_ids, uint16_t * act_src, uint16_t * act_dst,
-                                          uint16_t * events, bool * full_dep_map,
-                                          uint16_t * evt_deps, uint16_t * evt_dins, bool * evt_real)
+ccpmResultEn ccpm_do_glue(size_t n_cur,
+                          uint16_t * act_src, uint16_t * act_dst,
+                          uint16_t * events)
 {
-    uint16_t i, j, k;
-    uint16_t num_events = CCPM_LLEN(events);
+    uint16_t k;
 
-    CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_dst, CCPM_EINVAL);
     CCPM_CHECK_RETURN(events, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(full_dep_map, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(evt_deps, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(evt_dins, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(evt_real, CCPM_EINVAL);
 
-    CCPM_LOG_PRINTF("Optimizing network stage 1\n");
-
-    /* Initialize event data structures */
-    for (i = 0; i < num_events; i++)
-    {
-        CCPM_LCLR(evt_deps + n_max * i);
-        CCPM_LCLR(evt_dins + n_max * i);
-        evt_real[i] = false;
-    }
-
-    /* Clear full_dep_map for reuse */
-    for (i = 0; i < n_max * n_max; i++)
-    {
-        full_dep_map[i] = false;
-    }
-
-    /* Populate event dependencies and inputs */
-    for (k = 0; k < n_cur; k++)
-    {
-        uint16_t src_evt = CCPM_LITEM(act_src, k) - 1;
-        uint16_t dst_evt = CCPM_LITEM(act_dst, k) - 1;
-
-        if (CCPM_FAKE != CCPM_LITEM(act_ids, k))
-        {
-            evt_real[dst_evt] = true;
-            continue;
-        }
-
-        /* For dummy activities, record dependencies */
-        CCPM_LAPP(evt_dins + n_max * dst_evt, k);
-        CCPM_LAPP(evt_deps + n_max * dst_evt, src_evt);
-        full_dep_map[n_max * dst_evt + src_evt] = true;
-    }
-
-    /* Optimize: glue events with same dependencies */
-    for (i = 0; i < num_events; i++)
-    {
-        if (evt_real[i])
-        {
-            continue;
-        }
-
-        if (0 == CCPM_LLEN(evt_deps + n_max * i))
-        {
-            continue;
-        }
-
-        for (j = i + 1; j < num_events; j++)
-        {
-            if (evt_real[j])
-            {
-                continue;
-            }
-
-            if (CCPM_LLEN(evt_deps + n_max * i) < 2)
-            {
-                continue;
-            }
-
-            if (CCPM_LLEN(evt_deps + n_max * i) != CCPM_LLEN(evt_deps + n_max * j))
-            {
-                continue;
-            }
-
-            /* Check if events have same dependencies */
-            uint16_t match_count = 0;
-            for (k = 0; k < CCPM_LLEN(evt_deps + n_max * i); k++)
-            {
-                uint16_t dep = CCPM_LITEM(evt_deps + n_max * i, k);
-                if (full_dep_map[n_max * j + dep])
-                {
-                    match_count++;
-                }
-            }
-
-            if (match_count == CCPM_LLEN(evt_deps + n_max * i))
-            {
-                /* Glue events: redirect j to i */
-                CCPM_LITEM(events, j) = CCPM_LITEM(events, i);
-
-                /* Mark dummy activities for removal */
-                for (k = 0; k < CCPM_LLEN(evt_dins + n_max * j); k++)
-                {
-                    uint16_t dummy_act = CCPM_LITEM(evt_dins + n_max * j, k);
-                    CCPM_LITEM(act_src, dummy_act) = CCPM_FAKE;
-                    CCPM_LITEM(act_dst, dummy_act) = CCPM_FAKE;
-                }
-            }
-        }
-    }
-
-    /* Optimize: glue events with single dummy input to their predecessors */
-    for (i = 0; i < num_events; i++)
-    {
-        if (evt_real[i])
-        {
-            continue;
-        }
-
-        if (1 == CCPM_LLEN(evt_deps + n_max * i))
-        {
-            uint16_t dummy_act = CCPM_LITEM(evt_dins + n_max * i, 0);
-            CCPM_LITEM(events, i) = CCPM_LITEM(act_src, dummy_act);
-
-            /* Mark dummy activity for removal */
-            CCPM_LITEM(act_src, dummy_act) = CCPM_FAKE;
-            CCPM_LITEM(act_dst, dummy_act) = CCPM_FAKE;
-        }
-    }
-
-    return CCPM_OK;
-}
-/*===========================================================================*/
-ccpmResultEn ccpm_optimize_network_stage_2(size_t n_cur, size_t n_max,
-                                          uint16_t * act_ids, uint16_t * act_src, uint16_t * act_dst,
-                                          uint16_t * events,
-                                          uint16_t * evt_douts, uint16_t * evt_nout)
-{
-    uint16_t i, k;
-    uint16_t num_events = CCPM_LLEN(events);
-
-    CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(act_dst, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(events, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(evt_douts, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(evt_nout, CCPM_EINVAL);
-
-    CCPM_LOG_PRINTF("Optimizing network stage 2\n");
-
-    /* Initialize event data structures */
-    for (i = 0; i < num_events; i++)
-    {
-        CCPM_LCLR(evt_douts + n_max * i);
-        evt_nout[i] = 0;
-    }
-
-    /* Count outputs and collect dummy outputs for each event */
-    for (k = 0; k < n_cur; k++)
-    {
-        /* Skip redundant activities */
-        if (CCPM_FAKE == CCPM_LITEM(act_src, k) || CCPM_FAKE == CCPM_LITEM(act_dst, k))
-        {
-            continue;
-        }
-
-        uint16_t src_evt = CCPM_LITEM(act_src, k) - 1;
-        evt_nout[src_evt]++;
-
-        /* If this is a dummy activity, add to dummy outputs */
-        if (CCPM_FAKE == CCPM_LITEM(act_ids, k))
-        {
-            CCPM_LAPP(evt_douts + n_max * src_evt, k);
-        }
-    }
-
-    /* Optimize: glue events with single dummy output to their successors */
-    for (i = 0; i < num_events; i++)
-    {
-        /* Skip if event has more than one output */
-        if (evt_nout[i] > 1)
-        {
-            continue;
-        }
-
-        /* Skip if event has no dummy outputs */
-        if (0 == CCPM_LLEN(evt_douts + n_max * i))
-        {
-            continue;
-        }
-
-        /* Get the dummy output activity */
-        uint16_t dummy_act = CCPM_LITEM(evt_douts + n_max * i, 0);
-
-        /* Glue event to its successor */
-        CCPM_LITEM(events, i) = CCPM_LITEM(act_dst, dummy_act);
-
-        /* Mark dummy activity for removal */
-        CCPM_LITEM(act_src, dummy_act) = CCPM_FAKE;
-        CCPM_LITEM(act_dst, dummy_act) = CCPM_FAKE;
-    }
+    CCPM_LOG_PRINTF("Applying event glueing to all activities\n");
 
     /* Apply event glueing to all activities */
     for (k = 0; k < n_cur; k++)
@@ -1315,26 +1120,255 @@ ccpmResultEn ccpm_optimize_network_stage_2(size_t n_cur, size_t n_max,
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_add_needed_dummies(size_t n_cur,
+ccpmResultEn ccpm_optimize_network_stage_1(size_t n_cur, size_t n_max,
+                                          uint16_t * act_ids, uint16_t * act_src, uint16_t * act_dst,
+                                          uint16_t * events, bool * evt_dep_map,
+                                          uint16_t * evt_deps, uint16_t * evt_dins, bool * evt_real)
+{
+    ccpmResultEn ret = CCPM_OK;
+
+    uint16_t i, j, k;
+    uint16_t num_events = CCPM_LLEN(events);
+
+    CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(act_dst, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(events, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(evt_dep_map, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(evt_deps, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(evt_dins, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(evt_real, CCPM_EINVAL);
+
+    CCPM_LOG_PRINTF("Optimizing network stage 1\n");
+
+    /* Initialize event data structures */
+    for (i = 0; i < num_events; i++)
+    {
+        CCPM_LCLR(evt_deps + 2 * n_max * i);
+        CCPM_LCLR(evt_dins + 2 * n_max * i);
+        evt_real[i] = false;
+    }
+
+    /* Clear full_dep_map for reuse */
+    for (i = 0; i < 4 * n_max * n_max; i++)
+    {
+        evt_dep_map[i] = false;
+    }
+
+    /* Populate event dependencies and inputs */
+    for (k = 0; k < n_cur; k++)
+    {
+        uint16_t src_evt = CCPM_LITEM(act_src, k) - 1;
+        uint16_t dst_evt = CCPM_LITEM(act_dst, k) - 1;
+
+        /*Skip events that were marked as fake*/
+        if (CCPM_FAKE != CCPM_LITEM(act_ids, k))
+        {
+            evt_real[dst_evt] = true;
+            continue;
+        }
+
+        /* For dummy activities, record dependencies */
+        CCPM_LAPP(evt_dins + 2 * n_max * dst_evt, k);
+        CCPM_LAPP(evt_deps + 2 * n_max * dst_evt, src_evt);
+        evt_dep_map[2 * n_max * dst_evt + src_evt] = true;
+    }
+
+    /*
+    If some events have only dummy inputs and have equal dependencies
+    (earlier events) then we can "glue" them together
+    */
+    for (i = 0; i < num_events; i++)
+    {
+        /*Skip events with real inputs*/
+        if (evt_real[i])
+        {
+            continue;
+        }
+
+        /*Skip events without dummy inputs*/
+        if (0 == CCPM_LLEN(evt_deps + 2 * n_max * i))
+        {
+            continue;
+        }
+
+        for (j = i + 1; j < num_events; j++)
+        {
+            /*Skip events with real inputs*/
+            if (evt_real[j])
+            {
+                continue;
+            }
+
+            /*Skip events without dummy inputs*/
+            if (CCPM_LLEN(evt_deps + 2 * n_max * i) < 2)
+            {
+                continue;
+            }
+
+            /*Skip events with unequal dependencies lists*/
+            if (CCPM_LLEN(evt_deps + 2 * n_max * i) != CCPM_LLEN(evt_deps + 2 * n_max * j))
+            {
+                continue;
+            }
+
+            /* Check if events have same dependencies */
+            uint16_t match_count = 0;
+            for (k = 0; k < CCPM_LLEN(evt_deps + 2 * n_max * i); k++)
+            {
+                uint16_t dep = CCPM_LITEM(evt_deps + 2 * n_max * i, k);
+                if (evt_dep_map[2 * n_max * j + dep])
+                {
+                    match_count++;
+                }
+            }
+
+            /*
+            Will redirect _act_src later
+            (events[i] != (i + 1)) is feature of redundant event
+            */
+            if (match_count == CCPM_LLEN(evt_deps + 2 * n_max * i))
+            {
+                /* Glue events: redirect j to i */
+                CCPM_LITEM(events, j) = CCPM_LITEM(events, i);
+
+                /* Mark dummy activities for removal */
+                for (k = 0; k < CCPM_LLEN(evt_dins + 2 * n_max * j); k++)
+                {
+                    uint16_t dummy_act = CCPM_LITEM(evt_dins + 2 * n_max * j, k);
+                    CCPM_LITEM(act_src, dummy_act) = CCPM_FAKE;
+                    CCPM_LITEM(act_dst, dummy_act) = CCPM_FAKE;
+                }
+            }
+        }
+    }
+
+    /*
+    Work with redundant events and dummies (part 2)
+    "Glue" events each of which has only one input which is dummy
+    to their predeceptors
+    */
+    for (i = 0; i < num_events; i++)
+    {
+        /*Skip events with real inputs*/
+        if (evt_real[i])
+        {
+            continue;
+        }
+
+        if (1 == CCPM_LLEN(evt_deps + 2 * n_max * i))
+        {
+            uint16_t dummy_act = CCPM_LITEM(evt_dins + 2 * n_max * i, 0);
+            CCPM_LITEM(events, i) = CCPM_LITEM(act_src, dummy_act);
+
+            /* Mark dummy activity for removal */
+            CCPM_LITEM(act_src, dummy_act) = CCPM_FAKE;
+            CCPM_LITEM(act_dst, dummy_act) = CCPM_FAKE;
+        }
+    }
+
+    /* Apply event glueing to all activities */
+    CCPM_TRY_RETURN(ccpm_do_glue(n_cur, act_src, act_dst, events));
+
+    return ret;
+}
+/*===========================================================================*/
+ccpmResultEn ccpm_optimize_network_stage_2(size_t n_cur, size_t n_max,
+                                          uint16_t * act_ids, uint16_t * act_src, uint16_t * act_dst,
+                                          uint16_t * events,
+                                          uint16_t * evt_douts, uint16_t * evt_nout)
+{
+    ccpmResultEn ret = CCPM_OK;
+    uint16_t i, k;
+    uint16_t num_events = CCPM_LLEN(events);
+
+    CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(act_dst, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(events, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(evt_douts, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(evt_nout, CCPM_EINVAL);
+
+    CCPM_LOG_PRINTF("Optimizing network stage 2\n");
+
+    /* Initialize event data structures */
+    for (i = 0; i < num_events; i++)
+    {
+        CCPM_LCLR(evt_douts + 2 * n_max * i);
+        evt_nout[i] = 0;
+    }
+
+    /* Count outputs and collect dummy outputs for each event */
+    for (k = 0; k < n_cur; k++)
+    {
+        /* Skip redundant activities */
+        if (CCPM_FAKE == CCPM_LITEM(act_src, k) || CCPM_FAKE == CCPM_LITEM(act_dst, k))
+        {
+            continue;
+        }
+
+        uint16_t src_evt = CCPM_LITEM(act_src, k) - 1;
+        evt_nout[src_evt]++;
+
+        /* If this is a dummy activity, add to dummy outputs */
+        if (CCPM_FAKE == CCPM_LITEM(act_ids, k))
+        {
+            CCPM_LAPP(evt_douts + 2 * n_max * src_evt, k);
+        }
+    }
+
+    /* Optimize: glue events with single dummy output to their successors */
+    for (i = 0; i < num_events; i++)
+    {
+        /* Skip if event has more than one output */
+        if (evt_nout[i] > 1)
+        {
+            continue;
+        }
+
+        /* Skip if event has no dummy outputs */
+        if (0 == CCPM_LLEN(evt_douts + 2 * n_max * i))
+        {
+            continue;
+        }
+
+        /* Get the dummy output activity */
+        uint16_t dummy_act = CCPM_LITEM(evt_douts + 2 * n_max * i, 0);
+
+        /* Glue event to its successor */
+        CCPM_LITEM(events, i) = CCPM_LITEM(act_dst, dummy_act);
+
+        /* Mark dummy activity for removal */
+        CCPM_LITEM(act_src, dummy_act) = CCPM_FAKE;
+        CCPM_LITEM(act_dst, dummy_act) = CCPM_FAKE;
+    }
+
+    /* Apply event glueing to all activities */
+    CCPM_TRY_RETURN(ccpm_do_glue(n_cur, act_src, act_dst, events));
+
+    return ret;
+}
+
+/*===========================================================================*/
+ccpmResultEn ccpm_add_needed_dummies(size_t * n_cur,
                                     uint16_t * act_ids, uint16_t * act_pos,
                                     uint16_t * act_src, uint16_t * act_dst,
-                                    uint16_t * started, uint16_t * events,
+                                    uint16_t * to_do, uint16_t * events,
                                     size_t * n_events,
-                                    uint16_t * sorted_activities, uint16_t * sort_values, uint16_t * tmp)
+                                    uint16_t * sort_values, uint16_t * tmp)
 {
     ccpmResultEn ret = CCPM_OK;
     uint16_t i, j;
-    uint16_t d = n_cur;
+    uint16_t d = *n_cur;
     uint16_t evt = CCPM_LITEM(events, CCPM_LLEN(events) - 1); // Last event
 
     CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_pos, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_dst, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(started, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(to_do, CCPM_EINVAL);
     CCPM_CHECK_RETURN(events, CCPM_EINVAL);
     CCPM_CHECK_RETURN(n_events, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(sorted_activities, CCPM_EINVAL);
     CCPM_CHECK_RETURN(sort_values, CCPM_EINVAL);
     CCPM_CHECK_RETURN(tmp, CCPM_EINVAL);
 
@@ -1370,8 +1404,8 @@ ccpmResultEn ccpm_add_needed_dummies(size_t n_cur,
             continue;
         }
 
-        /* Skip non-started activities */
-        if (!CCPM_LITEM(started, act_i))
+        /* Skip done activities */
+        if (!CCPM_LITEM(to_do, act_i))
         {
             continue;
         }
@@ -1390,8 +1424,8 @@ ccpmResultEn ccpm_add_needed_dummies(size_t n_cur,
             if ((CCPM_LITEM(act_dst, act_i) == CCPM_LITEM(act_dst, act_j)) &&
                 (CCPM_LITEM(act_src, act_i) == CCPM_LITEM(act_src, act_j)))
             {
-                /* Mark second activity as not started */
-                CCPM_LITEM(started, act_j) = false;
+                /* Mark second activity as not to_do */
+                CCPM_LITEM(to_do, act_j) = false;
 
                 /* Create new event */
                 evt++;
@@ -1402,17 +1436,16 @@ ccpmResultEn ccpm_add_needed_dummies(size_t n_cur,
                 CCPM_LAPP(act_ids, CCPM_FAKE);
                 CCPM_LAPP(act_src, evt);
                 CCPM_LAPP(act_dst, CCPM_LITEM(act_dst, act_i));
-                CCPM_LAPP(started, true);
+                CCPM_LAPP(to_do, false);
 
                 /* Add new event to events list */
                 CCPM_LAPP(events, evt);
                 (*n_events)++;
 
-                d++;
+                (*n_cur)++;
             }
         }
     }
-
     return ret;
 }
 
@@ -1420,9 +1453,9 @@ ccpmResultEn ccpm_add_needed_dummies(size_t n_cur,
 ccpmResultEn ccpm_finalize_network(size_t n_cur,
                                   uint16_t * act_ids, uint16_t * act_pos,
                                   uint16_t * act_src, uint16_t * act_dst,
-                                  uint16_t * started, uint16_t * events,
+                                  uint16_t * events,
                                   uint16_t * final_act_ids, uint16_t * final_act_src, uint16_t * final_act_dst,
-                                  uint16_t * tmp_events, uint16_t * sort_values, uint16_t * tmp)
+                                  uint16_t * tmp)
 {
     ccpmResultEn ret = CCPM_OK;
 
@@ -1434,13 +1467,10 @@ ccpmResultEn ccpm_finalize_network(size_t n_cur,
     CCPM_CHECK_RETURN(act_pos, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_dst, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(started, CCPM_EINVAL);
     CCPM_CHECK_RETURN(events, CCPM_EINVAL);
     CCPM_CHECK_RETURN(final_act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(final_act_src, CCPM_EINVAL);
     CCPM_CHECK_RETURN(final_act_dst, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(tmp_events, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(sort_values, CCPM_EINVAL);
     CCPM_CHECK_RETURN(tmp, CCPM_EINVAL);
 
     CCPM_LOG_PRINTF("Finalizing network\n");
@@ -1449,18 +1479,17 @@ ccpmResultEn ccpm_finalize_network(size_t n_cur,
     CCPM_LCLR(final_act_ids);
     CCPM_LCLR(final_act_src);
     CCPM_LCLR(final_act_dst);
-    CCPM_LCLR(tmp_events);
 
-    /* Create temporary events mapping */
+    /*Renumerate events*/
     for (i = 0; i < num_events; i++)
     {
         if (CCPM_LITEM(events, i) != (i + 1))
         {
-            CCPM_LAPP(tmp_events, CCPM_FAKE);
+            CCPM_LITEM(events, i) = CCPM_FAKE;
         }
         else
         {
-            CCPM_LAPP(tmp_events, evt);
+            CCPM_LITEM(events, i) = evt;
             evt++;
         }
     }
@@ -1478,24 +1507,18 @@ ccpmResultEn ccpm_finalize_network(size_t n_cur,
         uint16_t dst_evt = CCPM_LITEM(act_dst, i) - 1;
 
         /* Skip if events are invalid */
-        if (CCPM_FAKE == CCPM_LITEM(tmp_events, src_evt) || CCPM_FAKE == CCPM_LITEM(tmp_events, dst_evt))
+        if (CCPM_FAKE == CCPM_LITEM(events, src_evt) || CCPM_FAKE == CCPM_LITEM(events, dst_evt))
         {
             continue;
         }
 
         /* Update source and destination */
-        CCPM_LITEM(act_src, i) = CCPM_LITEM(tmp_events, src_evt);
-        CCPM_LITEM(act_dst, i) = CCPM_LITEM(tmp_events, dst_evt);
+        CCPM_LITEM(act_src, i) = CCPM_LITEM(events, src_evt);
+        CCPM_LITEM(act_dst, i) = CCPM_LITEM(events, dst_evt);
     }
 
     /* Sort act_pos by act_ids for final output */
-    for (i = 0; i < CCPM_LLEN(act_pos); i++)
-    {
-        uint16_t idx = CCPM_LITEM(act_pos, i);
-        sort_values[i] = CCPM_LITEM(act_ids, idx);
-    }
-
-    CCPM_TRY_RETURN(ccpm_sort(tmp, act_pos + 1, sort_values, CCPM_LLEN(act_pos)));
+    CCPM_TRY_RETURN(ccpm_sort(tmp, act_pos + 1, act_ids, CCPM_LLEN(act_pos)));
 
     /* Build final output lists */
     for (i = 0; i < CCPM_LLEN(act_pos); i++)
@@ -1556,17 +1579,17 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
     CCPM_MEM_ALLOC(uint16_t   ,_act_dst      ,n_max + 1   );
 
     /*=======================================================================*/
-    CCPM_MEM_ALLOC(uint16_t   ,full_act_ndep ,n_max        ); /*Number of dependencies*/
-    CCPM_MEM_ALLOC(uint16_t   ,full_act_dep  ,n_max * n_max); /*Array of dependencies*/
-    CCPM_MEM_ALLOC(bool       ,full_dep_map  ,n_max * n_max); /*Work dependency map*/
+    CCPM_MEM_ALLOC(uint16_t   ,_full_act_ndep ,n_max        ); /*Number of dependencies*/
+    CCPM_MEM_ALLOC(uint16_t   ,_full_act_dep  ,n_max * n_max); /*Array of dependencies*/
+    CCPM_MEM_ALLOC(bool       ,_full_dep_map  ,n_max * n_max); /*Work dependency map*/
 
     /*=======================================================================*/
-    CCPM_MEM_ALLOC(uint16_t   ,min_act_ndep ,n_max        ); /*Number of dependencies*/
-    CCPM_MEM_ALLOC(uint16_t   ,min_act_dep  ,n_max * n_max); /*Array of dependencies*/
-    CCPM_MEM_ALLOC(bool       ,min_dep_map  ,n_max * n_max); /*Work dependency map*/
+    CCPM_MEM_ALLOC(uint16_t   ,_min_act_ndep ,n_max        ); /*Number of dependencies*/
+    CCPM_MEM_ALLOC(uint16_t   ,_min_act_dep  ,n_max * n_max); /*Array of dependencies*/
+    CCPM_MEM_ALLOC(bool       ,_min_dep_map  ,n_max * n_max); /*Work dependency map*/
 
     /*=======================================================================*/
-    CCPM_MEM_ALLOC(uint16_t   ,tmp          ,n_max        );
+    CCPM_MEM_ALLOC(uint16_t   ,_tmp          ,2 * n_max + 1);
 
     /*=======================================================================*/
     /* Additional allocations for new functions */
@@ -1576,24 +1599,23 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
     CCPM_MEM_ALLOC(uint16_t   ,_chk         ,n_max + 1   );
 
     /* For nested and overlapping dependencies */
-    CCPM_MEM_ALLOC(uint16_t   ,_tmp_deps    ,n_max + 1   );
-    CCPM_MEM_ALLOC(bool       ,_tmp_dep_map ,n_max       );
+    CCPM_MEM_ALLOC(uint16_t   ,_min_com_deps ,n_max       );
+    CCPM_MEM_ALLOC(uint16_t   ,_tmp_deps     ,n_max + 1   );
+    CCPM_MEM_ALLOC(bool       ,_tmp_dep_map  ,n_max       );
 
     /* For optimize_network_stage_1 */
+    CCPM_MEM_ALLOC(bool       ,_evt_dep_map ,4 * n_max * n_max);
     CCPM_MEM_ALLOC(uint16_t   ,_evt_deps    ,4 * n_max * n_max);
     CCPM_MEM_ALLOC(uint16_t   ,_evt_dins    ,4 * n_max * n_max);
     CCPM_MEM_ALLOC(bool       ,_evt_real    ,2 * n_max        );
 
     /* For optimize_network_stage_2 */
-    CCPM_MEM_ALLOC(uint16_t   ,_evt_douts   ,4 *n_max * n_max);
-    CCPM_MEM_ALLOC(uint16_t   ,_evt_nout    ,2 * n_max       );
+    CCPM_MEM_ALLOC(uint16_t   ,_evt_douts   ,4 * n_max * n_max);
+    CCPM_MEM_ALLOC(uint16_t   ,_evt_nout    ,2 * n_max        );
 
     /* For add_needed_dummies */
     CCPM_MEM_ALLOC(uint16_t   ,_sorted_activities, 2 * n_max + 1);
     CCPM_MEM_ALLOC(uint16_t   ,_sort_values      , 2 * n_max + 1);
-
-    /* For finalize_network */
-    CCPM_MEM_ALLOC(uint16_t   ,_tmp_events      , 2 * n_max + 1);
 
     /*=======================================================================*/
     size_t n_cur = n_act;
@@ -1608,52 +1630,54 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
     CCPM_TRY_GOTO_END(ccpm_links_prepare(_act_ids, lnk_src, lnk_dst, _n_lnk));
 
     /*Compute dependency info as is*/
-    CCPM_TRY_GOTO_END(ccpm_populate_dep_info(n_max, _n_lnk, lnk_src, lnk_dst, full_act_dep, full_dep_map));
-    CCPM_PRINT_DEPS(n_act, n_max, full_act_dep, full_dep_map);
+    CCPM_TRY_GOTO_END(ccpm_populate_dep_info(n_max, _n_lnk, lnk_src, lnk_dst, _full_act_dep, _full_dep_map));
+    CCPM_PRINT_DEPS(n_act, n_max, _full_act_dep, _full_dep_map);
 
     /*Compute full dependency info*/
-    CCPM_TRY_GOTO_END(ccpm_build_full_act_deps(n_act, n_max, full_act_dep, full_dep_map));
-    CCPM_PRINT_DEPS(n_act, n_max, full_act_dep, full_dep_map);
+    CCPM_TRY_GOTO_END(ccpm_build_full_deps(n_act, n_max, _full_act_dep, _full_dep_map));
+    CCPM_PRINT_DEPS(n_act, n_max, _full_act_dep, _full_dep_map);
 
     for (i = 0; i < n_max; i++)
     {
-        full_act_ndep[i] = CCPM_LLEN(full_act_dep + n_max * i);
+        _full_act_ndep[i] = CCPM_LLEN(_full_act_dep + n_max * i);
     }
 
-    memcpy(min_act_dep, full_act_dep, n_max * n_max * sizeof(uint16_t));
-    memcpy(min_dep_map, full_dep_map, n_max * n_max * sizeof(bool)    );
+    memcpy(_min_act_dep, _full_act_dep, n_max * n_max * sizeof(uint16_t));
+    memcpy(_min_dep_map, _full_dep_map, n_max * n_max * sizeof(bool)    );
 
-    CCPM_TRY_GOTO_END(ccpm_optimize_deps(n_act, n_max, _act_pos, full_act_ndep, min_act_dep, min_dep_map, tmp));
-    CCPM_PRINT_DEPS(n_act, n_max, min_act_dep, min_dep_map);
+    CCPM_TRY_GOTO_END(ccpm_optimize_deps(n_act, n_max, _act_pos, _full_act_ndep, _min_act_dep, _min_dep_map, _tmp));
+    CCPM_PRINT_DEPS(n_act, n_max, _min_act_dep, _min_dep_map);
 
     /* Process nested dependencies */
     CCPM_TRY_GOTO_END(ccpm_process_nested_deps(n_act, n_max, _act_pos,
-                                              min_act_dep, min_dep_map,
-                                              full_act_dep, full_dep_map,
+                                              _min_act_dep, _min_dep_map,
+                                              _full_act_dep, _full_dep_map,
                                               _act_ids, &n_cur,
+                                              _min_com_deps,
                                               _tmp_deps, _tmp_dep_map));
 
-    CCPM_PRINT_DEPS(n_cur, n_max, min_act_dep, min_dep_map);
+    CCPM_PRINT_DEPS(n_cur, n_max, _min_act_dep, _min_dep_map);
 
     /* Process overlapping dependencies */
     CCPM_TRY_GOTO_END(ccpm_process_overlapping_deps(n_max, _act_pos,
-                                                   min_act_dep, min_dep_map,
-                                                   full_act_dep, full_dep_map,
+                                                   _min_act_dep, _min_dep_map,
+                                                   _full_act_dep, _full_dep_map,
                                                    _act_ids, &n_cur,
+                                                   _min_com_deps,
                                                    _tmp_deps, _tmp_dep_map));
-    CCPM_PRINT_DEPS(n_cur, n_max, min_act_dep, min_dep_map);
+    CCPM_PRINT_DEPS(n_cur, n_max, _min_act_dep, _min_dep_map);
 
     /* Build network */
-    CCPM_TRY_GOTO_END(ccpm_build_network(n_cur, n_max, _act_ids, _act_pos,
-                                        min_act_dep, min_dep_map,
-                                        full_act_dep, full_dep_map,
+    CCPM_TRY_GOTO_END(ccpm_build_network(n_max, &n_cur, _act_ids, _act_pos,
+                                        _min_act_dep, _min_dep_map,
+                                        _full_act_dep, _full_dep_map,
                                         _act_src, _act_dst,
                                         _started, _num_dep,
-                                        _events, _chk));
+                                        _events, _chk, _tmp_deps));
 
     /* Optimize network stage 1 */
     CCPM_TRY_GOTO_END(ccpm_optimize_network_stage_1(n_cur, n_max, _act_ids, _act_src, _act_dst,
-                                                   _events, full_dep_map,
+                                                   _events, _evt_dep_map,
                                                    _evt_deps, _evt_dins, _evt_real));
 
     /* Optimize network stage 2 */
@@ -1662,15 +1686,15 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
 
     /* Add needed dummies */
     n_events = CCPM_LLEN(_events);
-    CCPM_TRY_GOTO_END(ccpm_add_needed_dummies(n_cur, _act_ids, _act_pos,
+    CCPM_TRY_GOTO_END(ccpm_add_needed_dummies(&n_cur, _act_ids, _act_pos,
                                              _act_src, _act_dst, _started, _events, &n_events,
-                                             _sorted_activities, _sort_values, tmp));
+                                             _sort_values, _tmp));
 
     /* Finalize network */
     CCPM_TRY_GOTO_END(ccpm_finalize_network(n_cur, _act_ids, _act_pos,
-                                           _act_src, _act_dst, _started, _events,
+                                           _act_src, _act_dst, _events,
                                            act_ids, act_src, act_dst,
-                                           _tmp_events, _sort_values, tmp));
+                                           _tmp));
 
 end:
     CCPM_MEM_FREE_ALL();
