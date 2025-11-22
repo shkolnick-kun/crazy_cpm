@@ -183,29 +183,7 @@ int main(void)
     uint16_t n_lnk = links_total;
     uint16_t n_dum = 0;
 
-    ccpm_make_aoa(wrk_index, wrk_src, wrk_dst, &n_dum, link_src, link_dst, &n_lnk);
-
-//    for (uint16_t i = 0; i < CCPM_WRK_NUM; i++)
-//    {
-//        wrk_pos[i] = i;
-//    }
-
-//    ccpm_sort(tmp, wrk_pos, wrk_dst, CCPM_WRK_NUM);
-//    ccpm_sort(tmp, wrk_pos, wrk_src, CCPM_WRK_NUM);
-//
-//    printf("Scheduled works: \n");
-//    for (uint16_t i = 0; i < CCPM_WRK_NUM; i++)
-//    {
-//        printf("%5d: %5d %5d\n", wrk_index[wrk_pos[i]], wrk_src[wrk_pos[i]], wrk_dst[wrk_pos[i]]);
-//    }
-//
-//    printf("Scheduled dummy works: \n");
-//    for (uint16_t i = 0; i < n_dum; i++)
-//    {
-//        printf("%5d: %5d %5d\n", i + 1, wrk_src[CCPM_WRK_NUM + i], wrk_dst[CCPM_WRK_NUM + i]);
-//    }
-//
-//    printf("Optimized links: %d", n_lnk);
+    ccpm_make_aoa(wrk_index, link_src, link_dst, n_lnk, wrk_src, wrk_dst);
 
     return 0;
 }
