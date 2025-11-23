@@ -103,6 +103,20 @@ do {                                                                          \
 #define CCPM_TRY_GOTO_END(exp) _CCPM_TRY_GOTO_END(exp, __FILE__, __func__, __LINE__)
 
 /*===========================================================================*/
+const char* ccpm_result_to_str(ccpmResultEn result)
+{
+    switch (result)
+    {
+        case CCPM_OK:     return "Success";
+        case CCPM_EINVAL: return "Invalid input parameters";
+        case CCPM_ENOMEM: return "Not enough memory";
+        case CCPM_ELOOP:  return "Dependency loop detected";
+        case CCPM_EUNK:   return "Unknown error";
+        default:          return "Undefined error code";
+    }
+}
+
+/*===========================================================================*/
 typedef struct _ccpmMemStackSt ccpmMemStackSt;
 
 struct _ccpmMemStackSt
@@ -1250,7 +1264,7 @@ ccpmResultEn ccpm_optimize_network_stage_1(size_t n_max,
     return ret;
 }
 /*===========================================================================*/
-ccpmResultEn ccpm_optimize_network_stage_2(size_t n_cur, size_t n_max,
+ccpmResultEn ccpm_optimize_network_stage_2(size_t n_max,
                                           uint16_t * act_ids, uint16_t * act_src, uint16_t * act_dst,
                                           uint16_t * events,
                                           uint16_t * evt_douts, uint16_t * evt_nout)
@@ -1662,8 +1676,6 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
     CCPM_MEM_ALLOC(uint16_t   ,_sort_values      , 2 * n_max + 1);
 
     /*=======================================================================*/
-    size_t n_cur = n_act;
-    size_t n_events = 0;
 
     for (i = 0; i <= CCPM_LLEN(act_ids); i++)
     {
@@ -1731,7 +1743,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
     _CCPM_PRINT_ACT_POS(_act_ids, _act_pos);
 
     /* Optimize network stage 2 */
-    CCPM_TRY_GOTO_END(ccpm_optimize_network_stage_2(n_cur, n_max, _act_ids, _act_src, _act_dst,
+    CCPM_TRY_GOTO_END(ccpm_optimize_network_stage_2(n_max, _act_ids, _act_src, _act_dst,
                                                    _events, _evt_douts, _evt_nout));
     _CCPM_PRINT_NET(_act_src, _act_dst);
     _CCPM_PRINT_ACT_POS(_act_ids, _act_pos);
@@ -1758,13 +1770,58 @@ end:
     return ret;
 }
 
-//ccpmResultEn ccpm_make_full_map(uint16_t * act_ids, uint16_t n_act, \
-//                                uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk,
-//                                bool * full_dep_map)
-//{
-//    ccpmResultEn ret = CCPM_OK;
-//    CCPM_MEM_INIT();
-//end:
-//    CCPM_MEM_FREE_ALL();
-//    return ret;
-//}
+/*===========================================================================*/
+ccpmResultEn ccpm_make_full_map(uint16_t* act_ids,
+                                uint16_t* lnk_src, uint16_t* lnk_dst,
+                                uint16_t n_lnk, uint16_t n_max,
+                                uint16_t* full_act_dep, uint8_t* full_dep_map)
+{
+    ccpmResultEn ret = CCPM_OK;
+
+    CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(full_act_dep, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(full_dep_map, CCPM_EINVAL);
+
+    uint16_t n_act = CCPM_LLEN(act_ids);
+
+    // Verify that n_max is sufficient
+    CCPM_CHECK_RETURN(n_max >= n_act, CCPM_EINVAL);
+
+    CCPM_LOG_PRINTF("Building full dependency map for %d activities\n", (int)n_act);
+
+    /* Prepare links for computing dependency info */
+    CCPM_TRY_RETURN(ccpm_links_prepare(act_ids, lnk_src, lnk_dst, n_lnk));
+
+    /* Compute dependency info as is */
+    CCPM_TRY_RETURN(ccpm_populate_dep_info(n_max, n_lnk, lnk_src, lnk_dst,
+                                          full_act_dep, (bool*)full_dep_map));
+
+    #ifdef CCPM_CFG_PRINTF
+    CCPM_LOG_PRINTF("Initial dependencies:\n");
+    for (uint16_t i = 0; i < n_act; i++) {
+        CCPM_LOG_PRINTF("%5d: [", (int)i);
+        for (uint16_t j = 0; j < CCPM_LLEN(full_act_dep + n_max * i); j++) {
+            CCPM_LOG_PRINTF("%5d ", (int)CCPM_LITEM(full_act_dep + n_max * i, j));
+        }
+        CCPM_LOG_PRINTF("]\n");
+    }
+    #endif
+
+    /* Compute full dependency info */
+    CCPM_TRY_RETURN(ccpm_build_full_deps(n_act, n_max, full_act_dep, (bool*)full_dep_map));
+
+    #ifdef CCPM_CFG_PRINTF
+    CCPM_LOG_PRINTF("Full dependency map (%dx%d):\n", (int)n_act, (int)n_act);
+    for (uint16_t i = 0; i < n_act; i++) {
+        CCPM_LOG_PRINTF("%5d: [", (int)i);
+        for (uint16_t j = 0; j < n_act; j++) {
+            CCPM_LOG_PRINTF("%d ", (int)full_dep_map[n_max * i + j]);
+        }
+        CCPM_LOG_PRINTF("]\n");
+    }
+    #endif
+
+    return CCPM_OK;
+}

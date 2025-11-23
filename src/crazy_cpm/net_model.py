@@ -33,6 +33,7 @@ Usage Example:
     This module uses a C extension (_ccpm) for performance-critical computations.
 """
 #==============================================================================
+
 """
     CrazyCPM
     Copyright (C) 2025 anonimous
@@ -58,8 +59,10 @@ from betapert import mpert
 import graphviz
 import numpy as np
 import pandas as pd
+
 import os
 import _ccpm
+
 
 # Constants for array indexing in time computations
 EPS = np.finfo(float).eps
@@ -813,7 +816,6 @@ class NetworkModel:
 
         # Create network model
         self._create_model(wbs_dict, lnk_src, lnk_dst, default_risk)
-
         assert 0 < len(self.events)
 
         # Compute stages of project
@@ -910,13 +912,10 @@ class NetworkModel:
         assert len(lnk_src) == len(lnk_dst)
 
         act_ids = list(wbs_dict.keys())
-        act_ids = np.array(act_ids, dtype=np.uint16)
-        lnk_src = np.array(lnk_src, dtype=np.uint16)
-        lnk_dst = np.array(lnk_dst, dtype=np.uint16)
 
         # Generate network graph using C extension
-        status, net_src, net_dst, _, _ = _ccpm.compute_aoa(act_ids, lnk_src, lnk_dst)
-        assert 0 == status
+        status, act_ids, net_src, net_dst = _ccpm.make_aoa(act_ids, lnk_src, lnk_dst)
+        assert _ccpm.OK == status
 
         self.events = []
         self.next_act = 1
@@ -1453,8 +1452,8 @@ if __name__ == '__main__':
 
     # Old format
     print("\n1. Old format with new duration inputs:")
-    src_old = np.array([1, 2, 3, 2, 3, 3, 4, 1, 6, 7, 5, 6, 7, 3, 6, 7, 6, 8, 9, 7, 8, 9, 10])
-    dst_old = np.array([5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12])
+    src_old = np.array([1,2,3, 2,3,3, 4,1,6, 7, 5,6,7,  3, 6, 7,  6, 8, 9,  7, 8, 9,10])
+    dst_old = np.array([5,5,5, 6,6,7, 7,8,8, 8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
     n_old = NetworkModel(wbs, src_old, dst_old)
     print("Successfully created model with mixed duration input formats")
 

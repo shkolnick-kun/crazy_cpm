@@ -59,43 +59,24 @@ cdef extern from "ccpm.c":
         CCPM_EINVAL
         CCPM_ENOMEM
         CCPM_ELOOP
+        CCPM_EUNK
 
-    cdef ccpmResultEn ccpm_check_act_ids(_uint16_t * act_id, _uint16_t n_act)
+    cdef ccpmResultEn ccpm_make_aoa(_uint16_t * act_ids,
+                                    _uint16_t * lnk_src,
+                                    _uint16_t * lnk_dst,
+                                    _uint16_t   n_lnk,
+                                    _uint16_t * act_src,
+                                    _uint16_t * act_dst
+                                    )
 
-    cdef ccpmResultEn ccpm_check_links(_uint16_t * lnk_src, _uint16_t * lnk_dst, \
-                                       _uint16_t   n_lnk)
-
-    cdef ccpmResultEn ccpm_links_prepare(_uint16_t *  act_id, _uint16_t     n_act, \
-                                         _uint16_t * lnk_src, _uint16_t * lnk_dst, \
-                                         _uint16_t     n_lnk)
-
-    cdef ccpmResultEn ccpm_populate_dep_info(_uint16_t *  act_id, _uint16_t *     dep, \
-                                             _uint16_t *   n_dep, _bool     * dep_map, \
-                                             _uint16_t * lnk_src, _uint16_t * lnk_dst, \
-                                             _uint16_t     n_lnk)
-
-    cdef ccpmResultEn ccpm_sort(_uint16_t * tmp, _uint16_t * key, \
-                                _uint16_t * val, _uint16_t     n)
-
-    cdef ccpmResultEn ccpm_build_dep(_uint16_t     n_act, _uint16_t    map_len, \
-                                     _uint16_t *     tmp, _uint16_t *   act_id, \
-                                     _uint16_t * act_pos, _uint16_t *    opt_n, \
-                                     _uint16_t * opt_dep, _bool     *  opt_map, \
-                                     _uint16_t *  full_n, _uint16_t * full_dep, \
-                                     _bool     * full_map)
-
-    cdef ccpmResultEn ccpm_make_aoa(_uint16_t * act_id,  \
-                                    _uint16_t * act_src, \
-                                    _uint16_t * act_dst, \
-                                    _uint16_t n_act,     \
-                                    _uint16_t * n_dum,   \
-                                    _uint16_t * lnk_src, \
-                                    _uint16_t * lnk_dst, \
-                                    _uint16_t *n_lnk)
-
-    cdef ccpmResultEn ccpm_make_full_map(_uint16_t *  act_id, _uint16_t n_act, \
-                                         _uint16_t * lnk_src, _uint16_t * lnk_dst, _uint16_t n_lnk,
-                        _bool * full_dep_map)
+    cdef ccpmResultEn ccpm_make_full_map(_uint16_t* act_ids,
+                                         _uint16_t* lnk_src,
+                                         _uint16_t* lnk_dst,
+                                         _uint16_t n_lnk,
+                                         _uint16_t n_max,
+                                         _uint16_t* full_act_dep,
+                                         _bool * full_dep_map
+                                         )
 
 import  numpy as np
 cimport numpy as np
@@ -107,162 +88,137 @@ ENOMEM = CCPM_ENOMEM
 ELOOP  = CCPM_ELOOP
 
 ###############################################################################
-def compute_aoa(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
-    """
-    Generate Activity-on-Arrow (AoA) network from activity dependencies.
-
-    This function converts activity dependencies into an Activity-on-Arrow
-    network representation, automatically creating dummy activities where
-    necessary to maintain proper network topology.
-
-    Parameters
-    ----------
-    act_id : numpy.ndarray
-        Array of activity IDs (dtype: uint16)
-    lnk_src : numpy.ndarray
-        Array of source activity IDs for dependencies (dtype: uint16)
-    lnk_dst : numpy.ndarray
-        Array of destination activity IDs for dependencies (dtype: uint16)
-
-    Returns
-    -------
-    tuple
-        (status, act_src, act_dst, lnk_src_clean, lnk_dst_clean) where:
-
-        - status: Operation result code (OK, EINVAL, ENOMEM, ELOOP)
-        - act_src: Array of source event IDs for all activities (real + dummy)
-        - act_dst: Array of destination event IDs for all activities (real + dummy)
-        - lnk_src_clean: Cleaned source activity IDs for dependencies
-        - lnk_dst_clean: Cleaned destination activity IDs for dependencies
-
-    Raises
-    ------
-    AssertionError
-        If lnk_src and lnk_dst arrays have different lengths
-
-    Notes
-    -----
-    The AoA network representation uses events (nodes) and activities (edges).
-    Dummy activities (zero duration) are automatically inserted to handle
-    complex dependency patterns and ensure proper network structure.
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from _ccpm import compute_aoa
-    >>> act_id = np.array([1, 2, 3], dtype=np.uint16)
-    >>> lnk_src = np.array([1, 2], dtype=np.uint16)
-    >>> lnk_dst = np.array([2, 3], dtype=np.uint16)
-    >>> status, act_src, act_dst, lnk_src_clean, lnk_dst_clean = compute_aoa(act_id, lnk_src, lnk_dst)
-    >>> print(f"Status: {status}, Activities: {len(act_src)}")
-    Status: 0, Activities: 3
-    """
-    #assert act_id.dtype  == np.uint16
-    #assert lnk_src.dtype == np.uint16
-    #assert lnk_dst.dtype == np.uint16
-    assert len(lnk_src)  == len(lnk_dst)
-
-    cdef _uint16_t n_act = len(act_id)
-    cdef _uint16_t n_lnk = len(lnk_src)
-    cdef _uint16_t n_dum = 0
-
-    _act_id  = act_id.astype(np.uint16)
-    #We may need som extra memory for dummies for unfinished works
-    _lnk_src = np.zeros((n_act + n_lnk,), dtype=np.uint16)
-    _lnk_dst = np.zeros((n_act + n_lnk,), dtype=np.uint16)
-
-    _lnk_src[:n_lnk] = lnk_src.astype(np.uint16)
-    _lnk_dst[:n_lnk] = lnk_dst.astype(np.uint16)
-
-    cdef _uint16_t [::1] v_act_id  = _act_id
-    cdef _uint16_t [::1] v_lnk_src = _lnk_src
-    cdef _uint16_t [::1] v_lnk_dst = _lnk_dst
-
-    #We may need som extra memory for dummies for unfinished works
-    act_src = np.zeros((2 * n_act + n_lnk,), dtype=np.uint16)
-    act_dst = np.zeros((2 * n_act + n_lnk,), dtype=np.uint16)
-
-    cdef _uint16_t [::1] v_act_src = act_src
-    cdef _uint16_t [::1] v_act_dst = act_dst
-
-    status = ccpm_make_aoa(&v_act_id[0], &v_act_src[0], &v_act_dst[0], n_act, \
-                           &n_dum, &v_lnk_src[0], &v_lnk_dst[0], &n_lnk)
-
-    return status, \
-        act_src[:n_act + n_dum].copy(), act_dst[:n_act + n_dum].copy(), \
-            _lnk_src[:n_lnk].copy(), _lnk_dst[:n_lnk].copy()
+# Memoryview array type for efficient C array handling
+ctypedef _uint16_t[:] _array
+ctypedef _bool[:] _bool_array
 
 ###############################################################################
-def make_full_map(np.ndarray act_id, np.ndarray lnk_src, np.ndarray lnk_dst):
+def make_aoa(act_ids, lnk_src, lnk_dst):
     """
-    Create complete dependency matrix for network analysis.
+    Cython wrapper for ccpm_make_aoa - converts Python lists to C arrays and back
 
-    Generates a boolean matrix representing all direct and transitive
-    dependencies between activities in the network.
+    Args:
+        act_ids: List of activity IDs
+        lnk_src: List of link sources
+        lnk_dst: List of link destinations
 
-    Parameters
-    ----------
-    act_id : numpy.ndarray
-        Array of activity IDs (dtype: uint16)
-    lnk_src : numpy.ndarray
-        Array of source activity IDs for dependencies (dtype: uint16)
-    lnk_dst : numpy.ndarray
-        Array of destination activity IDs for dependencies (dtype: uint16)
-
-    Returns
-    -------
-    tuple
-        (status, full_dep_map) where:
-
-        - status: Operation result code (OK, EINVAL, ENOMEM, ELOOP)
-        - full_dep_map: 2D boolean array where full_dep_map[i, j] = True
-          indicates activity i depends on activity j (directly or transitively)
-
-    Raises
-    ------
-    AssertionError
-        If lnk_src and lnk_dst arrays have different lengths
-
-    Notes
-    -----
-    The dependency matrix includes both direct dependencies (specified in links)
-    and transitive dependencies (dependencies of dependencies). This is useful
-    for identifying all prerequisites for each activity and detecting circular
-    dependencies.
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from _ccpm import make_full_map
-    >>> act_id = np.array([1, 2, 3], dtype=np.uint16)
-    >>> lnk_src = np.array([1, 2], dtype=np.uint16)
-    >>> lnk_dst = np.array([2, 3], dtype=np.uint16)
-    >>> status, dep_map = make_full_map(act_id, lnk_src, lnk_dst)
-    >>> print(f"Status: {status}, Dependency matrix shape: {dep_map.shape}")
-    Status: 0, Dependency matrix shape: (3, 3)
-    >>> # Activity 3 depends on both 2 and 1 (transitively)
-    >>> print(f"Dependencies for activity 3: {dep_map[2]}")
-    Dependencies for activity 3: [False  True  True]
+    Returns:
+        tuple: (status_code, status_message, act_ids, act_src, act_dst)
+        where:
+          status_code: integer status code (0 = success)
+          status_message: human-readable status description
+          act_ids: resulting activity IDs
+          act_src: resulting activity source events
+          act_dst: resulting activity destination events
     """
-    assert len(lnk_src) == len(lnk_dst)
-
-    cdef _uint16_t n_act = len(act_id)
+    cdef _uint16_t n_act = len(act_ids)
     cdef _uint16_t n_lnk = len(lnk_src)
+    cdef _uint16_t n_max = n_act + (n_lnk if n_lnk > n_act else n_act)
 
-    _act_id  = act_id.astype(np.uint16)
-    _lnk_src = lnk_src.astype(np.uint16)
-    _lnk_dst = lnk_dst.astype(np.uint16)
+    # Create buffer arrays
+    act_ids_arr = np.zeros(n_max + 1, dtype=np.uint16)
+    lnk_src_arr = np.zeros(n_lnk, dtype=np.uint16)
+    lnk_dst_arr = np.zeros(n_lnk, dtype=np.uint16)
+    act_src_arr = np.zeros(n_max + 1, dtype=np.uint16)
+    act_dst_arr = np.zeros(n_max + 1, dtype=np.uint16)
 
-    cdef _uint16_t [::1] v_act_id  = _act_id
-    cdef _uint16_t [::1] v_lnk_src = _lnk_src
-    cdef _uint16_t [::1] v_lnk_dst = _lnk_dst
+    # Prepare input data
+    act_ids_arr[0] = n_act
+    for i in range(n_act):
+        act_ids_arr[i + 1] = act_ids[i]
 
-    full_dep_map = np.zeros((n_act, n_act), dtype=np.bool_)
-    cdef _bool [:, ::1] full_dep_map_view = full_dep_map
+    for i in range(n_lnk):
+        lnk_src_arr[i] = lnk_src[i]
+        lnk_dst_arr[i] = lnk_dst[i]
 
-    cdef ccpmResultEn status
-    status = ccpm_make_full_map(&v_act_id[0], n_act,
-                               &v_lnk_src[0], &v_lnk_dst[0], n_lnk,
-                               &full_dep_map_view[0, 0])
+    # Memory views
+    cdef _uint16_t[:] act_ids_view = act_ids_arr
+    cdef _uint16_t[:] lnk_src_view = lnk_src_arr
+    cdef _uint16_t[:] lnk_dst_view = lnk_dst_arr
+    cdef _uint16_t[:] act_src_view = act_src_arr
+    cdef _uint16_t[:] act_dst_view = act_dst_arr
 
-    return status, full_dep_map
+    # Make AoA network
+    cdef ccpmResultEn result = ccpm_make_aoa(&act_ids_view[0],
+                                             &lnk_src_view[0],
+                                             &lnk_dst_view[0],
+                                             n_lnk,
+                                             &act_src_view[0],
+                                             &act_dst_view[0]
+                                             )
+
+    # Get output data
+    py_act_ids = []
+    for i in range(act_ids_arr[0]):
+        py_act_ids.append(act_ids_arr[i + 1])
+
+    py_act_src = []
+    py_act_dst = []
+
+    for i in range(act_src_arr[0]):
+        py_act_src.append(act_src_arr[i + 1])
+        py_act_dst.append(act_dst_arr[i + 1])
+
+    return result, py_act_ids, py_act_src, py_act_dst
+
+###############################################################################
+def make_full_map(act_ids, lnk_src, lnk_dst):
+    """
+    Build full dependency map for activities
+
+    Args:
+        act_ids: List of activity IDs
+        lnk_src: List of link sources
+        lnk_dst: List of link destinations
+
+    Returns:
+        tuple: (status_code, status_message, full_dep_map)
+        where:
+          status_code: integer status code (0 = success)
+          status_message: human-readable status description
+          full_dep_map: 2D numpy array with dtype=bool representing the full dependency matrix
+    """
+    cdef _uint16_t n_act = len(act_ids)
+    cdef _uint16_t n_lnk = len(lnk_src)
+    cdef _uint16_t n_max = n_act
+
+    # Create buffer arrays
+    act_ids_arr      = np.zeros(n_act + 1, dtype=np.uint16)
+    lnk_src_arr      = np.zeros(n_lnk, dtype=np.uint16)
+    lnk_dst_arr      = np.zeros(n_lnk, dtype=np.uint16)
+    full_act_dep_arr = np.zeros(n_max * n_max, dtype=np.uint16)
+    full_dep_map_arr = np.zeros(n_max * n_max, dtype=np.bool_)
+
+    # Prepare input data
+    act_ids_arr[0] = n_act
+    for i in range(n_act):
+        act_ids_arr[i + 1] = act_ids[i]
+
+    for i in range(n_lnk):
+        lnk_src_arr[i] = lnk_src[i]
+        lnk_dst_arr[i] = lnk_dst[i]
+
+    # Memory views
+    cdef _uint16_t[:] act_ids_view      = act_ids_arr
+    cdef _uint16_t[:] lnk_src_view      = lnk_src_arr
+    cdef _uint16_t[:] lnk_dst_view      = lnk_dst_arr
+    cdef _uint16_t[:] full_act_dep_view = full_act_dep_arr
+    cdef _bool[:]     full_dep_map_view = full_dep_map_arr
+
+    # Compute dependency map
+    cdef ccpmResultEn result = ccpm_make_full_map(&act_ids_view[0],
+                                                  &lnk_src_view[0],
+                                                  &lnk_dst_view[0],
+                                                  n_lnk,
+                                                  n_max,
+                                                  &full_act_dep_view[0],
+                                                  &full_dep_map_view[0]
+                                                  )
+
+    # Конвертируем результат в numpy bool array
+    full_dep_map_np = np.zeros((n_act, n_act), dtype=np.bool_)
+    for i in range(n_act):
+        for j in range(n_act):
+            full_dep_map_np[i, j] = full_dep_map_arr[i * n_max + j]
+
+    return result, full_dep_map_np
