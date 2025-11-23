@@ -1402,7 +1402,8 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids, uint16_t * act_pos,
                 CCPM_LITEM(act_dst, j) = evt;
 
                 /* Add dummy activity */
-                CCPM_LAPP(act_pos, d);
+                uint16_t nxt_pos = CCPM_LLEN(act_ids);
+                CCPM_LAPP(act_pos, nxt_pos);
                 CCPM_LAPP(act_ids, CCPM_FAKE);
                 CCPM_LAPP(act_src, evt);
                 CCPM_LAPP(act_dst, CCPM_LITEM(act_dst, i));
