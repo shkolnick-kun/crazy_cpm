@@ -86,6 +86,7 @@ OK     = CCPM_OK
 EINVAL = CCPM_EINVAL
 ENOMEM = CCPM_ENOMEM
 ELOOP  = CCPM_ELOOP
+EUNK   = CCPM_EUNK
 
 ###############################################################################
 # Memoryview array type for efficient C array handling

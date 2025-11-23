@@ -30,5 +30,5 @@ management.
 """
 #==============================================================================
 
-from _ccpm import compute_aoa, make_full_map, EINVAL, ELOOP, ENOMEM, OK
+from _ccpm import make_aoa, make_full_map, EINVAL, ELOOP, ENOMEM, EUNK, OK
 from .net_model import NetworkModel
