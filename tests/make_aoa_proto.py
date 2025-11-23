@@ -125,7 +125,7 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
     # Auxilary functions
     #
     # Reduce common action dependencies by adding dummies
-    n_cur = n_act
+    n_cur = 0
 
     #--------------------------------------------------------------------------
     # ccpm_hadle_deps
@@ -247,9 +247,9 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
                 continue
 
             # Reduce nested lists
+            n_cur = len(_act_ids)
             _handle_deps(min_com_deps, j)
             _add_a_dummy(min_com_deps, deps, dep_map)
-            n_cur += 1
             # End while
             q += 1
         # End while
@@ -261,7 +261,7 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
     # begin: ccpm_process_overlapping_deps
     #
     # Next reduce overlaping lists of dependencies
-    n_last = n_cur
+    n_last = len(_act_ids)
     p = 0
     while p < n_last:
         #
@@ -295,7 +295,7 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
             q += 1
         #
         if not found_overlap:
-            n_last = n_cur
+            n_last = len(_act_ids)
             p += 1
             continue
         #
@@ -316,13 +316,13 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
             #
             if lmcd == len(com_deps) and len(min_act_dep[j]) != lmcd:
                 # Reduce action dependencies overlap
+                n_cur = len(_act_ids)
                 _handle_deps(min_com_deps, j)
                 _add_a_dummy(min_com_deps, deps, dep_map)
-                n_cur += 1
             # End while
             q += 1
         # End while
-        n_last = n_cur
+        n_last = len(_act_ids)
         p += 1
 
     # and: ccpm_process_overlapping_deps
@@ -397,6 +397,7 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
     evt_deps  = [[] for e in events]
     evt_dins  = [[] for e in events]
     evt_real  = [False for e in events]
+    dum = len(_act_ids)
 
     for i in range(n_max):
         for j in range(n_max):
@@ -483,6 +484,8 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
     # to their successors
     evt_douts = [[] for e in events]
     evt_nout  = [0 for e in events]
+    dum = len(_act_ids)
+
     for k in range(dum):
         if CCPM_FAKE == _act_src[k] or CCPM_FAKE == _act_dst[k]:
             continue
@@ -517,7 +520,8 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
     # Add needed dummies
     _act_pos = sorted(_act_pos, key=lambda i: _act_dst[i])
     _act_pos = sorted(_act_pos, key=lambda i: _act_src[i])
-    d = dum
+
+    d = len(_act_ids)
     for i in range(d):
         if CCPM_FAKE == _act_src[i] or CCPM_FAKE == _act_dst[i]:
             continue
@@ -533,11 +537,11 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
                 evt += 1
                 _act_dst[j] = evt
 
+                dum = len(_act_ids)
                 _act_pos.append(dum)
                 _act_ids.append(CCPM_FAKE)
                 _act_src[dum] = evt
                 _act_dst[dum] = _act_dst[i]
-                dum += 1
                 events.append(evt)
     # end: ccpm_add_needed_dummies
     #==========================================================================
@@ -554,7 +558,7 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
         events[i] = evt
         evt += 1
 
-    for i in range(dum):
+    for i in range(len(_act_ids)):
         # Skip redundant dummies and events
         if CCPM_FAKE == _act_src[i] or CCPM_FAKE == _act_dst[i]:
             continue
@@ -566,16 +570,24 @@ def make_aoa(__act_ids, _lnk_src, _lnk_dst):
         _act_dst[i] = events[_act_dst[i] - 1]
 
     # Constuct result
-    act_pos = sorted(_act_pos, key=lambda i: _act_ids[i])
+    #act_pos = sorted(_act_pos, key=lambda i: _act_ids[i])
+    act_ids = []
     act_src = []
     act_dst = []
-    for p in act_pos:
-        if CCPM_FAKE == _act_src[p] or CCPM_FAKE == _act_dst[p]:
+    for p in _act_pos:
+        if CCPM_FAKE == _act_ids[p]:
+            continue
+        act_ids.append(_act_ids[p])
+        act_src.append(_act_src[p])
+        act_dst.append(_act_dst[p])
+
+    for p in _act_pos:
+        if CCPM_FAKE != _act_ids[p] or \
+            CCPM_FAKE == _act_src[p] or CCPM_FAKE == _act_dst[p]:
             continue
         act_src.append(_act_src[p])
         act_dst.append(_act_dst[p])
 
-    act_ids = [i for i in _act_ids if i != CCPM_FAKE]
     # end: ccpm_finalize_network
     #==========================================================================
 
