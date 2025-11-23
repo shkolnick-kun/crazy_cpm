@@ -19,8 +19,6 @@
 		<Compiler>
 			<Add option="-Wextra" />
 			<Add option="-Wall" />
-			<Add option="-Og" />
-			<Add option="-g" />
 			<Add option="-DCCPM_CFG_PRINTF=printf" />
 			<Add directory="../../src" />
 		</Compiler>
