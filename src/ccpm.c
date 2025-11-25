@@ -571,6 +571,9 @@ ccpmResultEn ccpm_add_a_dummy(uint32_t * min_deps, uint32_t * deps, uint8_t * de
     /* Add current position to act_pos list */
     CCPM_LAPP(act_pos, n_cur);
 
+    /*Check for limits*/
+    CCPM_CHECK_RETURN(CCPM_LLEN(act_pos) < CCPM_FAKE, CCPM_ELIM);
+
     /* Set dummy minimal dependencies */
     CCPM_LCLR(min_act_dep + n_max * n_cur);
     for (i = 0; i < CCPM_LLEN(min_deps); i++)
@@ -1419,7 +1422,6 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids,     uint32_t * act_pos,
 
                 /* Create new event */
                 evt++;
-                CCPM_CHECK_RETURN(evt < CCPM_FAKE, CCPM_ELIM);
                 CCPM_LITEM(act_dst, j) = evt;
 
                 /* Add dummy activity */
@@ -1429,6 +1431,10 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids,     uint32_t * act_pos,
                 CCPM_LAPP(act_src, evt);
                 CCPM_LAPP(act_dst, CCPM_LITEM(act_dst, i));
                 CCPM_LAPP(to_do, false);
+
+                /*Check for limits*/
+                CCPM_CHECK_RETURN(evt < CCPM_FAKE, CCPM_ELIM);
+                CCPM_CHECK_RETURN(CCPM_LLEN(act_pos) < CCPM_FAKE, CCPM_ELIM);
 
                 /* Add new event to events list */
                 CCPM_LAPP(events, evt);
