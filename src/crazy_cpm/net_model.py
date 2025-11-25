@@ -829,7 +829,7 @@ class NetworkModel:
         self.debug = debug
         self.is_pert = False
         self.p = p
-        self._duration = duration
+        self._duration = duration #TODO: Document this
 
         # Parse links into standard format
         lnk_src, lnk_dst = self._parse_links(lnk_src, lnk_dst, links)
@@ -1420,7 +1420,9 @@ class NetworkModel:
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
                 # Format expected time and reserve to 1 decimal place
-                lbl += '\n t=' + format(a.expected[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
+                early = a.early_end - a.early_start
+                late  = a.late_end  - a.late_start
+                lbl += '\n t=' + format(max(early, late), '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
             else:  # Dummy activity
                 lbl += '\n r=' + format(a.reserve[RES], '.2f')
 
