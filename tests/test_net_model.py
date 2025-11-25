@@ -68,20 +68,20 @@ if __name__ == '__main__':
     # Example usage with all link formats and new duration input methods
     wbs = {
         # Standard format (backward compatibility)
-         1: {'letter': 'A', 'duration': 1., 'name': 'A1'},
-         2: {'letter': 'B', 'duration': 1., 'name': 'A2'},
-         3: {'letter': 'C', 'duration': 2., 'name': 'A3'},
-         4: {'letter': 'D', 'duration': 3., 'name': 'A4'},
-         5: {'letter': 'E', 'duration': 1., 'name': 'A5'},
-         6: {'letter': 'F', 'duration': 1., 'name': 'A6'},
-         7: {'letter': 'G', 'duration': 2., 'name': 'A7'},
-         8: {'letter': 'H', 'duration': 3., 'name': 'A8'},
-         9: {'letter': 'J', 'duration': 1., 'name': 'A9'},
-        10: {'letter': 'K', 'duration': 4., 'name': 'A10'},
-        11: {'letter': 'L', 'duration': 5., 'name': 'A11'},
-        12: {'letter': 'M', 'duration': 5., 'name': 'A12'},
-        13: {'letter': 'O', 'duration': 5., 'name': 'A13'},
-        14: {'letter': 'P', 'duration': 5., 'name': 'A14'},
+         1: {'letter': 'A', 'expected': 1., 'name': 'A1'},
+         2: {'letter': 'B', 'expected': 1., 'name': 'A2'},
+         3: {'letter': 'C', 'expected': 2., 'name': 'A3'},
+         4: {'letter': 'D', 'expected': 3., 'name': 'A4'},
+         5: {'letter': 'E', 'expected': 1., 'name': 'A5'},
+         6: {'letter': 'F', 'expected': 1., 'name': 'A6'},
+         7: {'letter': 'G', 'expected': 2., 'name': 'A7'},
+         8: {'letter': 'H', 'expected': 3., 'name': 'A8'},
+         9: {'letter': 'J', 'expected': 1., 'name': 'A9'},
+        10: {'letter': 'K', 'expected': 4., 'name': 'A10'},
+        11: {'letter': 'L', 'expected': 5., 'name': 'A11'},
+        12: {'letter': 'M', 'expected': 5., 'name': 'A12'},
+        13: {'letter': 'O', 'expected': 5., 'name': 'A13'},
+        14: {'letter': 'P', 'expected': 5., 'name': 'A14'},
     }
 
     src = np.array([1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ])

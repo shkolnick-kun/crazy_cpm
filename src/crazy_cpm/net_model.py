@@ -223,7 +223,7 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
     return prob
 
 #==============================================================================
-def _calculate_time_params(work_data, default_risk=0.3):
+def _calculate_action_time_params(work_data, default_risk=0.3):
     """
     Calculate expected time and its variance from various input formats.
 
@@ -264,19 +264,19 @@ def _calculate_time_params(work_data, default_risk=0.3):
     --------
     >>> # Three-point PERT
     >>> data = {'optimistic': 5, 'most_likely': 7, 'pessimistic': 12}
-    >>> mean, var, a, m, b = _calculate_time_params(data)
+    >>> mean, var, a, m, b = _calculate_action_time_params(data)
     >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
     Mean: 7.50, Variance: 1.36
 
     >>> # Two-point PERT
     >>> data = {'optimistic': 3, 'pessimistic': 8}
-    >>> mean, var, a, m, b = _calculate_time_params(data)
+    >>> mean, var, a, m, b = _calculate_action_time_params(data)
     >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
     Mean: 7.00, Variance: 1.00
 
     >>> # Direct parameters
     >>> data = {'expected': 6.5, 'variance': 0.5}
-    >>> mean, var, a, m, b = _calculate_time_params(data)
+    >>> mean, var, a, m, b = _calculate_action_time_params(data)
     >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
     Mean: 6.50, Variance: 0.50
     """
@@ -726,6 +726,25 @@ class _Event:
         return ret
 
 #==============================================================================
+def _default_duration(value, activity, base_time):
+    return value
+
+#==============================================================================
+def _choice(old, new, delta):
+    e = new[ERR] + old[ERR]
+    if delta >= e:
+        return new  # Certain result
+    elif delta >= -e:
+        # Uncertain result, use mixing
+        ret = np.zeros((3,), dtype=float)
+        ret[RES] = 0.5 * (new[RES] + old[RES])
+        ret[VAR] = max(old[VAR], new[VAR])
+        ret[ERR] = 0.5 * e
+        return ret
+    else:
+        return old  # Certain result
+
+#==============================================================================
 class NetworkModel:
     """
     Main class for CPM/PERT network analysis.
@@ -804,12 +823,13 @@ class NetworkModel:
     """
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
-                 p=0.95, default_risk=0.3, debug=False):
+                 duration=_default_duration, p=0.95, default_risk=0.3, debug=False):
         assert isinstance(wbs_dict, dict)
 
         self.debug = debug
         self.is_pert = False
         self.p = p
+        self._duration = duration
 
         # Parse links into standard format
         lnk_src, lnk_dst = self._parse_links(lnk_src, lnk_dst, links)
@@ -941,7 +961,7 @@ class NetworkModel:
                 # Calculate expected time and variance using new unified function
                 try:
                     expected, variance, optimistic, _, pessimistic = \
-                        _calculate_time_params(wbs_data, default_risk)
+                        _calculate_action_time_params(wbs_data, default_risk)
                 except ValueError as e:
                     raise ValueError(f"Error processing activity {act_id} ({wbs_data.get('letter', 'unknown')}): {e}")
 
@@ -965,7 +985,7 @@ class NetworkModel:
                 dsrc.append(int(net_src[i]))
 
         # Network postprocessing
-        # Make sure that actions with longest durations (shortest reserves) are on straigth paths between events
+        # Make sure that actions with biggest ecpected times are on straigth paths between events
         grpoi = {}
         # Find groups of triangles on dummies
         for e in self.events:
@@ -988,17 +1008,18 @@ class NetworkModel:
             else:
                 grpoi[key][1].append(bck[0])
 
-        # Place maximum duration actions on long side of trianle groups
+        # Place maximum time actions on long side of trianle groups
         for k in grpoi.keys():
             aoi = grpoi[k][1]
             if len(aoi) < 1:
                 raise RuntimeError("Action of interest group must contain at least one action!")
-            #Maximum duration (minimum reserve) candidate
-            mina = grpoi[k][0]
+            #Maximum time candidate
+            maxa = grpoi[k][0]
             for a in aoi:
-                if a.reserve[RES] < mina.reserve[RES]:
-                    a.dst, mina.dst = mina.dst, a.dst
-                    mina = a
+                # Here base_time is None then only resource performances should be accounted
+                if self._duration(a.expected[RES], a, None) > self._duration(maxa.expected[RES], maxa, None):
+                    a.dst, maxa.dst = maxa.dst, a.dst
+                    maxa = a
 
     def _remove_duplicate_fields(self, wbs_data, expected, variance, letter):
         """
@@ -1067,11 +1088,27 @@ class NetworkModel:
                 raise RuntimeError("Events can not have negative time reserves!!!")
 
         for a in self.activities:
-            a.reserve[VAR] = a.late_start[VAR] + a.early_start[VAR]
-            a.reserve[ERR] = a.late_start[ERR] + a.early_start[ERR]
+            # Compute start and end reserve values
+            #
+            # These values may be different due to resource availability
+            # dependence on time
+            start_res = np.zeros((3,), dtype=float)
+            start_res[RES] = a.late_start[RES] - a.early_start[RES]
+            start_res[VAR] = a.late_start[VAR] + a.early_start[VAR]
+            start_res[ERR] = a.late_start[ERR] + a.early_start[ERR]
+
+            end_res = np.zeros((3,), dtype=float)
+            end_res[RES] = a.late_end[RES] - a.early_end[RES]
+            end_res[VAR] = a.late_end[VAR] + a.early_end[VAR]
+            end_res[ERR] = a.late_end[ERR] + a.early_end[ERR]
+
+            # Choose minimum reserve value
+            a.reserve = _choice(start_res, end_res, start_res[RES] - end_res[RES])
+
             # Round off insignificant values
-            r = a.late_start[RES] - a.early_start[RES]
+            r = a.reserve[RES]
             a.reserve[RES] = r if abs(r) > a.reserve[ERR] else 0.0
+
             # Check for programming errors
             if r < -a.reserve[ERR]:
                 raise RuntimeError("Actions can not have negative time reserves!!!")
@@ -1097,19 +1134,6 @@ class NetworkModel:
         ValueError
             If target parameter is invalid
         """
-        def _choice(old, new, delta):
-            e = new[ERR] + old[ERR]
-            if delta >= e:
-                return new  # Certain result
-            elif delta >= -e:
-                # Uncertain result, use mixing
-                ret = np.zeros((3,), dtype=float)
-                ret[RES] = 0.5 * (new[RES] + old[RES])
-                ret[VAR] = max(old[VAR], new[VAR])
-                ret[ERR] = 0.5 * e
-                return ret
-            else:
-                return old  # Certain result
 
         def _choice_early(old, new):
             return _choice(old, new, new[RES] - old[RES])
@@ -1193,7 +1217,8 @@ class NetworkModel:
                 if act_base:
                     setattr(a, act_base, base_val)
 
-                new_val = base_val + delta(a)
+                # Here we use base_val so resource availability should be taken into account
+                new_val = base_val + self._duration(delta(a), a, base_val)
 
                 if act_new:
                     setattr(a, act_new, new_val)
@@ -1468,7 +1493,7 @@ if __name__ == '__main__':
 
     for i, test_case in enumerate(test_cases):
         try:
-            mean, var, a, m, b = _calculate_time_params(test_case)
+            mean, var, a, m, b = _calculate_action_time_params(test_case)
             print(f"Test case {i + 1}: {test_case} -> mean={mean:.3f}, variance={var:.3f}")
         except ValueError as e:
             print(f"Test case {i + 1} error: {e}")
