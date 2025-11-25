@@ -103,20 +103,6 @@ do {                                                                          \
 #define CCPM_TRY_GOTO_END(exp) _CCPM_TRY_GOTO_END(exp, __FILE__, __func__, __LINE__)
 
 /*===========================================================================*/
-const char* ccpm_result_to_str(ccpmResultEn result)
-{
-    switch (result)
-    {
-        case CCPM_OK:     return "Success";
-        case CCPM_EINVAL: return "Invalid input parameters";
-        case CCPM_ENOMEM: return "Not enough memory";
-        case CCPM_ELOOP:  return "Dependency loop detected";
-        case CCPM_EUNK:   return "Unknown error";
-        default:          return "Undefined error code";
-    }
-}
-
-/*===========================================================================*/
 typedef struct _ccpmMemStackSt ccpmMemStackSt;
 
 struct _ccpmMemStackSt
@@ -178,11 +164,11 @@ Merge sort based on:
 =========================================================================*/
 
 // Merge the two half uint16_to a sorted data.
-static inline void _merge(uint16_t * m, uint16_t * l, uint16_t nl, uint16_t * r, uint16_t nr, uint16_t * val)
+static inline void _merge(uint32_t * m, uint32_t * l, size_t nl, uint32_t * r, size_t nr, uint32_t * val)
 {
-    uint16_t i = 0;
-    uint16_t j = 0;
-    uint16_t k = 0;
+    size_t i = 0;
+    size_t j = 0;
+    size_t k = 0;
 
     while ((i < nl) && (j < nr))
     {
@@ -212,27 +198,27 @@ static inline void _merge(uint16_t * m, uint16_t * l, uint16_t nl, uint16_t * r,
 
 // l is for left index and r is right index of the
 // sub-array of arr to be sorted
-static inline uint16_t * _merge_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n)
+static inline uint32_t * _merge_sort(uint32_t * tmp, uint32_t * key, uint32_t * val, size_t n)
 {
     if (1 == n)
     {
         return key;
     }
 
-    uint16_t nl = n/2;
-    uint16_t nr = n - nl;
+    size_t nl = n/2;
+    size_t nr = n - nl;
     // Sort first and second halves
-    uint16_t * l = _merge_sort(tmp,      key,      val, nl);              /*Will return arr or tmp*/
-    uint16_t * r = _merge_sort(tmp + nl, key + nl, val, nr);
+    uint32_t * l = _merge_sort(tmp,      key,      val, nl);              /*Will return arr or tmp*/
+    uint32_t * r = _merge_sort(tmp + nl, key + nl, val, nr);
 
-    uint16_t * ret = (l != key) ? key : tmp;
+    uint32_t * ret = (l != key) ? key : tmp;
 
     _merge(ret, l, nl, r, nr, val);
 
     return ret;
 }
 
-ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n)
+ccpmResultEn ccpm_sort(uint32_t * tmp, uint32_t * key, uint32_t * val, size_t n)
 {
     CCPM_CHECK_RETURN(tmp, CCPM_EINVAL);
     CCPM_CHECK_RETURN(key, CCPM_EINVAL);
@@ -242,10 +228,10 @@ ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t 
     {
         return CCPM_OK;
     }
-    uint16_t * ms = _merge_sort(tmp, key, val, n);
+    uint32_t * ms = _merge_sort(tmp, key, val, n);
     if (ms != key)
     {
-        for (uint16_t i = 0; i < n; i++)
+        for (size_t i = 0; i < n; i++)
         {
             key[i] = tmp[i];
         }
@@ -266,18 +252,20 @@ ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t 
 
 
 /*===========================================================================*/
-#define CCPM_FAKE (0xffff)
+#define CCPM_FAKE  (0xffff)
 
 /*===========================================================================*/
 ccpmResultEn ccpm_check_act_idss(uint16_t * act_ids)
 {
     CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
 
-    uint16_t n_act = CCPM_LLEN(act_ids);
+    size_t n_act = CCPM_LLEN(act_ids);
 
-    for (uint16_t i = 0; i < n_act; i++)
+    CCPM_CHECK_RETURN(n_act < CCPM_FAKE, CCPM_ELIM);
+
+    for (size_t i = 0; i < n_act; i++)
     {
-        for (uint16_t j = i + 1; j < n_act; j++)
+        for (size_t j = i + 1; j < n_act; j++)
         {
             CCPM_CHECK_RETURN(CCPM_LITEM(act_ids, i) != CCPM_LITEM(act_ids, j), CCPM_EINVAL);
         }
@@ -291,9 +279,11 @@ ccpmResultEn ccpm_check_links(uint16_t * lnk_src, uint16_t * lnk_dst, size_t n_l
     CCPM_CHECK_RETURN(lnk_src, CCPM_EINVAL);
     CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
 
-    for (uint16_t i = 0; i < n_lnk; i++)
+    CCPM_CHECK_RETURN(n_lnk < CCPM_FAKE, CCPM_ELIM);
+
+    for (size_t i = 0; i < n_lnk; i++)
     {
-        for (uint16_t j = i + 1; j < n_lnk; j++)
+        for (size_t j = i + 1; j < n_lnk; j++)
         {
             CCPM_CHECK_RETURN((lnk_src[i] != lnk_src[j]) || (lnk_dst[i] != lnk_dst[j]), CCPM_EINVAL);
         }
@@ -304,8 +294,8 @@ ccpmResultEn ccpm_check_links(uint16_t * lnk_src, uint16_t * lnk_dst, size_t n_l
 /*===========================================================================*/
 static inline bool _ccpm_lookup_act_pos(uint16_t * link, uint16_t * act_ids)
 {
-    uint16_t n_act = CCPM_LLEN(act_ids);
-    for (uint16_t i = 0; i < n_act; i++)
+    size_t n_act = CCPM_LLEN(act_ids);
+    for (size_t i = 0; i < n_act; i++)
     {
         if (0 == *link - CCPM_LITEM(act_ids, i))
         {
@@ -323,7 +313,7 @@ ccpmResultEn ccpm_links_prepare(uint16_t * act_ids, uint16_t * lnk_src, uint16_t
     CCPM_CHECK_RETURN(lnk_dst, CCPM_EINVAL);
 
     CCPM_LOG_PRINTF("Translate work indexes to work array positions...\n");
-    for (uint16_t i = 0; i < n_lnk; i++)
+    for (size_t i = 0; i < n_lnk; i++)
     {
         CCPM_LOG_PRINTF("%d: (%d,%d)->", (int)i, (int)lnk_src[i], (int)lnk_dst[i]);
 
@@ -339,7 +329,7 @@ ccpmResultEn ccpm_links_prepare(uint16_t * act_ids, uint16_t * lnk_src, uint16_t
 /*===========================================================================*/
 ccpmResultEn ccpm_populate_dep_info(size_t   n_max,
                                     size_t   n_lnk, uint16_t * lnk_src, uint16_t * lnk_dst,
-                                    uint16_t * dep, bool * dep_map)
+                                    uint32_t * dep, uint8_t * dep_map)
 {
     size_t i;
     size_t j;
@@ -360,7 +350,7 @@ ccpmResultEn ccpm_populate_dep_info(size_t   n_max,
     }
 
     CCPM_LOG_PRINTF("Populate dependencies data...\n");
-    for (uint16_t l = 0; l < n_lnk; l++)
+    for (size_t l = 0; l < n_lnk; l++)
     {
         i = lnk_src[l];
         j = lnk_dst[l];
@@ -381,7 +371,7 @@ ccpmResultEn ccpm_populate_dep_info(size_t   n_max,
 
 /*===========================================================================*/
 ccpmResultEn ccpm_build_full_deps(size_t     n_act,    size_t  n_max,
-                                  uint16_t * full_act_dep, bool *  full_map)
+                                  uint32_t * full_act_dep, uint8_t * full_map)
 {
     size_t i;
     size_t j;
@@ -430,9 +420,9 @@ ccpmResultEn ccpm_build_full_deps(size_t     n_act,    size_t  n_max,
 
 /*===========================================================================*/
 ccpmResultEn ccpm_optimize_deps(size_t     n_act,    size_t     n_max,
-                                uint16_t * act_pos,  uint16_t * full_n,
-                                uint16_t * dep,      bool     * map,
-                                uint16_t * tmp)
+                                uint32_t * act_pos,  uint32_t * full_n,
+                                uint32_t * dep,      uint8_t  * map,
+                                uint32_t * tmp)
 {
     size_t i;
     size_t j;
@@ -504,10 +494,10 @@ ccpmResultEn ccpm_optimize_deps(size_t     n_act,    size_t     n_max,
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_handle_deps(uint16_t * min_deps, uint16_t target,
+ccpmResultEn ccpm_handle_deps(uint32_t * min_deps, uint32_t target,
                               size_t n_cur, size_t n_max,
-                              uint16_t *  min_act_dep, bool *  min_dep_map,
-                              uint16_t * full_act_dep, bool * full_dep_map)
+                              uint32_t *  min_act_dep, uint8_t *  min_dep_map,
+                              uint32_t * full_act_dep, uint8_t * full_dep_map)
 {
     size_t i;
     size_t d;
@@ -553,11 +543,11 @@ ccpmResultEn ccpm_handle_deps(uint16_t * min_deps, uint16_t target,
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_add_a_dummy(uint16_t * min_deps, uint16_t * deps, bool * dep_map,
+ccpmResultEn ccpm_add_a_dummy(uint32_t * min_deps, uint32_t * deps, uint8_t * dep_map,
                               size_t n_cur, size_t n_max,
-                              uint16_t * act_ids, uint16_t * act_pos,
-                              uint16_t *  min_act_dep, bool *  min_dep_map,
-                              uint16_t * full_act_dep, bool * full_dep_map)
+                              uint16_t * act_ids,      uint32_t * act_pos,
+                              uint32_t * min_act_dep,  uint8_t  * min_dep_map,
+                              uint32_t * full_act_dep, uint8_t  * full_dep_map)
 {
     size_t i;
     size_t d;
@@ -608,10 +598,10 @@ ccpmResultEn ccpm_add_a_dummy(uint16_t * min_deps, uint16_t * deps, bool * dep_m
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_full_deps(uint16_t * min_deps,
-                                uint16_t * deps, bool * dep_map,
-                                size_t n_max,
-                                uint16_t * full_act_dep, bool * full_dep_map)
+ccpmResultEn ccpm_full_deps(uint32_t * min_deps,
+                            uint32_t * deps, uint8_t * dep_map,
+                            size_t n_max,
+                            uint32_t * full_act_dep, uint8_t * full_dep_map)
 {
     size_t i;
     size_t j;
@@ -668,19 +658,20 @@ ccpmResultEn ccpm_full_deps(uint16_t * min_deps,
 
 /*===========================================================================*/
 ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
-                                      uint16_t * act_pos,
-                                      uint16_t * min_act_dep, bool * min_dep_map,
-                                      uint16_t * full_act_dep, bool * full_dep_map,
+                                      uint32_t * act_pos,
+                                      uint32_t * min_act_dep,  uint8_t * min_dep_map,
+                                      uint32_t * full_act_dep, uint8_t * full_dep_map,
                                       uint16_t * act_ids,
-                                      uint16_t * min_com_deps,
-                                      uint16_t * tmp_deps, bool * tmp_dep_map)
+                                      uint32_t * min_com_deps,
+                                      uint32_t * tmp_deps,     uint8_t * tmp_dep_map)
 {
     size_t p;
     size_t q;
     size_t i;
     size_t j;
     size_t k;
-    uint16_t lcd, lmcd;
+    size_t lcd;
+    size_t lmcd;
     ccpmResultEn ret = CCPM_OK;
 
     CCPM_CHECK_RETURN(act_pos, CCPM_EINVAL);
@@ -722,7 +713,7 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
             CCPM_LCLR(min_com_deps);
             for (k = 0; k < CCPM_LLEN(min_act_dep + n_max * i); k++)
             {
-                uint16_t d = CCPM_LITEM(min_act_dep + n_max * i, k);
+                size_t d = CCPM_LITEM(min_act_dep + n_max * i, k);
                 if (min_dep_map[n_max * j + d])
                 {
                     CCPM_LAPP(min_com_deps, d);
@@ -730,8 +721,8 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
             }
 
             lcd = CCPM_LLEN(min_com_deps);
-            uint16_t len_i = CCPM_LLEN(min_act_dep + n_max * i);
-            uint16_t len_j = CCPM_LLEN(min_act_dep + n_max * j);
+            size_t len_i = CCPM_LLEN(min_act_dep + n_max * i);
+            size_t len_j = CCPM_LLEN(min_act_dep + n_max * j);
 
             if ((len_i == lcd || len_j == lcd) && (len_i != len_j))
             {
@@ -759,7 +750,7 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
         {
             j = CCPM_LITEM(act_pos, q);
 
-            uint16_t len_j = CCPM_LLEN(min_act_dep + n_max * j);
+            size_t len_j = CCPM_LLEN(min_act_dep + n_max * j);
             if (0 == len_j || len_j == lmcd)
             {
                 /* Skip empty, equal, or non-nested lists */
@@ -767,10 +758,10 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
             }
 
             /* Check if j has all common dependencies */
-            uint16_t com_count = 0;
+            size_t com_count = 0;
             for (k = 0; k < lmcd; k++)
             {
-                uint16_t d = CCPM_LITEM(min_com_deps, k);
+                size_t d = CCPM_LITEM(min_com_deps, k);
                 if (min_dep_map[n_max * j + d])
                 {
                     com_count++;
@@ -783,7 +774,7 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
                 continue;
             }
 
-            uint16_t nxt_id = CCPM_LLEN(act_ids);
+            size_t nxt_id = CCPM_LLEN(act_ids);
 
             /* Reduce nested lists */
             CCPM_TRY_RETURN(ccpm_handle_deps(min_com_deps, j, nxt_id, n_max,
@@ -795,8 +786,6 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
                                             act_ids, act_pos,
                                             min_act_dep, min_dep_map,
                                             full_act_dep, full_dep_map));
-
-            //(*n_cur)++;
         }
     }
 
@@ -805,12 +794,12 @@ ccpmResultEn ccpm_process_nested_deps(size_t n_act, size_t n_max,
 
 /*===========================================================================*/
 ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
-                                          uint16_t * act_pos,
-                                          uint16_t * min_act_dep, bool * min_dep_map,
-                                          uint16_t * full_act_dep, bool * full_dep_map,
+                                          uint32_t * act_pos,
+                                          uint32_t * min_act_dep,  uint8_t * min_dep_map,
+                                          uint32_t * full_act_dep, uint8_t * full_dep_map,
                                           uint16_t * act_ids,
-                                          uint16_t * min_com_deps,
-                                          uint16_t * tmp_deps, bool * tmp_dep_map)
+                                          uint32_t * min_com_deps,
+                                          uint32_t * tmp_deps,     uint8_t * tmp_dep_map)
 {
     size_t p;
     size_t q;
@@ -860,16 +849,16 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
             CCPM_LCLR(min_com_deps);
             for (k = 0; k < CCPM_LLEN(min_act_dep + n_max * i); k++)
             {
-                uint16_t d = CCPM_LITEM(min_act_dep + n_max * i, k);
+                size_t d = CCPM_LITEM(min_act_dep + n_max * i, k);
                 if (min_dep_map[n_max * j + d])
                 {
                     CCPM_LAPP(min_com_deps, d);
                 }
             }
 
-            uint16_t lmcd = CCPM_LLEN(min_com_deps);
-            uint16_t len_i = CCPM_LLEN(min_act_dep + n_max * i);
-            uint16_t len_j = CCPM_LLEN(min_act_dep + n_max * j);
+            size_t lmcd = CCPM_LLEN(min_com_deps);
+            size_t len_i = CCPM_LLEN(min_act_dep + n_max * i);
+            size_t len_j = CCPM_LLEN(min_act_dep + n_max * j);
 
             if (lmcd > 0 && len_i != lmcd && len_j != lmcd)
             {
@@ -885,7 +874,7 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
             continue;
         }
 
-        uint16_t lmcd = CCPM_LLEN(min_com_deps);
+        size_t lmcd = CCPM_LLEN(min_com_deps);
 
         /* Build full dependencies for common deps */
         CCPM_TRY_RETURN(ccpm_full_deps(min_com_deps, tmp_deps, tmp_dep_map,
@@ -903,10 +892,10 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
             }
 
             /* Check if j has all common dependencies */
-            uint16_t com_count = 0;
+            size_t com_count = 0;
             for (k = 0; k < lmcd; k++)
             {
-                uint16_t d = CCPM_LITEM(min_com_deps, k);
+                size_t d = CCPM_LITEM(min_com_deps, k);
                 if (min_dep_map[n_max * j + d])
                 {
                     com_count++;
@@ -916,7 +905,7 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
             if (com_count == lmcd && CCPM_LLEN(min_act_dep + n_max * j) != lmcd)
             {
                 /* Reduce overlapping dependencies */
-                uint16_t nxt_id = CCPM_LLEN(act_ids);
+                size_t nxt_id = CCPM_LLEN(act_ids);
                 CCPM_TRY_RETURN(ccpm_handle_deps(min_com_deps, j, nxt_id, n_max,
                                                 min_act_dep, min_dep_map,
                                                 full_act_dep, full_dep_map));
@@ -926,13 +915,10 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
                                                 act_ids, act_pos,
                                                 min_act_dep, min_dep_map,
                                                 full_act_dep, full_dep_map));
-
-                //(*n_cur)++;
             }
         }
 
         n_last = CCPM_LLEN(act_ids);
-        //n_last = *n_cur;
     }
 
     return CCPM_OK;
@@ -940,19 +926,19 @@ ccpmResultEn ccpm_process_overlapping_deps(size_t n_max,
 
 /*===========================================================================*/
 ccpmResultEn ccpm_build_network(size_t n_max,
-                               uint16_t * act_ids, uint16_t * act_pos,
-                               uint16_t * min_act_dep, bool * min_dep_map,
-                               uint16_t * full_act_dep, bool * full_dep_map,
-                               uint16_t * act_src, uint16_t * act_dst,
-                               uint16_t * started, uint16_t * num_dep,
-                               uint16_t * events, uint16_t * chk,
-                               uint16_t * start)
+                               uint16_t * act_ids,      uint32_t * act_pos,
+                               uint32_t * min_act_dep,  uint8_t  * min_dep_map,
+                               uint32_t * full_act_dep, uint8_t  * full_dep_map,
+                               uint32_t * act_src,      uint32_t * act_dst,
+                               uint32_t * started,      uint32_t * num_dep,
+                               uint32_t * events,       uint32_t * chk,
+                               uint32_t * start)
 {
     size_t i;
     size_t j;
     size_t k;
-    uint16_t evt = 1;
-    uint16_t dum = CCPM_LLEN(act_ids);
+    size_t evt = 1;
+    size_t dum = CCPM_LLEN(act_ids);
 
     CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_pos, CCPM_EINVAL);
@@ -1007,7 +993,7 @@ ccpmResultEn ccpm_build_network(size_t n_max,
     /* Process activities in order */
     for (i = 0; i < CCPM_LLEN(chk); i++)
     {
-        uint16_t current_act = CCPM_LITEM(chk, i);
+        size_t current_act = CCPM_LITEM(chk, i);
 
         /* Decrement dependency counters for activities that depend on current activity */
         for (j = 0; j < dum; j++)
@@ -1036,15 +1022,15 @@ ccpmResultEn ccpm_build_network(size_t n_max,
         if (CCPM_LLEN(start) > 0)
         {
             /* All newly started activities have the same dependencies, use the first one*/
-            uint16_t first_act = CCPM_LITEM(start, 0);
+            size_t first_act = CCPM_LITEM(start, 0);
             for (k = 0; k < CCPM_LLEN(min_act_dep + n_max * first_act); k++)
             {
-                uint16_t dep_act = CCPM_LITEM(min_act_dep + n_max * first_act, k);
+                size_t dep_act = CCPM_LITEM(min_act_dep + n_max * first_act, k);
 
                 if (CCPM_LITEM(act_dst, dep_act))
                 {
                     /* Need to add a dummy activity */
-                    uint16_t nxt_pos = CCPM_LLEN(act_ids);
+                    size_t nxt_pos = CCPM_LLEN(act_ids);
 
                     CCPM_LAPP(act_pos, nxt_pos);
                     CCPM_LAPP(act_ids, CCPM_FAKE);
@@ -1064,6 +1050,7 @@ ccpmResultEn ccpm_build_network(size_t n_max,
             /* Add new event */
             CCPM_LAPP(events, evt);
             evt++;
+            CCPM_CHECK_RETURN(evt < CCPM_FAKE, CCPM_ELIM);
         }
 
         /* Add newly started activities to check list */
@@ -1090,8 +1077,8 @@ ccpmResultEn ccpm_build_network(size_t n_max,
 
 /*===========================================================================*/
 ccpmResultEn ccpm_do_glue(size_t n_cur,
-                          uint16_t * act_src, uint16_t * act_dst,
-                          uint16_t * events)
+                          uint32_t * act_src, uint32_t * act_dst,
+                          uint32_t * events)
 {
     size_t k;
 
@@ -1111,8 +1098,8 @@ ccpmResultEn ccpm_do_glue(size_t n_cur,
         }
 
         /* Update source and destination events */
-        uint16_t src_evt = CCPM_LITEM(act_src, k) - 1;
-        uint16_t dst_evt = CCPM_LITEM(act_dst, k) - 1;
+        size_t src_evt = CCPM_LITEM(act_src, k) - 1;
+        size_t dst_evt = CCPM_LITEM(act_dst, k) - 1;
 
         CCPM_LITEM(act_src, k) = CCPM_LITEM(events, src_evt);
         CCPM_LITEM(act_dst, k) = CCPM_LITEM(events, dst_evt);
@@ -1123,17 +1110,17 @@ ccpmResultEn ccpm_do_glue(size_t n_cur,
 
 /*===========================================================================*/
 ccpmResultEn ccpm_optimize_network_stage_1(size_t n_max,
-                                          uint16_t * act_ids, uint16_t * act_src, uint16_t * act_dst,
-                                          uint16_t * events, bool * evt_dep_map,
-                                          uint16_t * evt_deps, uint16_t * evt_dins, bool * evt_real)
+                                          uint16_t * act_ids,  uint32_t * act_src,     uint32_t * act_dst,
+                                          uint32_t * events,   uint8_t  * evt_dep_map,
+                                          uint32_t * evt_deps, uint32_t * evt_dins,    uint8_t * evt_real)
 {
     ccpmResultEn ret = CCPM_OK;
 
     size_t i;
     size_t j;
     size_t k;
-    uint16_t num_events = CCPM_LLEN(events);
-    uint16_t dum        = CCPM_LLEN(act_ids);
+    size_t num_events = CCPM_LLEN(events);
+    size_t dum        = CCPM_LLEN(act_ids);
 
     CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
@@ -1166,8 +1153,8 @@ ccpmResultEn ccpm_optimize_network_stage_1(size_t n_max,
     /* Populate event dependencies and inputs */
     for (k = 0; k < dum; k++)
     {
-        uint16_t src_evt = CCPM_LITEM(act_src, k) - 1;
-        uint16_t dst_evt = CCPM_LITEM(act_dst, k) - 1;
+        size_t src_evt = CCPM_LITEM(act_src, k) - 1;
+        size_t dst_evt = CCPM_LITEM(act_dst, k) - 1;
 
         /*Skip events that were marked as fake*/
         if (CCPM_FAKE != CCPM_LITEM(act_ids, k))
@@ -1221,10 +1208,10 @@ ccpmResultEn ccpm_optimize_network_stage_1(size_t n_max,
             }
 
             /* Check if events have same dependencies */
-            uint16_t match_count = 0;
+            size_t match_count = 0;
             for (k = 0; k < CCPM_LLEN(evt_deps + 2 * n_max * i); k++)
             {
-                uint16_t dep = CCPM_LITEM(evt_deps + 2 * n_max * i, k);
+                size_t dep = CCPM_LITEM(evt_deps + 2 * n_max * i, k);
                 if (evt_dep_map[2 * n_max * j + dep])
                 {
                     match_count++;
@@ -1243,7 +1230,7 @@ ccpmResultEn ccpm_optimize_network_stage_1(size_t n_max,
                 /* Mark dummy activities for removal */
                 for (k = 0; k < CCPM_LLEN(evt_dins + 2 * n_max * j); k++)
                 {
-                    uint16_t dummy_act = CCPM_LITEM(evt_dins + 2 * n_max * j, k);
+                    size_t dummy_act = CCPM_LITEM(evt_dins + 2 * n_max * j, k);
                     CCPM_LITEM(act_src, dummy_act) = CCPM_FAKE;
                     CCPM_LITEM(act_dst, dummy_act) = CCPM_FAKE;
                 }
@@ -1266,7 +1253,7 @@ ccpmResultEn ccpm_optimize_network_stage_1(size_t n_max,
 
         if (1 == CCPM_LLEN(evt_deps + 2 * n_max * i))
         {
-            uint16_t dummy_act = CCPM_LITEM(evt_dins + 2 * n_max * i, 0);
+            size_t dummy_act = CCPM_LITEM(evt_dins + 2 * n_max * i, 0);
             CCPM_LITEM(events, i) = CCPM_LITEM(act_src, dummy_act);
 
             /* Mark dummy activity for removal */
@@ -1282,15 +1269,15 @@ ccpmResultEn ccpm_optimize_network_stage_1(size_t n_max,
 }
 /*===========================================================================*/
 ccpmResultEn ccpm_optimize_network_stage_2(size_t n_max,
-                                          uint16_t * act_ids, uint16_t * act_src, uint16_t * act_dst,
-                                          uint16_t * events,
-                                          uint16_t * evt_douts, uint16_t * evt_nout)
+                                          uint16_t * act_ids, uint32_t * act_src, uint32_t * act_dst,
+                                          uint32_t * events,
+                                          uint32_t * evt_douts, uint32_t * evt_nout)
 {
     ccpmResultEn ret = CCPM_OK;
     size_t i;
     size_t k;
-    uint16_t num_events = CCPM_LLEN(events);
-    uint16_t dum        = CCPM_LLEN(act_ids);
+    size_t num_events = CCPM_LLEN(events);
+    size_t dum        = CCPM_LLEN(act_ids);
 
     CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_src, CCPM_EINVAL);
@@ -1317,7 +1304,7 @@ ccpmResultEn ccpm_optimize_network_stage_2(size_t n_max,
             continue;
         }
 
-        uint16_t src_evt = CCPM_LITEM(act_src, k) - 1;
+        size_t src_evt = CCPM_LITEM(act_src, k) - 1;
         evt_nout[src_evt]++;
 
         /* If this is a dummy activity, add to dummy outputs */
@@ -1343,7 +1330,7 @@ ccpmResultEn ccpm_optimize_network_stage_2(size_t n_max,
         }
 
         /* Get the dummy output activity */
-        uint16_t dummy_act = CCPM_LITEM(evt_douts + 2 * n_max * i, 0);
+        size_t dummy_act = CCPM_LITEM(evt_douts + 2 * n_max * i, 0);
 
         /* Glue event to its successor */
         CCPM_LITEM(events, i) = CCPM_LITEM(act_dst, dummy_act);
@@ -1360,16 +1347,16 @@ ccpmResultEn ccpm_optimize_network_stage_2(size_t n_max,
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids, uint16_t * act_pos,
-                                    uint16_t * act_src, uint16_t * act_dst,
-                                    uint16_t * to_do, uint16_t * events,
-                                    uint16_t * sort_values, uint16_t * tmp)
+ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids,     uint32_t * act_pos,
+                                     uint32_t * act_src,     uint32_t * act_dst,
+                                     uint32_t * to_do,       uint32_t * events,
+                                     uint32_t * sort_values, uint32_t * tmp)
 {
     ccpmResultEn ret = CCPM_OK;
     size_t i;
     size_t j;
-    uint16_t d   = CCPM_LLEN(act_ids);
-    uint16_t evt = CCPM_LITEM(events, CCPM_LLEN(events) - 1); // Last event
+    size_t d   = CCPM_LLEN(act_ids);
+    size_t evt = CCPM_LITEM(events, CCPM_LLEN(events) - 1); // Last event
 
     CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_pos, CCPM_EINVAL);
@@ -1432,10 +1419,11 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids, uint16_t * act_pos,
 
                 /* Create new event */
                 evt++;
+                CCPM_CHECK_RETURN(evt < CCPM_FAKE, CCPM_ELIM);
                 CCPM_LITEM(act_dst, j) = evt;
 
                 /* Add dummy activity */
-                uint16_t nxt_pos = CCPM_LLEN(act_ids);
+                size_t nxt_pos = CCPM_LLEN(act_ids);
                 CCPM_LAPP(act_pos, nxt_pos);
                 CCPM_LAPP(act_ids, CCPM_FAKE);
                 CCPM_LAPP(act_src, evt);
@@ -1451,17 +1439,17 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids, uint16_t * act_pos,
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_finalize_network(uint16_t * act_ids, uint16_t * act_pos,
-                                  uint16_t * act_src, uint16_t * act_dst,
-                                  uint16_t * events,
-                                  uint16_t * final_act_ids, uint16_t * final_act_src, uint16_t * final_act_dst,
-                                  uint16_t * tmp)
+ccpmResultEn ccpm_finalize_network(uint16_t * act_ids, uint32_t * act_pos,
+                                   uint32_t * act_src, uint32_t * act_dst,
+                                   uint32_t * events,
+                                   uint16_t * final_act_ids, uint16_t * final_act_src, uint16_t * final_act_dst
+                                   )
 {
     ccpmResultEn ret = CCPM_OK;
 
     size_t i;
-    uint16_t num_events = CCPM_LLEN(events);
-    uint16_t evt = 1;
+    size_t num_events = CCPM_LLEN(events);
+    size_t evt = 1;
 
     CCPM_CHECK_RETURN(act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(act_pos, CCPM_EINVAL);
@@ -1471,7 +1459,6 @@ ccpmResultEn ccpm_finalize_network(uint16_t * act_ids, uint16_t * act_pos,
     CCPM_CHECK_RETURN(final_act_ids, CCPM_EINVAL);
     CCPM_CHECK_RETURN(final_act_src, CCPM_EINVAL);
     CCPM_CHECK_RETURN(final_act_dst, CCPM_EINVAL);
-    CCPM_CHECK_RETURN(tmp, CCPM_EINVAL);
 
     CCPM_LOG_PRINTF("Finalizing network\n");
 
@@ -1503,8 +1490,8 @@ ccpmResultEn ccpm_finalize_network(uint16_t * act_ids, uint16_t * act_pos,
             continue;
         }
 
-        uint16_t src_evt = CCPM_LITEM(act_src, i) - 1;
-        uint16_t dst_evt = CCPM_LITEM(act_dst, i) - 1;
+        size_t src_evt = CCPM_LITEM(act_src, i) - 1;
+        size_t dst_evt = CCPM_LITEM(act_dst, i) - 1;
 
         /* Skip if events are invalid */
         if (CCPM_FAKE == CCPM_LITEM(events, src_evt) || CCPM_FAKE == CCPM_LITEM(events, dst_evt))
@@ -1520,7 +1507,7 @@ ccpmResultEn ccpm_finalize_network(uint16_t * act_ids, uint16_t * act_pos,
     /* Build final output lists */
     for (i = 0; i < CCPM_LLEN(act_pos); i++)
     {
-        uint16_t idx = CCPM_LITEM(act_pos, i);
+        size_t idx = CCPM_LITEM(act_pos, i);
 
         /* Real actions go first, skip dummies */
         if (CCPM_FAKE == CCPM_LITEM(act_ids, idx))
@@ -1536,7 +1523,7 @@ ccpmResultEn ccpm_finalize_network(uint16_t * act_ids, uint16_t * act_pos,
 
     for (i = 0; i < CCPM_LLEN(act_pos); i++)
     {
-        uint16_t idx = CCPM_LITEM(act_pos, i);
+        size_t idx = CCPM_LITEM(act_pos, i);
 
         /* Skip real actions and deleted dummies */
         if (CCPM_FAKE != CCPM_LITEM(act_ids, idx) ||
@@ -1559,20 +1546,20 @@ ccpmResultEn ccpm_finalize_network(uint16_t * act_ids, uint16_t * act_pos,
 #define _CCPM_PRINT_DEPS(n_act, n_max, dep, dep_map)                      \
 do {                                                                      \
     CCPM_LOG_PRINTF("Dependencies:\n");                                   \
-    for (uint16_t i = 0; i < n_act; i++)                                  \
+    for (size_t i = 0; i < n_act; i++)                                    \
     {                                                                     \
         CCPM_LOG_PRINTF("%5d: [", (int)i);                                \
-        for (uint16_t j = 0; j < CCPM_LLEN(dep + n_max * i); j++)         \
+        for (size_t j = 0; j < CCPM_LLEN(dep + n_max * i); j++)           \
         {                                                                 \
             CCPM_LOG_PRINTF("%5d ", (int)CCPM_LITEM(dep + n_max * i, j)); \
         }                                                                 \
         CCPM_LOG_PRINTF("]\n");                                           \
     }                                                                     \
     CCPM_LOG_PRINTF("Dependcy map:\n");                                   \
-    for (uint16_t i = 0; i < n_act; i++)                                  \
+    for (size_t i = 0; i < n_act; i++)                                    \
     {                                                                     \
         CCPM_LOG_PRINTF("%5d: [", (int)i);                                \
-        for (uint16_t j = 0; j < n_max; j++)                              \
+        for (size_t j = 0; j < n_max; j++)                                \
         {                                                                 \
             CCPM_LOG_PRINTF("%d ", (int)dep_map[n_max * i + j]);          \
         }                                                                 \
@@ -1583,16 +1570,16 @@ do {                                                                      \
 #define _CCPM_PRINT_NET(act_src, act_dst)                                                                 \
 do {                                                                                                      \
     CCPM_LOG_PRINTF("Network:\n");                                                                        \
-    for (i = 0; i < CCPM_LLEN(act_src); i++)                                                              \
+    for (size_t i = 0; i < CCPM_LLEN(act_src); i++)                                                       \
     {                                                                                                     \
-        CCPM_LOG_PRINTF("%5d: [%5d %5d]\n", i, (int)CCPM_LITEM(act_src, i), (int)CCPM_LITEM(act_dst, i)); \
+        CCPM_LOG_PRINTF("%5d: [%5d %5d]\n", (int)i, (int)CCPM_LITEM(act_src, i), (int)CCPM_LITEM(act_dst, i)); \
     }                                                                                                     \
 } while (0)
 
 #define _CCPM_PRINT_ACT_POS(act_id, act_pos)                                                    \
 do {                                                                                            \
     CCPM_LOG_PRINTF("Activities:\n");                                                           \
-    for (i = 0; i < CCPM_LLEN(act_pos); i++)                                                    \
+    for (size_t i = 0; i < CCPM_LLEN(act_pos); i++)                                             \
     {                                                                                           \
         CCPM_LOG_PRINTF("%5d: %5d\n", (int)CCPM_LITEM(act_id, i), (int)CCPM_LITEM(act_pos, i)); \
     }                                                                                           \
@@ -1602,7 +1589,7 @@ do {                                                                            
 #define _CCPM_PRINT_ACT_IDS(act_id)                                        \
 do {                                                                       \
     CCPM_LOG_PRINTF("Activities:\n");                                      \
-    for (i = 0; i < CCPM_LLEN(act_id); i++)                                \
+    for (size_t i = 0; i < CCPM_LLEN(act_id); i++)                         \
     {                                                                      \
         CCPM_LOG_PRINTF("%5d: %5d\n", (int)i, (int)CCPM_LITEM(act_id, i)); \
     }                                                                      \
@@ -1621,7 +1608,7 @@ do {                                                                       \
 
 /*===========================================================================*/
 /*to DeepSeek: All allocation must in the function below*/
-ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk, uint16_t * act_src, uint16_t * act_dst)
+ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * lnk_dst, size_t n_lnk, uint16_t * act_src, uint16_t * act_dst)
 {
     ccpmResultEn ret = CCPM_OK;
 
@@ -1651,48 +1638,48 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
 
     /*=======================================================================*/
     CCPM_MEM_ALLOC(uint16_t   ,_act_ids      ,n_max + 1   );
-    CCPM_MEM_ALLOC(uint16_t   ,_act_pos      ,n_max + 1   ); /*Works positions in sorted lists*/
-    CCPM_MEM_ALLOC(uint16_t   ,_act_src      ,n_max + 1   );
-    CCPM_MEM_ALLOC(uint16_t   ,_act_dst      ,n_max + 1   );
+    CCPM_MEM_ALLOC(uint32_t   ,_act_pos      ,n_max + 1   ); /*Works positions in sorted lists*/
+    CCPM_MEM_ALLOC(uint32_t   ,_act_src      ,n_max + 1   );
+    CCPM_MEM_ALLOC(uint32_t   ,_act_dst      ,n_max + 1   );
 
     /*=======================================================================*/
-    CCPM_MEM_ALLOC(uint16_t   ,_full_act_ndep ,n_max        ); /*Number of dependencies*/
-    CCPM_MEM_ALLOC(uint16_t   ,_full_act_dep  ,n_max * n_max); /*Array of dependencies*/
-    CCPM_MEM_ALLOC(bool       ,_full_dep_map  ,n_max * n_max); /*Work dependency map*/
+    CCPM_MEM_ALLOC(uint32_t   ,_full_act_ndep ,n_max        ); /*Number of dependencies*/
+    CCPM_MEM_ALLOC(uint32_t   ,_full_act_dep  ,n_max * n_max); /*Array of dependencies*/
+    CCPM_MEM_ALLOC(uint8_t    ,_full_dep_map  ,n_max * n_max); /*Work dependency map*/
 
     /*=======================================================================*/
     //CCPM_MEM_ALLOC(uint16_t   ,_min_act_ndep ,n_max        ); /*Number of dependencies*/
-    CCPM_MEM_ALLOC(uint16_t   ,_min_act_dep  ,n_max * n_max); /*Array of dependencies*/
-    CCPM_MEM_ALLOC(bool       ,_min_dep_map  ,n_max * n_max); /*Work dependency map*/
+    CCPM_MEM_ALLOC(uint32_t   ,_min_act_dep  ,n_max * n_max); /*Array of dependencies*/
+    CCPM_MEM_ALLOC(uint8_t    ,_min_dep_map  ,n_max * n_max); /*Work dependency map*/
 
     /*=======================================================================*/
-    CCPM_MEM_ALLOC(uint16_t   ,_tmp          ,2 * n_max + 1);
+    CCPM_MEM_ALLOC(uint32_t   ,_tmp          ,2 * n_max + 1);
 
     /*=======================================================================*/
     /* Additional allocations for new functions */
-    CCPM_MEM_ALLOC(uint16_t   ,_started     ,n_max + 1   );
-    CCPM_MEM_ALLOC(uint16_t   ,_num_dep     ,n_max + 1   );
-    CCPM_MEM_ALLOC(uint16_t   ,_events      ,n_max + 1   );
-    CCPM_MEM_ALLOC(uint16_t   ,_chk         ,n_max + 1   );
+    CCPM_MEM_ALLOC(uint32_t   ,_started     ,n_max + 1   );
+    CCPM_MEM_ALLOC(uint32_t   ,_num_dep     ,n_max + 1   );
+    CCPM_MEM_ALLOC(uint32_t   ,_events      ,n_max + 1   );
+    CCPM_MEM_ALLOC(uint32_t   ,_chk         ,n_max + 1   );
 
     /* For nested and overlapping dependencies */
-    CCPM_MEM_ALLOC(uint16_t   ,_min_com_deps ,n_max       );
-    CCPM_MEM_ALLOC(uint16_t   ,_tmp_deps     ,n_max + 1   );
-    CCPM_MEM_ALLOC(bool       ,_tmp_dep_map  ,n_max       );
+    CCPM_MEM_ALLOC(uint32_t   ,_min_com_deps ,n_max       );
+    CCPM_MEM_ALLOC(uint32_t   ,_tmp_deps     ,n_max + 1   );
+    CCPM_MEM_ALLOC(uint8_t    ,_tmp_dep_map  ,n_max       );
 
     /* For optimize_network_stage_1 */
-    CCPM_MEM_ALLOC(bool       ,_evt_dep_map ,4 * n_max * n_max);
-    CCPM_MEM_ALLOC(uint16_t   ,_evt_deps    ,4 * n_max * n_max);
-    CCPM_MEM_ALLOC(uint16_t   ,_evt_dins    ,4 * n_max * n_max);
-    CCPM_MEM_ALLOC(bool       ,_evt_real    ,2 * n_max        );
+    CCPM_MEM_ALLOC(uint8_t    ,_evt_dep_map ,4 * n_max * n_max);
+    CCPM_MEM_ALLOC(uint32_t   ,_evt_deps    ,4 * n_max * n_max);
+    CCPM_MEM_ALLOC(uint32_t   ,_evt_dins    ,4 * n_max * n_max);
+    CCPM_MEM_ALLOC(uint8_t    ,_evt_real    ,2 * n_max        );
 
     /* For optimize_network_stage_2 */
-    CCPM_MEM_ALLOC(uint16_t   ,_evt_douts   ,4 * n_max * n_max);
-    CCPM_MEM_ALLOC(uint16_t   ,_evt_nout    ,2 * n_max        );
+    CCPM_MEM_ALLOC(uint32_t   ,_evt_douts   ,4 * n_max * n_max);
+    CCPM_MEM_ALLOC(uint32_t   ,_evt_nout    ,2 * n_max        );
 
     /* For add_needed_dummies */
     //CCPM_MEM_ALLOC(uint16_t   ,_sorted_activities, 2 * n_max + 1);
-    CCPM_MEM_ALLOC(uint16_t   ,_sort_values      , 2 * n_max + 1);
+    CCPM_MEM_ALLOC(uint32_t   ,_sort_values      , 2 * n_max + 1);
 
     /*=======================================================================*/
 
@@ -1778,8 +1765,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
     /* Finalize network */
     CCPM_TRY_GOTO_END(ccpm_finalize_network(_act_ids, _act_pos,
                                            _act_src, _act_dst, _events,
-                                           act_ids, act_src, act_dst,
-                                           _tmp));
+                                           act_ids, act_src, act_dst));
     _CCPM_PRINT_NET(_act_src, _act_dst);
     _CCPM_PRINT_ACT_POS(_act_ids, _act_pos);
     _CCPM_PRINT_NET(act_src, act_dst);
@@ -1790,10 +1776,10 @@ end:
 }
 
 /*===========================================================================*/
-ccpmResultEn ccpm_make_full_map(uint16_t* act_ids,
-                                uint16_t* lnk_src, uint16_t* lnk_dst,
-                                uint16_t n_lnk, uint16_t n_max,
-                                uint16_t* full_act_dep, uint8_t* full_dep_map)
+ccpmResultEn ccpm_make_full_map(uint16_t * act_ids,
+                                uint16_t * lnk_src,      uint16_t * lnk_dst,
+                                size_t     n_lnk,        size_t     n_max,
+                                uint32_t * full_act_dep, uint8_t  * full_dep_map)
 {
     ccpmResultEn ret = CCPM_OK;
 
@@ -1815,13 +1801,13 @@ ccpmResultEn ccpm_make_full_map(uint16_t* act_ids,
 
     /* Compute dependency info as is */
     CCPM_TRY_RETURN(ccpm_populate_dep_info(n_max, n_lnk, lnk_src, lnk_dst,
-                                          full_act_dep, (bool*)full_dep_map));
+                                          full_act_dep,  full_dep_map));
 
     #ifdef CCPM_CFG_PRINTF
     CCPM_LOG_PRINTF("Initial dependencies:\n");
-    for (uint16_t i = 0; i < n_act; i++) {
+    for (size_t i = 0; i < n_act; i++) {
         CCPM_LOG_PRINTF("%5d: [", (int)i);
-        for (uint16_t j = 0; j < CCPM_LLEN(full_act_dep + n_max * i); j++) {
+        for (size_t j = 0; j < CCPM_LLEN(full_act_dep + n_max * i); j++) {
             CCPM_LOG_PRINTF("%5d ", (int)CCPM_LITEM(full_act_dep + n_max * i, j));
         }
         CCPM_LOG_PRINTF("]\n");
@@ -1829,13 +1815,13 @@ ccpmResultEn ccpm_make_full_map(uint16_t* act_ids,
     #endif
 
     /* Compute full dependency info */
-    CCPM_TRY_RETURN(ccpm_build_full_deps(n_act, n_max, full_act_dep, (bool*)full_dep_map));
+    CCPM_TRY_RETURN(ccpm_build_full_deps(n_act, n_max, full_act_dep, full_dep_map));
 
     #ifdef CCPM_CFG_PRINTF
     CCPM_LOG_PRINTF("Full dependency map (%dx%d):\n", (int)n_act, (int)n_act);
-    for (uint16_t i = 0; i < n_act; i++) {
+    for (size_t i = 0; i < n_act; i++) {
         CCPM_LOG_PRINTF("%5d: [", (int)i);
-        for (uint16_t j = 0; j < n_act; j++) {
+        for (size_t j = 0; j < n_act; j++) {
             CCPM_LOG_PRINTF("%d ", (int)full_dep_map[n_max * i + j]);
         }
         CCPM_LOG_PRINTF("]\n");

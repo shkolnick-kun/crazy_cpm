@@ -35,6 +35,7 @@ typedef enum {
     CCPM_EINVAL,
     CCPM_ENOMEM,
     CCPM_ELOOP,
+    CCPM_ELIM,
     CCPM_EUNK
 }ccpmResultEn;
 
@@ -42,19 +43,16 @@ typedef enum {
 static const uint16_t _ccpm_dep_buf##id[] = {__VA_ARGS__};
 
 /*===========================================================================*/
-const char* ccpm_result_to_str(ccpmResultEn result);
-
-/*===========================================================================*/
-ccpmResultEn ccpm_sort(uint16_t * tmp, uint16_t * key, uint16_t * val, uint16_t n);
+ccpmResultEn ccpm_sort(uint32_t * tmp, uint32_t * key, uint32_t * val, size_t n);
 
 /*===========================================================================*/
 ccpmResultEn ccpm_make_aoa(uint16_t * act_ids,
-                           uint16_t * lnk_src, uint16_t * lnk_dst, uint16_t n_lnk,
+                           uint16_t * lnk_src, uint16_t * lnk_dst, size_t n_lnk,
                            uint16_t * act_src, uint16_t * act_dst);
 
 /*===========================================================================*/
-ccpmResultEn ccpm_make_full_map(uint16_t* act_ids,
-                                uint16_t* lnk_src, uint16_t* lnk_dst,
-                                uint16_t n_lnk, uint16_t n_max,
-                                uint16_t* full_act_dep, uint8_t* full_dep_map);
+ccpmResultEn ccpm_make_full_map(uint16_t * act_ids,
+                                uint16_t * lnk_src, uint16_t * lnk_dst,
+                                size_t n_lnk, size_t n_max,
+                                uint32_t * full_act_dep, uint8_t * full_dep_map);
 #endif // CCMP_H

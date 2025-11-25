@@ -50,8 +50,9 @@ Constants:
 from libc cimport stdint
 from libcpp cimport bool
 
+ctypedef stdint.uint8_t  _uint8_t
 ctypedef stdint.uint16_t _uint16_t
-ctypedef bool _bool
+ctypedef stdint.uint32_t _uint32_t
 
 cdef extern from "ccpm.c":
     ctypedef enum ccpmResultEn:
@@ -59,39 +60,36 @@ cdef extern from "ccpm.c":
         CCPM_EINVAL
         CCPM_ENOMEM
         CCPM_ELOOP
+        CCPM_ELIM
         CCPM_EUNK
 
     cdef ccpmResultEn ccpm_make_aoa(_uint16_t * act_ids,
                                     _uint16_t * lnk_src,
                                     _uint16_t * lnk_dst,
-                                    _uint16_t   n_lnk,
+                                    size_t      n_lnk,
                                     _uint16_t * act_src,
                                     _uint16_t * act_dst
                                     )
 
-    cdef ccpmResultEn ccpm_make_full_map(_uint16_t* act_ids,
-                                         _uint16_t* lnk_src,
-                                         _uint16_t* lnk_dst,
-                                         _uint16_t n_lnk,
-                                         _uint16_t n_max,
-                                         _uint16_t* full_act_dep,
-                                         _bool * full_dep_map
+    cdef ccpmResultEn ccpm_make_full_map(_uint16_t * act_ids,
+                                         _uint16_t * lnk_src,
+                                         _uint16_t * lnk_dst,
+                                         size_t      n_lnk,
+                                         size_t      n_max,
+                                         _uint32_t * full_act_dep,
+                                         _uint8_t  * full_dep_map
                                          )
 
 import  numpy as np
-cimport numpy as np
+cimport numpy as cnp
 
 # Define constants
 OK     = CCPM_OK
 EINVAL = CCPM_EINVAL
 ENOMEM = CCPM_ENOMEM
 ELOOP  = CCPM_ELOOP
+ELIM   = CCPM_ELIM
 EUNK   = CCPM_EUNK
-
-###############################################################################
-# Memoryview array type for efficient C array handling
-ctypedef _uint16_t[:] _array
-ctypedef _bool[:] _bool_array
 
 ###############################################################################
 def make_aoa(act_ids, lnk_src, lnk_dst):
@@ -112,9 +110,9 @@ def make_aoa(act_ids, lnk_src, lnk_dst):
           act_src: resulting activity source events
           act_dst: resulting activity destination events
     """
-    cdef _uint16_t n_act = len(act_ids)
-    cdef _uint16_t n_lnk = len(lnk_src)
-    cdef _uint16_t n_max = n_act + (n_lnk if n_lnk > n_act else n_act)
+    cdef size_t n_act = len(act_ids)
+    cdef size_t n_lnk = len(lnk_src)
+    cdef size_t n_max = n_act + (n_lnk if n_lnk > n_act else n_act)
 
     # Create buffer arrays
     act_ids_arr = np.zeros(n_max + 1, dtype=np.uint16)
@@ -179,16 +177,16 @@ def make_full_map(act_ids, lnk_src, lnk_dst):
           status_message: human-readable status description
           full_dep_map: 2D numpy array with dtype=bool representing the full dependency matrix
     """
-    cdef _uint16_t n_act = len(act_ids)
-    cdef _uint16_t n_lnk = len(lnk_src)
-    cdef _uint16_t n_max = n_act
+    cdef size_t n_act = len(act_ids)
+    cdef size_t n_lnk = len(lnk_src)
+    cdef size_t n_max = n_act
 
     # Create buffer arrays
     act_ids_arr      = np.zeros(n_act + 1, dtype=np.uint16)
     lnk_src_arr      = np.zeros(n_lnk, dtype=np.uint16)
     lnk_dst_arr      = np.zeros(n_lnk, dtype=np.uint16)
-    full_act_dep_arr = np.zeros(n_max * n_max, dtype=np.uint16)
-    full_dep_map_arr = np.zeros(n_max * n_max, dtype=np.bool_)
+    full_act_dep_arr = np.zeros(n_max * n_max, dtype=np.uint32)
+    full_dep_map_arr = np.zeros(n_max * n_max, dtype=np.uint8)
 
     # Prepare input data
     act_ids_arr[0] = n_act
@@ -203,8 +201,8 @@ def make_full_map(act_ids, lnk_src, lnk_dst):
     cdef _uint16_t[:] act_ids_view      = act_ids_arr
     cdef _uint16_t[:] lnk_src_view      = lnk_src_arr
     cdef _uint16_t[:] lnk_dst_view      = lnk_dst_arr
-    cdef _uint16_t[:] full_act_dep_view = full_act_dep_arr
-    cdef _bool[:]     full_dep_map_view = full_dep_map_arr
+    cdef _uint32_t[:] full_act_dep_view = full_act_dep_arr
+    cdef _uint8_t[:]  full_dep_map_view = full_dep_map_arr
 
     # Compute dependency map
     cdef ccpmResultEn result = ccpm_make_full_map(&act_ids_view[0],
