@@ -458,6 +458,12 @@ class _Activity:
         self.pes_end = 0
 
     @property
+    def duration(self):
+        early = self.early_end - self.early_start
+        late  = self.late_end  - self.late_start
+        return max(early[RES], late[RES])
+
+    @property
     def early_start_pqe(self):
         """
         Get early start probabilistic quantile estimate.
@@ -543,6 +549,7 @@ class _Activity:
         PERT-specific fields (early_start_var, early_end_var, early_start_pqe, early_end_pqe)
         are only included when PERT analysis is enabled.
         """
+
         ret = {
             'id': self.id,
             'wbs_id': self.wbs_id,
@@ -552,6 +559,7 @@ class _Activity:
             'expected': self.expected[RES],
             'variance': self.expected[VAR],
             # CPM things
+            'duration':self.duration,
             'early_start': self.early_start[RES],
             'late_start': self.late_start[RES],
             'early_end': self.early_end[RES],
@@ -1420,9 +1428,7 @@ class NetworkModel:
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
                 # Format expected time and reserve to 1 decimal place
-                early = a.early_end - a.early_start
-                late  = a.late_end  - a.late_start
-                lbl += '\n t=' + format(max(early, late), '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
+                lbl += '\n t=' + format(a.duration, '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
             else:  # Dummy activity
                 lbl += '\n r=' + format(a.reserve[RES], '.2f')
 
