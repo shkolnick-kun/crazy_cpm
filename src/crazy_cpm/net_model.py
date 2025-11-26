@@ -48,23 +48,12 @@ Basic usage with direct resource effort estimates:
 Advanced usage with resource-aware duration:
 
 >>> def resource_duration(effort, activity, base_time):
-...     # Validate input for time computation
-...     if not isinstance(effort, np.ndarray):
-...         raise ValueError("Effort must be int or np.array")
-...     if effort.shape != (3,):
-...         raise ValueError("Effort must have (3,) shape")
-...     if effort.dtype != float:
-...         raise ValueError("Effort must have float dtype")
 ...
 ...     # Calculate actual duration based on resource allocation
 ...     resource_count = 2  # Two people assigned
 ...     productivity = 0.8  # 80% productivity
 ...
-...     dur = np.zeros((3,), dtype=float)
-...     dur[RES] = effort[RES] / (resource_count * productivity)
-...     dur[VAR] = effort[VAR] / (effort[RES] ** 2) * (dur[RES] ** 2)
-...     dur[ERR] = EPS * dur[RES]
-...     return dur
+...     return effort / (resource_count * productivity)
 ...
 >>> model = NetworkModel(wbs, links=links, duration=resource_duration)
 
@@ -324,7 +313,6 @@ def _default_duration(value, activity, base_time):
 
     Notes
     -----
-
     The variance propagation follows:
     Var(duration) = (∂duration/∂effort)² * Var(effort)
 
@@ -333,19 +321,9 @@ def _default_duration(value, activity, base_time):
     Simple productivity model:
 
     >>> def custom_duration(effort, activity, base_time):
-    ...     # Validate input for time computation
-    ...     if not isinstance(effort, np.ndarray) or effort.shape != (3,) or effort.dtype != float:
-    ...         raise ValueError("Invalid effort array")
-    ...
     ...     team_size = activity.data.get('team_size', 1)
     ...     productivity = activity.data.get('productivity', 1.0)
-    ...
-    ...     dur = np.zeros((3,), dtype=float)
-    ...     dur[RES] = effort[RES] / (team_size * productivity)
-    ...     # Variance propagation: Var(duration) = (duration/effort)² * Var(effort)
-    ...     dur[VAR] = effort[VAR] / (effort[RES] ** 2) * (dur[RES] ** 2)
-    ...     dur[ERR] = EPS * dur[RES]
-    ...     return dur
+    ...     return effort / (team_size * productivity)
     """
     # For time computation, return effort array directly (default: duration = effort)
     return value
@@ -726,7 +704,7 @@ class _Event:
 
         Parameters
         ----------
-        val : float
+    val : float
             Value to compare against
 
         Returns
@@ -993,10 +971,8 @@ class NetworkModel:
     Resource-aware scheduling with custom duration callback:
 
     >>> def team_duration(effort, activity, base_time):
-    ...
     ...     team_size = activity.data.get('team_size', 1)
     ...     productivity = activity.data.get('productivity', 1.0)
-    ...
     ...     return effort / (team_size * productivity)
     ...
     >>> wbs_resource = {
