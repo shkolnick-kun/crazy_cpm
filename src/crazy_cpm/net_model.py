@@ -6,34 +6,73 @@ CrazyCPM - Critical Path Method and PERT analysis library
 
 This module provides comprehensive CPM (Critical Path Method) and PERT
 (Program Evaluation and Review Technique) analysis capabilities for project
-management.
+management with resource-aware time calculations.
 
-Features:
-    - Multiple activity time input formats (direct, PERT three-point, PERT two-point)
-    - Automatic network diagram generation using Graphviz
-    - Statistical analysis with variance propagation
-    - Multiple link format support
-    - Export to dictionaries and pandas DataFrames
+Features
+--------
+- Multiple activity resource input formats (direct, PERT three-point, PERT two-point)
+- Resource-aware duration calculations via callback function
+- Automatic network diagram generation using Graphviz
+- Statistical analysis with variance propagation
+- Multiple link format support
+- Export to dictionaries and pandas DataFrames
 
-Classes:
-    - NetworkModel: Main class for network analysis
-    - _Activity: Represents activities in the network (internal)
-    - _Event: Represents events/milestones in the network (internal)
+Classes
+-------
+- :class:`NetworkModel`: Main class for network analysis
+- :class:`_Activity`: Represents activities in the network (internal)
+- :class:`_Event`: Represents events/milestones in the network (internal)
 
-Usage Example:
-    >>> wbs = {
-    ...     1: {'letter': 'A', 'expected': 5.0, 'exp_var': 1.0},
-    ...     2: {'letter': 'B', 'optimistic': 3.0, 'most_likely': 4.0, 'pessimistic': 8.0}
-    ... }
-    >>> links = [[1], [2]]
-    >>> model = NetworkModel(wbs, links=links)
-    >>> activities_df, events_df = model.to_dataframe()
+Key Concepts
+------------
+Resource Effort vs Duration:
+    - ``expected``, ``optimistic``, ``pessimistic``: Estimates of resource effort (e.g., person-hours, machine-hours)
+    - ``duration``: Actual time considering resource availability and allocation
+
+Resource Dependency:
+    - Duration calculations can account for resource constraints, productivity, and availability
+    - Custom duration callback allows modeling of complex resource scenarios
+
+Usage Example
+-------------
+Basic usage with direct resource effort estimates:
+
+>>> wbs = {
+...     1: {'letter': 'A', 'expected': 5.0, 'variance': 1.0},
+...     2: {'letter': 'B', 'optimistic': 3.0, 'most_likely': 4.0, 'pessimistic': 8.0}
+... }
+>>> links = [[1, 2]]
+>>> model = NetworkModel(wbs, links=links)
+>>> activities_df, events_df = model.to_dataframe()
+
+Advanced usage with resource-aware duration:
+
+>>> def resource_duration(effort, activity, base_time):
+...     # Validate input for time computation
+...     if not isinstance(effort, np.ndarray):
+...         raise ValueError("Effort must be int or np.array")
+...     if effort.shape != (3,):
+...         raise ValueError("Effort must have (3,) shape")
+...     if effort.dtype != float:
+...         raise ValueError("Effort must have float dtype")
+...
+...     # Calculate actual duration based on resource allocation
+...     resource_count = 2  # Two people assigned
+...     productivity = 0.8  # 80% productivity
+...
+...     dur = np.zeros((3,), dtype=float)
+...     dur[RES] = effort[RES] / (resource_count * productivity)
+...     dur[VAR] = effort[VAR] / (effort[RES] ** 2) * (dur[RES] ** 2)
+...     dur[ERR] = EPS * dur[RES]
+...     return dur
+...
+>>> model = NetworkModel(wbs, links=links, duration=resource_duration)
 
 .. note::
     This module uses a C extension (_ccpm) for performance-critical computations.
 """
-#==============================================================================
 
+#==============================================================================
 """
     CrazyCPM
     Copyright (C) 2025 anonimous
@@ -224,6 +263,26 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
 
 #==============================================================================
 def _choice(old, new, delta):
+    """
+    Choose between two time estimates based on certainty criteria.
+
+    This function implements a decision mechanism for selecting between
+    competing time estimates in the presence of uncertainty.
+
+    Parameters
+    ----------
+    old : numpy.ndarray
+        Existing time estimate [value, variance, error_bound]
+    new : numpy.ndarray
+        New time estimate [value, variance, error_bound]
+    delta : float
+        Difference threshold for decision making
+
+    Returns
+    -------
+    numpy.ndarray
+        Selected time estimate
+    """
     e = new[ERR] + old[ERR]
     if delta >= e:
         return new  # Certain result
@@ -236,6 +295,60 @@ def _choice(old, new, delta):
         return ret
     else:
         return old  # Certain result
+
+#==============================================================================
+def _default_duration(value, activity, base_time):
+    """
+    Default duration callback function.
+
+    This function provides the default behavior where duration equals effort.
+    Override this with custom logic to model resource constraints.
+
+    Parameters
+    ----------
+    value : float or numpy.ndarray
+        Resource effort estimate or time delta:
+        - For stage computation: int value (1)
+        - For time computation: numpy array of shape (3,) with [RES, VAR, ERR]
+    activity : _Activity
+        Activity object for context-aware calculations
+    base_time : float or numpy.ndarray
+        Base time from which the activity starts:
+        - For stage computation: not used
+        - For time computation: numpy array of shape (3,) for availability checks
+
+    Returns
+    -------
+    duration: numpy.ndarray
+        Activity duration [value, variance, error_bound]
+
+    Notes
+    -----
+
+    The variance propagation follows:
+    Var(duration) = (∂duration/∂effort)² * Var(effort)
+
+    Examples
+    --------
+    Simple productivity model:
+
+    >>> def custom_duration(effort, activity, base_time):
+    ...     # Validate input for time computation
+    ...     if not isinstance(effort, np.ndarray) or effort.shape != (3,) or effort.dtype != float:
+    ...         raise ValueError("Invalid effort array")
+    ...
+    ...     team_size = activity.data.get('team_size', 1)
+    ...     productivity = activity.data.get('productivity', 1.0)
+    ...
+    ...     dur = np.zeros((3,), dtype=float)
+    ...     dur[RES] = effort[RES] / (team_size * productivity)
+    ...     # Variance propagation: Var(duration) = (duration/effort)² * Var(effort)
+    ...     dur[VAR] = effort[VAR] / (effort[RES] ** 2) * (dur[RES] ** 2)
+    ...     dur[ERR] = EPS * dur[RES]
+    ...     return dur
+    """
+    # For time computation, return effort array directly (default: duration = effort)
+    return value
 
 #==============================================================================
 class _Activity:
@@ -260,13 +373,13 @@ class _Activity:
     dst : _Event
         Destination event of the activity
     expected : float
-        Activity expected time (mathematical expectation)
-    exp_var : float
-        Activity time variance
+        Activity expected resource effort (mathematical expectation)
+    variance : float
+        Activity effort variance
     optimistic : float
-        Optimistic time estimate
+        Optimistic effort estimate
     pessimistic : float
-        Pessimistic time estimate
+        Pessimistic effort estimate
     data : dict, optional
         Additional activity data from WBS
 
@@ -285,7 +398,7 @@ class _Activity:
     dst : _Event
         Destination event
     expected : numpy.ndarray
-        Array containing [value, variance, error_bound]
+        Array containing [effort_value, variance, error_bound]
     data : dict
         Additional activity data
     early_start : numpy.ndarray
@@ -299,9 +412,9 @@ class _Activity:
     reserve : numpy.ndarray
         Time reserve [value, variance, error_bound]
     optimistic : float
-        Optimistic time estimate
+        Optimistic effort estimate
     pessimistic : float
-        Pessimistic time estimate
+        Pessimistic effort estimate
     opt_start : float
         Optimistic start time
     opt_end : float
@@ -313,7 +426,9 @@ class _Activity:
 
     Notes
     -----
-    Time arrays follow the format: [RES (value), VAR (variance), ERR (error bound)]
+    - Resource effort arrays follow the format: [RES (value), VAR (variance), ERR (error bound)]
+    - Duration is calculated dynamically considering resource allocation and availability
+    - The ``duration`` property computes actual time from early and late time analyses
     """
 
     def __init__(self, id, wbs_id, letter, model, src, dst, expected=0.0,
@@ -351,26 +466,50 @@ class _Activity:
         self.reserve = np.zeros_like(self.expected)
 
         self.optimistic = optimistic
-        self.opt_start = 0
-        self.opt_end = 0
+        self.opt_start = 0.
+        self.opt_end = 0.
 
         self.pessimistic = pessimistic
-        self.pes_start = 0
-        self.pes_end = 0
+        self.pes_start = 0.
+        self.pes_end = 0.
 
     @property
     def duration(self):
-        #ealy_end[[RES,VAR]] == ealy_atsrt[[RES,VAR]] + early[[RES,VAR]]
+        """
+        Calculate activity duration from early and late time analyses.
+
+        This property computes the actual duration by comparing
+        early and late time calculations and selecting the most certain
+        estimate.
+
+        Returns
+        -------
+        numpy.ndarray
+            Duration array [value, variance, error_bound]
+
+        Notes
+        -----
+        The duration is calculated as:
+        - Early approach: early_end - early_start
+        - Late approach: late_end - late_start
+        - Final selection uses certainty-based decision making
+        """
+        # Early duration calculation
+        # Note:
+        # ealy_end[[RES,VAR]] == ealy_atsrt[[RES,VAR]] + early[[RES,VAR]]
         early      = self.early_end - self.early_start
         early[ERR] = self.early_end[ERR] + self.early_start[ERR]
 
-        #late_start[RES] == late_end[RES] - late[RES]
-        #late_start[VAR] == late_end[VAR] + late[VAR]
+        # Late duration calculation
+        # Note:
+        # late_start[RES] == late_end[RES] - late[RES]
+        # late_start[VAR] == late_end[VAR] + late[VAR]
         late = np.zeros_like(early)
         late[RES] = self.late_end[RES]   - self.late_start[RES]
         late[VAR] = self.late_start[VAR] - self.late_end[VAR]
         late[ERR] = self.late_end[ERR]   + self.late_start[ERR]
 
+        # Choose most certain estimate
         return _choice(early, late, late[RES] - early[RES])
 
     @property
@@ -447,8 +586,8 @@ class _Activity:
             - ``letter``: Activity letter
             - ``src_id``: Source event ID
             - ``dst_id``: Destination event ID
-            - ``expected``: Activity expected time
-            - ``exp_var``: Activity expected time variance
+            - ``expected``: Activity expected resource effort
+            - ``duration``: Actual duration
             - ``early_start``, ``late_start``, ``early_end``, ``late_end``: Timing parameters
             - ``reserve``: Time reserve
             - ``data``: Additional activity data
@@ -466,30 +605,31 @@ class _Activity:
             'letter': self.letter,
             'src_id': self.src.id,
             'dst_id': self.dst.id,
-            'expexted': self.expected[RES],
-            'duration':duration[RES],
+            'expected': self.expected[RES],  # Resource effort estimate
+            'duration': duration[RES],       # Actual duration
 
-            # CPM things
+            # CPM timing parameters
             'early_start': self.early_start[RES],
             'late_start': self.late_start[RES],
             'early_end': self.early_end[RES],
             'late_end': self.late_end[RES],
             'reserve': self.reserve[RES],
+
             # Additional data copy
             'data': self.data.copy()  # Return a copy to avoid modifying original
         }
 
         if self.model.is_pert:
-            # PERT things
-            ret['exp_var'] = self.expected[VAR]
-            ret['variance'] = duration[VAR]
-            ret['optimistic'] = self.optimistic
-            ret['opt_start'] = self.opt_start
-            ret['opt_end'] = self.opt_end
+            # PERT analysis fields
+            ret['exp_var'] = self.expected[VAR]   # Variance of effort estimate
+            ret['variance'] = duration[VAR]       # Variance of duration
+            ret['optimistic'] = self.optimistic   # Optimistic effort
+            ret['opt_start'] = self.opt_start     # Optimistic start time
+            ret['opt_end'] = self.opt_end         # Optimistic end time
 
-            ret['pessimistic'] = self.pessimistic
-            ret['pes_start'] = self.pes_start
-            ret['pes_end'] = self.pes_end
+            ret['pessimistic'] = self.pessimistic # Pessimistic effort
+            ret['pes_start'] = self.pes_start     # Pessimistic start time
+            ret['pes_end'] = self.pes_end         # Pessimistic end time
 
             ret['early_start_var'] = self.early_start[VAR]
             ret['early_end_var'] = self.early_end[VAR]
@@ -499,7 +639,7 @@ class _Activity:
             ret['late_end_prob'] = self.early_end_prob(self.late_end[RES])
 
         if self.model.debug:
-            # CPM computation errors
+            # Debug information
             ret['early_start_err'] = self.early_start[ERR]
             ret['late_start_err'] = self.late_start[ERR]
             ret['early_end_err'] = self.early_end[ERR]
@@ -621,7 +761,7 @@ class _Event:
         PERT-specific fields (early_var, early_pqe) are only included
         when PERT analysis is enabled.
         """
-        # Basic action (CPM)
+        # Basic CPM parameters
         ret = {
             'id': self.id,
             'stage': self.stage,
@@ -631,7 +771,7 @@ class _Event:
         }
 
         if self.model.is_pert:
-            # PERT things
+            # PERT analysis fields
             ret['optimistic'] = self.optimistic
             ret['pessimistic'] = self.pessimistic
             ret['early_var'] = self.early[VAR]
@@ -639,32 +779,28 @@ class _Event:
             ret['late_prob'] = self.early_prob(self.late[RES])
 
         if self.model.debug:
-            # CPM computation errors
+            # Debug information
             ret['early_err'] = self.early[ERR]
             ret['late_err'] = self.late[ERR]
 
         return ret
 
 #==============================================================================
-def _default_duration(value, activity, base_time):
-    return value
-
-#==============================================================================
 def _calculate_action_time_params(work_data, default_risk=0.3):
     """
-    Calculate expected time and its variance from various input formats.
+    Calculate expected resource effort and its variance from various input formats.
 
     Supports three formats in order of priority:
 
-    1. **Three-point PERT**: Uses optimistic, most_likely, and pessimistic estimates
+    1. **Three-point PERT**: Uses optimistic, most_likely, and pessimistic effort estimates
        with formula: mean = (optimistic + 4*most_likely + pessimistic)/6,
        variance = ((pessimistic - optimistic)/6)²
 
-    2. **Two-point PERT**: Uses optimistic and pessimistic estimates
+    2. **Two-point PERT**: Uses optimistic and pessimistic effort estimates
        with formula: mean = (optimistic + 4*pessimistic)/5,
        variance = ((pessimistic - optimistic)/5)²
 
-    3. **Direct parameters**: Uses directly provided expected and exp_var values
+    3. **Direct parameters**: Uses directly provided expected and variance values
 
     Parameters
     ----------
@@ -675,12 +811,12 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
         - For two-point PERT: ``optimistic``, ``pessimistic``
         - For direct parameters: ``expected``, ``exp_var`` (optional)
     default_risk : float, default=0.3
-        Default risk factor for time estimation when variance is provided
+        Default risk factor for effort estimation when variance is provided
 
     Returns
     -------
     tuple
-        (mean, variance, optimistic, most_likely, pessimistic)
+        (mean_effort, variance, optimistic, most_likely, pessimistic)
 
     Raises
     ------
@@ -689,23 +825,26 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
 
     Examples
     --------
-    >>> # Three-point PERT
+    Three-point PERT effort estimation:
+
     >>> data = {'optimistic': 5, 'most_likely': 7, 'pessimistic': 12}
     >>> mean, var, a, m, b = _calculate_action_time_params(data)
-    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
-    Mean: 7.50, Variance: 1.36
+    >>> print(f"Mean effort: {mean:.2f}, Variance: {var:.2f}")
+    Mean effort: 7.50, Variance: 1.36
 
-    >>> # Two-point PERT
+    Two-point PERT effort estimation:
+
     >>> data = {'optimistic': 3, 'pessimistic': 8}
     >>> mean, var, a, m, b = _calculate_action_time_params(data)
-    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
-    Mean: 7.00, Variance: 1.00
+    >>> print(f"Mean effort: {mean:.2f}, Variance: {var:.2f}")
+    Mean effort: 7.00, Variance: 1.00
 
-    >>> # Direct parameters
+    Direct parameters:
+
     >>> data = {'expected': 6.5, 'exp_var': 0.5}
     >>> mean, var, a, m, b = _calculate_action_time_params(data)
-    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
-    Mean: 6.50, Variance: 0.50
+    >>> print(f"Mean effort: {mean:.2f}, Variance: {var:.2f}")
+    Mean effort: 6.50, Variance: 0.50
     """
     # 1. Check for three-point PERT estimation (highest priority)
     if all(key in work_data for key in ['optimistic', 'most_likely', 'pessimistic']):
@@ -743,7 +882,7 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
 
         # Validate inputs
         if mean < 0:
-            raise ValueError(f"Mean must be non-negative. Got: {mean}")
+            raise ValueError(f"Expected effort must be non-negative. Got: {mean}")
         if variance < 0:
             raise ValueError(f"Variance must be non-negative. Got: {variance}")
 
@@ -765,15 +904,16 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
 
     # 4. Error - insufficient data
     else:
-        raise ValueError(f"Insufficient data for determining action time parameters. Available keys: {list(work_data.keys())}")
+        raise ValueError(f"Insufficient data for determining action effort parameters. Available keys: {list(work_data.keys())}")
 
 #==============================================================================
 class NetworkModel:
     """
-    Main class for CPM/PERT network analysis.
+    Main class for CPM/PERT network analysis with resource-aware scheduling.
 
     This class constructs and analyzes network models using Critical Path
-    Method (CPM) and Program Evaluation and Review Technique (PERT).
+    Method (CPM) and Program Evaluation and Review Technique (PERT) with
+    support for resource-dependent duration calculations.
 
     Parameters
     ----------
@@ -782,12 +922,12 @@ class NetworkModel:
         Each key is an activity ID and value is a dictionary containing:
 
         - ``letter``: Activity letter/code (required)
-        - One of these time specifications:
+        - One of these resource effort specifications:
             - Direct: ``expected`` and optional ``exp_var``
             - Three-point PERT: ``optimistic``, ``most_likely``, ``pessimistic``
             - Two-point PERT: ``optimistic``, ``pessimistic``
         - ``name``: Activity description (optional)
-        - Any other custom fields
+        - Any other custom fields for resource modeling
 
     lnk_src : array-like, optional
         Source activity IDs for dependencies (old format)
@@ -800,10 +940,14 @@ class NetworkModel:
         - Two columns: ``[[src1, dst1], [src2, dst2], ...]``
         - Dictionary: ``{'src': [src1, src2, ...], 'dst': [dst1, dst2, ...]}``
 
+    duration : callable, default=_default_duration
+        Callback function for resource-aware duration calculation.
+        Signature: duration(effort, activity, base_time) -> numpy.ndarray
+        - Effort is numpy array (3,), return numpy array (3,)
     p : float, default=0.95
         Probability level for PERT quantile estimates
     default_risk : float, default=0.3
-        Default risk factor for time estimation
+        Default risk factor for effort estimation
     debug : bool, default=False
         Enable debug mode to include computation error bounds
 
@@ -829,20 +973,37 @@ class NetworkModel:
 
     Examples
     --------
-    >>> # Direct expected parameters
+    Basic usage with direct effort parameters:
+
     >>> wbs = {
     ...     1: {'letter': 'A', 'expected': 5.0, 'exp_var': 1.0},
     ...     2: {'letter': 'B', 'expected': 3.0}
     ... }
-    >>> links = [[1], [2]]
+    >>> links = [[1, 2]]
     >>> model = NetworkModel(wbs, links=links)
-    >>>
-    >>> # Three-point PERT estimates
+
+    Three-point PERT effort estimates:
+
     >>> wbs_pert = {
     ...     1: {'letter': 'A', 'optimistic': 3, 'most_likely': 5, 'pessimistic': 8},
     ...     2: {'letter': 'B', 'optimistic': 2, 'pessimistic': 6}
     ... }
     >>> model_pert = NetworkModel(wbs_pert, links=links)
+
+    Resource-aware scheduling with custom duration callback:
+
+    >>> def team_duration(effort, activity, base_time):
+    ...
+    ...     team_size = activity.data.get('team_size', 1)
+    ...     productivity = activity.data.get('productivity', 1.0)
+    ...
+    ...     return effort / (team_size * productivity)
+    ...
+    >>> wbs_resource = {
+    ...     1: {'letter': 'A', 'expected': 40.0, 'team_size': 2, 'productivity': 0.8},
+    ...     2: {'letter': 'B', 'expected': 30.0, 'team_size': 1, 'productivity': 1.0}
+    ... }
+    >>> model_resource = NetworkModel(wbs_resource, links=links, duration=team_duration)
     """
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
@@ -852,7 +1013,7 @@ class NetworkModel:
         self.debug = debug
         self.is_pert = False
         self.p = p
-        self._duration = duration #TODO: Document this
+        self._duration = duration  # Resource-aware duration callback
 
         # Parse links into standard format
         lnk_src, lnk_dst = self._parse_links(lnk_src, lnk_dst, links)
@@ -864,7 +1025,7 @@ class NetworkModel:
         # Compute stages of project
         self._compute_target('stage')
 
-        # Renumerate events according to the rools of network modeling
+        # Renumerate events according to the rules of network modeling
         self.events.sort(key=lambda e: e.stage)
         for i, e in enumerate(self.events, 1):
             e.id = i
@@ -939,12 +1100,12 @@ class NetworkModel:
         ----------
         wbs_dict : dict
             Work Breakdown Structure data
-        lnk_src : numpy.ndarray
+        lnk_src : list
             Source activity IDs
-        lnk_dst : numpy.ndarray
+        lnk_dst : list
             Destination activity IDs
         default_risk : float
-            Default risk factor for time estimation
+            Default risk factor for effort estimation
 
         Notes
         -----
@@ -971,17 +1132,14 @@ class NetworkModel:
         # Create activities (real and dummy)
         na = len(act_ids)  # Number of actions
         nd = 0  # Number of dummy actions
-        dsrc = [] #Dumy event srcs
+        dsrc = [] # Dummy event sources
         for i in range(len(net_src)):
             if i < na:
                 # Real activity - get data from WBS
                 act_id = act_ids[i]
-                # if act_id == last_action:
-                #     last_evt = int(net_dst[i])
-                #     continue
                 wbs_data = wbs_dict[act_id]  # Get complete WBS data
 
-                # Calculate expected time and variance using new unified function
+                # Calculate expected effort and variance using unified function
                 try:
                     expected, exp_var, optimistic, _, pessimistic = \
                         _calculate_action_time_params(wbs_data, default_risk)
@@ -990,7 +1148,7 @@ class NetworkModel:
 
                 letter = wbs_data.get('letter', '')
 
-                # Even one wbs item with nonzero exp_var is enough to compute PERT
+                # Even one wbs item with nonzero variance is enough to compute PERT
                 if exp_var > 0.0:
                     self.is_pert = True
 
@@ -1001,24 +1159,24 @@ class NetworkModel:
                                    expected, exp_var, optimistic, pessimistic,
                                    letter, data_without_duplicates)
             else:
-                # Add a dummy activity (no expected time, no letter, no data)
+                # Add a dummy activity (no effort, no letter, no data)
                 nd += 1  # One more dummy work
                 self._add_activity(0, int(net_src[i]), int(net_dst[i]),
                                    0., 0., 0., 0., '#' + str(nd), {})
                 dsrc.append(int(net_src[i]))
 
         # Network postprocessing
-        # Make sure that actions with biggest ecpected times are on straigth paths between events
+        # Make sure that activities with largest efforts are on straight paths between events
         grpoi = {}
         # Find groups of triangles on dummies
         for e in self.events:
-            # Watch only dummy src
+            # Watch only dummy sources
             if e.id not in dsrc:
                 continue
 
             bck = e.in_activities
             fwd = e.out_activities
-            # Watch only events with one incomming and one outgoing action
+            # Watch only events with one incoming and one outgoing action
             if 1 < len(bck) or 1 < len(fwd):
                 continue
 
@@ -1031,15 +1189,14 @@ class NetworkModel:
             else:
                 grpoi[key][1].append(bck[0])
 
-        # Place maximum time actions on long side of trianle groups
+        # Place maximum duration activities on long side of triangle groups
         for k in grpoi.keys():
             aoi = grpoi[k][1]
             if len(aoi) < 1:
                 raise RuntimeError("Action of interest group must contain at least one action!")
-            #Maximum time candidate
+            # Maximum duration candidate
             maxa = grpoi[k][0]
             for a in aoi:
-                # Here base_time is None then only resource performances should be accounted
                 if self._duration(a.expected[RES], a, None) > self._duration(maxa.expected[RES], maxa, None):
                     a.dst, maxa.dst = maxa.dst, a.dst
                     maxa = a
@@ -1053,9 +1210,9 @@ class NetworkModel:
         wbs_data : dict
             Complete WBS data for an activity
         expected : float
-            Activity expected time (already extracted)
+            Activity expected effort (already extracted)
         exp_var : float
-            Activity expected time variance (already extracted)
+            Activity effort variance (already extracted)
         letter : str
             Activity letter (already extracted)
 
@@ -1083,6 +1240,12 @@ class NetworkModel:
         This method performs both forward pass (early times) and
         backward pass (late times) through the network, then calculates
         time reserves for both events and activities.
+
+        Notes
+        -----
+        The computation is performed in two phases:
+        1. Forward pass: Compute early times starting from project beginning
+        2. Backward pass: Compute late times starting from project completion
         """
         self._compute_target('early')
 
@@ -1109,10 +1272,8 @@ class NetworkModel:
                 raise RuntimeError("Events can not have negative time reserves!!!")
 
         for a in self.activities:
-            # Compute start and end reserve values
-            #
-            # These values may be different due to resource availability
-            # dependence on time
+            # Compute start and end reserve values separately
+            # These values may differ due to resource availability time dependence
             start_res = np.zeros((3,), dtype=float)
             start_res[RES] = a.late_start[RES] - a.early_start[RES]
             start_res[VAR] = a.late_start[VAR] + a.early_start[VAR]
@@ -1154,8 +1315,12 @@ class NetworkModel:
         ------
         ValueError
             If target parameter is invalid
-        """
 
+        Notes
+        -----
+        The computation uses different strategies for stage calculation
+        vs time parameter calculation.
+        """
         def _choice_early(old, new):
             return _choice(old, new, new[RES] - old[RES])
 
@@ -1219,7 +1384,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: a.optimistic
-            process_delta = self._duration
+            process_delta = lambda x, a, b: x
 
         elif 'pessimistic' == target:
             act_base = 'pes_start'
@@ -1229,10 +1394,11 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: a.pessimistic
-            process_delta = self._duration
+            process_delta = lambda x, a, b: x
         else:
             raise ValueError("Unknown 'target' value!!!")
 
+        # Initialize activity parameters and processing function
         if target != 'stage':
             for a in self.activities:
                 setattr(a, act_base, -1)
@@ -1257,7 +1423,8 @@ class NetworkModel:
                 if act_base:
                     setattr(a, act_base, base_val)
 
-                # Here we use base_val so resource availability should be taken into account
+                # Calculate new value using appropriate delta processing
+                # For stage: direct value, for time: resource-aware duration callback
                 new_val = base_val + process_delta(delta(a), a, base_val)
 
                 if act_new:
@@ -1295,13 +1462,13 @@ class NetworkModel:
         dst_id : int
             Destination event ID
         expected : float
-            Activity expected time
+            Activity expected resource effort
         exp_var : float
-            Activity expected time variance
+            Activity effort variance
         optimistic : float
-            Optimistic time estimate
+            Optimistic effort estimate
         pessimistic : float
-            Pessimistic time estimate
+            Pessimistic effort estimate
         letter : str
             Activity letter/code for visualization
         data : dict
@@ -1459,7 +1626,7 @@ class NetworkModel:
             lbl = a.letter
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
-                # Format expected time and reserve to 1 decimal place
+                # Format duration and reserve to 1 decimal place
                 lbl += '\n t=' + format(a.duration[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
             else:  # Dummy activity
                 lbl += '\n r=' + format(a.reserve[RES], '.2f')
@@ -1543,9 +1710,54 @@ if __name__ == '__main__':
     for i, activity in enumerate(n_old.activities[:8]):  # Show first 8 activities
         if activity.wbs_id != 0:  # Skip dummy activities
             print(f"Activity {i + 1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
-            print(f"  expected: {activity.expected[RES]:.3f}, Variance: {activity.expected[VAR]:.3f}")
+            print(f"  Expected effort: {activity.expected[RES]:.3f}, Variance: {activity.expected[VAR]:.3f}")
+            print(f"  Actual duration: {activity.duration[RES]:.3f}")
             if activity.data:
                 print(f"  Data fields: {list(activity.data.keys())}")
+
+    # Advanced example: Resource-aware scheduling
+    print("\n=== Advanced Example: Resource-Aware Scheduling ===")
+
+    def resource_aware_duration(effort, activity, base_time):
+        # Get resource allocation from activity data
+        team_size = activity.data.get('team_size', 1)
+        productivity = activity.data.get('productivity', 1.0)
+
+        # Simulate resource availability (e.g., weekends, holidays)
+        # This is a simplified example - real implementation would use calendar
+        availability = 1.0
+        if base_time is not None:
+            # Example: reduce availability on weekends (simplified)
+            day_of_week = int(base_time) % 7
+            if day_of_week >= 5:  # Weekend
+                availability = 0.5
+
+        # Calculate duration: effort / (resources * productivity * availability)
+        if team_size * productivity * availability > 0:
+            return effort / (team_size * productivity * availability)
+        else:
+            return effort  # Fallback to direct mapping
+
+    # WBS with resource information
+    wbs_resource = {
+        1: {'letter': 'A', 'optimistic': 40., 'pessimistic': 60., 'team_size': 2, 'productivity': 0.8, 'name': 'Design'},
+        2: {'letter': 'B', 'expected': 60., 'team_size': 3, 'productivity': 0.9, 'name': 'Development'},
+        3: {'letter': 'C', 'expected': 20., 'team_size': 1, 'productivity': 1.0, 'name': 'Testing'}
+    }
+
+    links_resource = [[1, 2], [2, 3]]
+
+    print("Creating resource-aware model...")
+    model_resource = NetworkModel(wbs_resource, links=links_resource, duration=resource_aware_duration)
+
+    # Show resource-aware durations
+    for activity in model_resource.activities:
+        if activity.wbs_id != 0:
+            print(f"Activity {activity.letter}: "
+                  f"Effort={activity.expected[RES]:.1f}h, "
+                  f"Duration={activity.duration[RES]:.1f} days, "
+                  f"Team={activity.data.get('team_size', 1)} people, "
+                  f"Productivity={activity.data.get('productivity', 1.0):.1f}")
 
     print("Full dependency map for old format:")
     act_id = np.array(list(wbs.keys()))
@@ -1636,7 +1848,7 @@ if __name__ == '__main__':
         print("\nChecking data expansion:")
         if 'name' in activities_df.columns:
             print("Data from 'data' successfully expanded into separate columns:")
-            print(activities_df[['letter', 'name', 'duration', 'reserve']].head())
+            print(activities_df[['letter', 'name', 'expected', 'duration', 'reserve']].head())
 
     except Exception as e:
         print(f"Error exporting to DataFrame: {e}")
