@@ -1167,6 +1167,20 @@ class NetworkModel:
             ret[RES] = -a.expected[RES]
             return ret
 
+        def _duration_vec(effort, activity, base_time):
+            dur = np.zeros((3,), dtype=float)
+
+            if np.abs(effort[RES]) <= effort[ERR]:
+                # For fake activities return zeros
+                return dur
+
+            # Compute duration value and error bound
+            dur[RES] = self._duration(effort[RES], activity, base_time[RES])
+            # Compute variation and error bound
+            dur[VAR] = effort[VAR] * ((dur[RES] / effort[RES]) ** 2)
+            dur[ERR] = EPS * dur[RES]
+            return dur
+
         if 'stage' == target:
             act_base = None
             act_new = None
@@ -1175,6 +1189,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: 1
+            process_delta = lambda x, a, b: x
 
         elif 'early' == target:
             act_base = 'early_start'
@@ -1184,6 +1199,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = _choice_early
             delta = lambda a: a.expected
+            process_delta = _duration_vec
 
         elif 'late' == target:
             act_base = 'late_end'
@@ -1193,6 +1209,7 @@ class NetworkModel:
             rev = 'out_activities'
             choice = _choice_late
             delta = _delta_late
+            process_delta = _duration_vec
 
         elif 'optimistic' == target:
             act_base = 'opt_start'
@@ -1202,6 +1219,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: a.optimistic
+            process_delta = self._duration
 
         elif 'pessimistic' == target:
             act_base = 'pes_start'
@@ -1211,6 +1229,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: a.pessimistic
+            process_delta = self._duration
         else:
             raise ValueError("Unknown 'target' value!!!")
 
@@ -1239,7 +1258,7 @@ class NetworkModel:
                     setattr(a, act_base, base_val)
 
                 # Here we use base_val so resource availability should be taken into account
-                new_val = base_val + self._duration(delta(a), a, base_val)
+                new_val = base_val + process_delta(delta(a), a, base_val)
 
                 if act_new:
                     setattr(a, act_new, new_val)
