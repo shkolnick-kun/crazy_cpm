@@ -1360,7 +1360,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: a.optimistic
-            process_delta = lambda x, a, b: x
+            process_delta = self._duration
 
         elif 'pessimistic' == target:
             act_base = 'pes_start'
@@ -1370,7 +1370,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: a.pessimistic
-            process_delta = lambda x, a, b: x
+            process_delta = self._duration
         else:
             raise ValueError("Unknown 'target' value!!!")
 
