@@ -223,122 +223,19 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
     return prob
 
 #==============================================================================
-def _calculate_action_time_params(work_data, default_risk=0.3):
-    """
-    Calculate expected time and its variance from various input formats.
-
-    Supports three formats in order of priority:
-
-    1. **Three-point PERT**: Uses optimistic, most_likely, and pessimistic estimates
-       with formula: mean = (optimistic + 4*most_likely + pessimistic)/6,
-       variance = ((pessimistic - optimistic)/6)²
-
-    2. **Two-point PERT**: Uses optimistic and pessimistic estimates
-       with formula: mean = (optimistic + 4*pessimistic)/5,
-       variance = ((pessimistic - optimistic)/5)²
-
-    3. **Direct parameters**: Uses directly provided expected and variance values
-
-    Parameters
-    ----------
-    work_data : dict
-        Dictionary containing work data with one of these combinations:
-
-        - For three-point PERT: ``optimistic``, ``most_likely``, ``pessimistic``
-        - For two-point PERT: ``optimistic``, ``pessimistic``
-        - For direct parameters: ``expected``, ``variance`` (optional)
-    default_risk : float, default=0.3
-        Default risk factor for time estimation when variance is provided
-
-    Returns
-    -------
-    tuple
-        (mean, variance, optimistic, most_likely, pessimistic)
-
-    Raises
-    ------
-    ValueError
-        If insufficient data is provided or estimates are invalid
-
-    Examples
-    --------
-    >>> # Three-point PERT
-    >>> data = {'optimistic': 5, 'most_likely': 7, 'pessimistic': 12}
-    >>> mean, var, a, m, b = _calculate_action_time_params(data)
-    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
-    Mean: 7.50, Variance: 1.36
-
-    >>> # Two-point PERT
-    >>> data = {'optimistic': 3, 'pessimistic': 8}
-    >>> mean, var, a, m, b = _calculate_action_time_params(data)
-    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
-    Mean: 7.00, Variance: 1.00
-
-    >>> # Direct parameters
-    >>> data = {'expected': 6.5, 'variance': 0.5}
-    >>> mean, var, a, m, b = _calculate_action_time_params(data)
-    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
-    Mean: 6.50, Variance: 0.50
-    """
-    # 1. Check for three-point PERT estimation (highest priority)
-    if all(key in work_data for key in ['optimistic', 'most_likely', 'pessimistic']):
-        a = work_data['optimistic']
-        m = work_data['most_likely']
-        b = work_data['pessimistic']
-
-        # Validate inputs
-        if not (a <= m <= b):
-            raise ValueError(f"Invalid PERT estimates: must satisfy optimistic <= most_likely <= pessimistic. Got: {a}, {m}, {b}")
-
-        mean = (a + 4 * m + b) / 6
-        variance = ((b - a) / 6) ** 2
-        return mean, variance, a, m, b
-
-    # 2. Check for two-point PERT estimation (medium priority)
-    elif all(key in work_data for key in ['optimistic', 'pessimistic']):
-        a = work_data['optimistic']
-        b = work_data['pessimistic']
-
-        # Validate inputs
-        if not (a <= b):
-            raise ValueError(f"Invalid PERT estimates: must satisfy optimistic <= pessimistic. Got: {a}, {b}")
-
-        m = (2 * a + b) / 3
-        mean = (3 * a + 2 * b) / 5
-        variance = ((b - a) / 5) ** 2
-
-        return mean, variance, a, m, b
-
-    # 3. Direct parameters (lowest priority - backward compatibility)
-    elif 'expected' in work_data:
-        mean = work_data['expected']
-        variance = work_data.get('variance', 0.0)
-
-        # Validate inputs
-        if mean < 0:
-            raise ValueError(f"Mean must be non-negative. Got: {mean}")
-        if variance < 0:
-            raise ValueError(f"Variance must be non-negative. Got: {variance}")
-
-        if variance > 0:
-            d = 6 * np.sqrt(variance) / 2
-            if d > default_risk * mean:
-                a = (1 - default_risk) * mean
-            else:
-                a = mean - d
-
-            b = a + 2 * d
-            m = (mean * 6 - a - b) / 4
-        else:
-            a = mean
-            b = mean
-            m = mean
-
-        return mean, variance, a, m, b
-
-    # 4. Error - insufficient data
+def _choice(old, new, delta):
+    e = new[ERR] + old[ERR]
+    if delta >= e:
+        return new  # Certain result
+    elif delta >= -e:
+        # Uncertain result, use mixing
+        ret = np.zeros((3,), dtype=float)
+        ret[RES] = 0.5 * (new[RES] + old[RES])
+        ret[VAR] = max(old[VAR], new[VAR])
+        ret[ERR] = 0.5 * e
+        return ret
     else:
-        raise ValueError(f"Insufficient data for determining action time parameters. Available keys: {list(work_data.keys())}")
+        return old  # Certain result
 
 #==============================================================================
 class _Activity:
@@ -459,9 +356,18 @@ class _Activity:
 
     @property
     def duration(self):
-        early = self.early_end - self.early_start
-        late  = self.late_end  - self.late_start
-        return max(early[RES], late[RES])
+        #ealy_end[[RES,VAR]] == ealy_atsrt[[RES,VAR]] + early[[RES,VAR]]
+        early      = self.early_end - self.early_start
+        early[ERR] = self.early_end[ERR] + self.early_start[ERR]
+
+        #late_start[RES] == late_end[RES] - late[RES]
+        #late_start[VAR] == late_end[VAR] + late[VAR]
+        late = np.zeros_like(early)
+        late[RES] = self.late_end[RES]   - self.late_start[RES]
+        late[VAR] = self.late_start[VAR] - self.late_end[VAR]
+        late[ERR] = self.late_end[ERR]   + self.late_start[ERR]
+
+        return _choice(early, late, late[RES] - early[RES])
 
     @property
     def early_start_pqe(self):
@@ -549,17 +455,17 @@ class _Activity:
         PERT-specific fields (early_start_var, early_end_var, early_start_pqe, early_end_pqe)
         are only included when PERT analysis is enabled.
         """
-
+        duration = self.duration
         ret = {
             'id': self.id,
             'wbs_id': self.wbs_id,
             'letter': self.letter,
             'src_id': self.src.id,
             'dst_id': self.dst.id,
-            'expected': self.expected[RES],
-            'variance': self.expected[VAR],
+            'expexted': self.expected[RES],
+            'duration':duration[RES],
+
             # CPM things
-            'duration':self.duration,
             'early_start': self.early_start[RES],
             'late_start': self.late_start[RES],
             'early_end': self.early_end[RES],
@@ -571,6 +477,8 @@ class _Activity:
 
         if self.model.is_pert:
             # PERT things
+            ret['exp_var'] = self.expected[VAR]
+            ret['variance'] = duration[VAR]
             ret['optimistic'] = self.optimistic
             ret['opt_start'] = self.opt_start
             ret['opt_end'] = self.opt_end
@@ -738,19 +646,122 @@ def _default_duration(value, activity, base_time):
     return value
 
 #==============================================================================
-def _choice(old, new, delta):
-    e = new[ERR] + old[ERR]
-    if delta >= e:
-        return new  # Certain result
-    elif delta >= -e:
-        # Uncertain result, use mixing
-        ret = np.zeros((3,), dtype=float)
-        ret[RES] = 0.5 * (new[RES] + old[RES])
-        ret[VAR] = max(old[VAR], new[VAR])
-        ret[ERR] = 0.5 * e
-        return ret
+def _calculate_action_time_params(work_data, default_risk=0.3):
+    """
+    Calculate expected time and its variance from various input formats.
+
+    Supports three formats in order of priority:
+
+    1. **Three-point PERT**: Uses optimistic, most_likely, and pessimistic estimates
+       with formula: mean = (optimistic + 4*most_likely + pessimistic)/6,
+       variance = ((pessimistic - optimistic)/6)²
+
+    2. **Two-point PERT**: Uses optimistic and pessimistic estimates
+       with formula: mean = (optimistic + 4*pessimistic)/5,
+       variance = ((pessimistic - optimistic)/5)²
+
+    3. **Direct parameters**: Uses directly provided expected and variance values
+
+    Parameters
+    ----------
+    work_data : dict
+        Dictionary containing work data with one of these combinations:
+
+        - For three-point PERT: ``optimistic``, ``most_likely``, ``pessimistic``
+        - For two-point PERT: ``optimistic``, ``pessimistic``
+        - For direct parameters: ``expected``, ``variance`` (optional)
+    default_risk : float, default=0.3
+        Default risk factor for time estimation when variance is provided
+
+    Returns
+    -------
+    tuple
+        (mean, variance, optimistic, most_likely, pessimistic)
+
+    Raises
+    ------
+    ValueError
+        If insufficient data is provided or estimates are invalid
+
+    Examples
+    --------
+    >>> # Three-point PERT
+    >>> data = {'optimistic': 5, 'most_likely': 7, 'pessimistic': 12}
+    >>> mean, var, a, m, b = _calculate_action_time_params(data)
+    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
+    Mean: 7.50, Variance: 1.36
+
+    >>> # Two-point PERT
+    >>> data = {'optimistic': 3, 'pessimistic': 8}
+    >>> mean, var, a, m, b = _calculate_action_time_params(data)
+    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
+    Mean: 7.00, Variance: 1.00
+
+    >>> # Direct parameters
+    >>> data = {'expected': 6.5, 'variance': 0.5}
+    >>> mean, var, a, m, b = _calculate_action_time_params(data)
+    >>> print(f"Mean: {mean:.2f}, Variance: {var:.2f}")
+    Mean: 6.50, Variance: 0.50
+    """
+    # 1. Check for three-point PERT estimation (highest priority)
+    if all(key in work_data for key in ['optimistic', 'most_likely', 'pessimistic']):
+        a = work_data['optimistic']
+        m = work_data['most_likely']
+        b = work_data['pessimistic']
+
+        # Validate inputs
+        if not (a <= m <= b):
+            raise ValueError(f"Invalid PERT estimates: must satisfy optimistic <= most_likely <= pessimistic. Got: {a}, {m}, {b}")
+
+        mean = (a + 4 * m + b) / 6
+        variance = ((b - a) / 6) ** 2
+        return mean, variance, a, m, b
+
+    # 2. Check for two-point PERT estimation (medium priority)
+    elif all(key in work_data for key in ['optimistic', 'pessimistic']):
+        a = work_data['optimistic']
+        b = work_data['pessimistic']
+
+        # Validate inputs
+        if not (a <= b):
+            raise ValueError(f"Invalid PERT estimates: must satisfy optimistic <= pessimistic. Got: {a}, {b}")
+
+        m = (2 * a + b) / 3
+        mean = (3 * a + 2 * b) / 5
+        variance = ((b - a) / 5) ** 2
+
+        return mean, variance, a, m, b
+
+    # 3. Direct parameters (lowest priority - backward compatibility)
+    elif 'expected' in work_data:
+        mean = work_data['expected']
+        variance = work_data.get('variance', 0.0)
+
+        # Validate inputs
+        if mean < 0:
+            raise ValueError(f"Mean must be non-negative. Got: {mean}")
+        if variance < 0:
+            raise ValueError(f"Variance must be non-negative. Got: {variance}")
+
+        if variance > 0:
+            d = 6 * np.sqrt(variance) / 2
+            if d > default_risk * mean:
+                a = (1 - default_risk) * mean
+            else:
+                a = mean - d
+
+            b = a + 2 * d
+            m = (mean * 6 - a - b) / 4
+        else:
+            a = mean
+            b = mean
+            m = mean
+
+        return mean, variance, a, m, b
+
+    # 4. Error - insufficient data
     else:
-        return old  # Certain result
+        raise ValueError(f"Insufficient data for determining action time parameters. Available keys: {list(work_data.keys())}")
 
 #==============================================================================
 class NetworkModel:
@@ -1428,7 +1439,7 @@ class NetworkModel:
             if a.wbs_id:  # Real activity
                 # Use letter instead of wbs_id in visualization
                 # Format expected time and reserve to 1 decimal place
-                lbl += '\n t=' + format(a.duration, '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
+                lbl += '\n t=' + format(a.duration[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
             else:  # Dummy activity
                 lbl += '\n r=' + format(a.reserve[RES], '.2f')
 
@@ -1604,7 +1615,7 @@ if __name__ == '__main__':
         print("\nChecking data expansion:")
         if 'name' in activities_df.columns:
             print("Data from 'data' successfully expanded into separate columns:")
-            print(activities_df[['letter', 'name', 'expected', 'reserve']].head())
+            print(activities_df[['letter', 'name', 'duration', 'reserve']].head())
 
     except Exception as e:
         print(f"Error exporting to DataFrame: {e}")
