@@ -920,7 +920,7 @@ class NetworkModel:
 
     duration : callable, default=_default_duration
         Callback function for resource-aware duration calculation.
-        Signature: duration(effort, activity, base_time) -> numpy.ndarray
+        Signature: duration(effort, activity, base_time) -> float
         - Effort is numpy array (3,), return numpy array (3,)
     p : float, default=0.95
         Probability level for PERT quantile estimates
@@ -1272,8 +1272,10 @@ class NetworkModel:
                 raise RuntimeError("Actions can not have negative time reserves!!!")
 
         if self.is_pert:
+            # For PERT models we must compute optimistic and pessimistic scenarios
             self._compute_target('optimistic')
             self._compute_target('pessimistic')
+
 
     def _compute_target(self, target=None):
         """
@@ -1309,17 +1311,43 @@ class NetworkModel:
             return ret
 
         def _duration_vec(effort, activity, base_time):
-            dur = np.zeros((3,), dtype=float)
 
-            if np.abs(effort[RES]) <= effort[ERR]:
-                # For fake activities return zeros
-                return dur
+            if _default_duration == self._duration:
+                return effort
+
+            dur = np.zeros((3,), dtype=float)
 
             # Compute duration value and error bound
             dur[RES] = self._duration(effort[RES], activity, base_time[RES])
-            # Compute variation and error bound
-            dur[VAR] = effort[VAR] * ((dur[RES] / effort[RES]) ** 2)
             dur[ERR] = EPS * dur[RES]
+
+            if 0. == effort[VAR] or not self.is_pert:
+                # Deterministic or fake activity
+                # VAR is zero already
+                return dur
+
+            _,g = fit_mpert(activity.expected[RES], activity.expected[VAR],
+                            activity.optimistic, activity.pessimistic)
+
+            if not g:
+                # Deterministic activity
+                return dur
+
+            # Model is PERT and activity is not deterministic,
+            # will compute duration variance
+            #
+            # Compute optimistic and pessimistic duration estimates
+            if effort[RES] >= 0.:
+                opt_dur  = self._duration(activity.optimistic,  activity, base_time[RES])
+                pess_dur = self._duration(activity.pessimistic, activity, base_time[RES])
+            else:
+                opt_dur  = self._duration( -activity.optimistic,  activity, base_time[RES])
+                pess_dur = self._duration( -activity.pessimistic, activity, base_time[RES])
+
+            # Use modified PERT formula
+            # D = (M - a) * (b - M) / (3 + g)
+            dur[VAR] = (dur[RES] - opt_dur) * (pess_dur - dur[RES]) / (3 + g)
+
             return dur
 
         if 'stage' == target:
@@ -1580,7 +1608,7 @@ class NetworkModel:
 
         def _cl(res, p):
             """Choose color based on reserve (red for critical path)"""
-            if abs(res[RES]) < res[ERR]:  # Absolute precision is nonsense
+            if abs(res[RES]) <= res[ERR]:  # Absolute precision is nonsense
                 return '#ff0000'  # Critical path
             elif p < self.p:
                 return '#ffa000'  # May consume the time reserve before completion

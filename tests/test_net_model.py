@@ -69,11 +69,11 @@ if __name__ == '__main__':
     wbs = {
         # Standard format (backward compatibility)
          1: {'letter': 'A', 'expected': 1., 'name': 'A1'},
-         2: {'letter': 'B', 'expected': 1., 'name': 'A2'},
+         2: {'letter': 'B', 'expected': 1., 'name': 'A2', 'vacation':[2]},
          3: {'letter': 'C', 'expected': 2., 'name': 'A3'},
          4: {'letter': 'D', 'expected': 3., 'name': 'A4'},
          5: {'letter': 'E', 'expected': 1., 'name': 'A5'},
-         6: {'letter': 'F', 'expected': 1., 'name': 'A6'},
+         6: {'letter': 'F', 'expected': 1., 'name': 'A6', 'vacation':[6,7]},
          7: {'letter': 'G', 'expected': 2., 'name': 'A7'},
          8: {'letter': 'H', 'expected': 3., 'name': 'A8'},
          9: {'letter': 'J', 'expected': 1., 'name': 'A9'},
@@ -84,7 +84,32 @@ if __name__ == '__main__':
         14: {'letter': 'P', 'expected': 5., 'name': 'A14'},
     }
 
+    def resource_aware_duration(effort, activity, base_time):
+        if None == base_time:
+            return effort
+
+        vacation = activity.data.get('vacation', [])
+        if not vacation:
+            return effort
+
+        vacation.sort()
+
+        if effort > 0.:
+            start = base_time
+            end   = start + effort
+            for d in vacation:
+                if d <= end and d >= start:
+                    end += 1
+            return end - start
+        else:
+            end   = base_time
+            start = end - effort
+            for d in vacation:
+                if d <= end and d >= start:
+                    start -= 1
+            return end - start
+
     src = np.array([1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ])
     dst = np.array([2, 3, 4,  5, 5, 5,  6, 7, 8,  9, 9, 9,  10, 11, 12 ])
-    net = NetworkModel(wbs, src, dst)
+    net = NetworkModel(wbs, src, dst, duration=resource_aware_duration)
     a,e = net.to_dataframe()
