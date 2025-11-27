@@ -69,7 +69,7 @@ if __name__ == '__main__':
     wbs = {
         # Standard format (backward compatibility)
          1: {'letter': 'A', 'expected': 1., 'name': 'A1'},
-         2: {'letter': 'B', 'expected': 1., 'name': 'A2', 'vacation':[2]},
+         2: {'letter': 'B', 'expected': 1., 'name': 'A2', 'vacation':[3]},
          3: {'letter': 'C', 'expected': 2., 'name': 'A3'},
          4: {'letter': 'D', 'expected': 3., 'name': 'A4'},
          5: {'letter': 'E', 'expected': 1., 'name': 'A5'},
@@ -103,11 +103,11 @@ if __name__ == '__main__':
             return end - start
         else:
             end   = base_time
-            start = end - effort
+            start = end + effort
             for d in vacation:
                 if d <= end and d >= start:
                     start -= 1
-            return end - start
+            return start - end
 
     src = np.array([1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ])
     dst = np.array([2, 3, 4,  5, 5, 5,  6, 7, 8,  9, 9, 9,  10, 11, 12 ])

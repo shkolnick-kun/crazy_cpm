@@ -704,7 +704,7 @@ class _Event:
 
         Parameters
         ----------
-    val : float
+        val : float
             Value to compare against
 
         Returns
@@ -921,7 +921,10 @@ class NetworkModel:
     duration : callable, default=_default_duration
         Callback function for resource-aware duration calculation.
         Signature: duration(effort, activity, base_time) -> float
-        - Effort is numpy array (3,), return numpy array (3,)
+        - effort: float value representing resource effort
+        - activity: _Activity object for context
+        - base_time: float representing base time for availability checks
+        Returns: float value representing actual duration
     p : float, default=0.95
         Probability level for PERT quantile estimates
     default_risk : float, default=0.3
@@ -980,6 +983,17 @@ class NetworkModel:
     ...     2: {'letter': 'B', 'expected': 30.0, 'team_size': 1, 'productivity': 1.0}
     ... }
     >>> model_resource = NetworkModel(wbs_resource, links=links, duration=team_duration)
+
+    Notes
+    -----
+    The duration callback function should return a float value representing
+    the actual duration based on resource allocation. The function receives:
+    - effort: The resource effort estimate
+    - activity: The activity object containing additional data
+    - base_time: The base time for resource availability calculations
+
+    For PERT analysis, variance is automatically propagated through the
+    network using modified PERT distribution formulas.
     """
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
@@ -1222,6 +1236,9 @@ class NetworkModel:
         The computation is performed in two phases:
         1. Forward pass: Compute early times starting from project beginning
         2. Backward pass: Compute late times starting from project completion
+
+        For PERT models, additional optimistic and pessimistic scenarios
+        are computed to provide statistical analysis.
         """
         self._compute_target('early')
 
@@ -1297,7 +1314,8 @@ class NetworkModel:
         Notes
         -----
         The computation uses different strategies for stage calculation
-        vs time parameter calculation.
+        vs time parameter calculation. For PERT analysis, variance is
+        propagated using modified PERT distribution formulas.
         """
         def _choice_early(old, new):
             return _choice(old, new, new[RES] - old[RES])
@@ -1311,7 +1329,13 @@ class NetworkModel:
             return ret
 
         def _duration_vec(effort, activity, base_time):
+            """
+            Compute duration vector with variance propagation for PERT analysis.
 
+            This function handles the conversion from resource effort to actual
+            duration while properly propagating variance through the network.
+            """
+            # Optimize for default duration function
             if _default_duration == self._duration:
                 return effort
 
@@ -1326,6 +1350,7 @@ class NetworkModel:
                 # VAR is zero already
                 return dur
 
+            # Compute shape parameter for modified PERT distribution
             _,g = fit_mpert(activity.expected[RES], activity.expected[VAR],
                             activity.optimistic, activity.pessimistic)
 
@@ -1334,8 +1359,8 @@ class NetworkModel:
                 return dur
 
             # Model is PERT and activity is not deterministic,
-            # will compute duration variance
-            #
+            # will compute duration variance using modified PERT formula
+
             # Compute optimistic and pessimistic duration estimates
             if effort[RES] >= 0.:
                 opt_dur  = self._duration(activity.optimistic,  activity, base_time[RES])
@@ -1344,7 +1369,7 @@ class NetworkModel:
                 opt_dur  = self._duration( -activity.optimistic,  activity, base_time[RES])
                 pess_dur = self._duration( -activity.pessimistic, activity, base_time[RES])
 
-            # Use modified PERT formula
+            # Use modified PERT formula for variance calculation:
             # D = (M - a) * (b - M) / (3 + g)
             dur[VAR] = (dur[RES] - opt_dur) * (pess_dur - dur[RES]) / (3 + g)
 
@@ -1601,6 +1626,11 @@ class NetworkModel:
         - Orange: Near-critical activities
         - Black: Non-critical activities
         - Dashed lines: Dummy activities
+
+        The visualization shows:
+        - Event nodes with early/late times and reserves
+        - Activity edges with duration and reserve information
+        - Critical paths highlighted in red
         """
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style': 'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
@@ -1649,6 +1679,16 @@ class NetworkModel:
 
 #==============================================================================
 if __name__ == '__main__':
+    """
+    Demonstration module for CrazyCPM library.
+
+    This section provides comprehensive examples of library usage including:
+    - Multiple link format demonstrations
+    - Resource-aware scheduling examples
+    - PERT analysis with statistical estimates
+    - Visualization and export capabilities
+    """
+
     # Example usage with all link formats and new time input methods
     wbs = {
         # Standard format (backward compatibility)
@@ -1723,6 +1763,14 @@ if __name__ == '__main__':
     print("\n=== Advanced Example: Resource-Aware Scheduling ===")
 
     def resource_aware_duration(effort, activity, base_time):
+        """
+        Custom duration callback function for resource-aware scheduling.
+
+        This function demonstrates how to model resource constraints including:
+        - Team size allocation
+        - Productivity factors
+        - Resource availability based on time
+        """
         # Get resource allocation from activity data
         team_size = activity.data.get('team_size', 1)
         productivity = activity.data.get('productivity', 1.0)
