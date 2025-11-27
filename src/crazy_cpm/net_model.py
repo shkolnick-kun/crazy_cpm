@@ -286,7 +286,7 @@ def _choice(old, new, delta):
         return old  # Certain result
 
 #==============================================================================
-def _default_duration(value, activity, base_time):
+def _default_duration(effort, activity, base_time):
     """
     Default duration callback function.
 
@@ -295,26 +295,32 @@ def _default_duration(value, activity, base_time):
 
     Parameters
     ----------
-    value : float or numpy.ndarray
-        Resource effort estimate or time delta:
-        - For stage computation: int value (1)
-        - For time computation: numpy array of shape (3,) with [RES, VAR, ERR]
+    effort : float
+        Resource effort estimate:
+        - Positive number or zero for forward pass (early times calculation)
+        - Negative number or zero for backward pass (late times calculation)
     activity : _Activity
         Activity object for context-aware calculations
-    base_time : float or numpy.ndarray
+    base_time : float or None
         Base time from which the activity starts:
-        - For stage computation: not used
-        - For time computation: numpy array of shape (3,) for availability checks
+        - float for time computations during network traversal
+        - None for network post-processing (optimistic/pessimistic scenarios)
 
     Returns
     -------
-    duration: numpy.ndarray
-        Activity duration [value, variance, error_bound]
+    float
+        Activity duration with the same sign as effort:
+        - Zero if effort is zero
+        - Positive number if effort is positive
+        - Negative number if effort is negative
 
     Notes
     -----
-    The variance propagation follows:
-    Var(duration) = (∂duration/∂effort)² * Var(effort)
+    The function must preserve the sign of the effort parameter to ensure
+    correct forward and backward pass calculations in the network.
+
+    When base_time is None, the function should return a duration estimate
+    without considering time-based resource availability constraints.
 
     Examples
     --------
@@ -323,10 +329,16 @@ def _default_duration(value, activity, base_time):
     >>> def custom_duration(effort, activity, base_time):
     ...     team_size = activity.data.get('team_size', 1)
     ...     productivity = activity.data.get('productivity', 1.0)
-    ...     return effort / (team_size * productivity)
+    ...
+    ...     # Calculate absolute duration
+    ...     abs_duration = abs(effort) / (team_size * productivity)
+    ...
+    ...     # Return with original sign
+    ...     return abs_duration if effort >= 0 else -abs_duration
     """
-    # For time computation, return effort array directly (default: duration = effort)
-    return value
+    # Return effort directly (default: duration = effort)
+    # This preserves the sign of effort for forward/backward pass calculations
+    return effort
 
 #==============================================================================
 class _Activity:
@@ -921,10 +933,16 @@ class NetworkModel:
     duration : callable, default=_default_duration
         Callback function for resource-aware duration calculation.
         Signature: duration(effort, activity, base_time) -> float
-        - effort: float value representing resource effort
+        - effort: float value representing resource effort:
+          * Positive number or zero for forward pass (early times calculation)
+          * Negative number or zero for backward pass (late times calculation)
         - activity: _Activity object for context
-        - base_time: float representing base time for availability checks
-        Returns: float value representing actual duration
+        - base_time: float for time-based availability checks during network traversal,
+          or None for network post-processing (optimistic/pessimistic scenarios)
+        Returns: float value representing actual duration with the same sign as effort:
+          * Zero if effort is zero
+          * Positive number if effort is positive
+          * Negative number if effort is negative
     p : float, default=0.95
         Probability level for PERT quantile estimates
     default_risk : float, default=0.3
@@ -976,7 +994,12 @@ class NetworkModel:
     >>> def team_duration(effort, activity, base_time):
     ...     team_size = activity.data.get('team_size', 1)
     ...     productivity = activity.data.get('productivity', 1.0)
-    ...     return effort / (team_size * productivity)
+    ...
+    ...     # Calculate absolute duration
+    ...     abs_duration = abs(effort) / (team_size * productivity)
+    ...
+    ...     # Return with original sign
+    ...     return abs_duration if effort >= 0 else -abs_duration
     ...
     >>> wbs_resource = {
     ...     1: {'letter': 'A', 'expected': 40.0, 'team_size': 2, 'productivity': 0.8},
@@ -986,11 +1009,15 @@ class NetworkModel:
 
     Notes
     -----
-    The duration callback function should return a float value representing
-    the actual duration based on resource allocation. The function receives:
-    - effort: The resource effort estimate
-    - activity: The activity object containing additional data
-    - base_time: The base time for resource availability calculations
+    The duration callback function must preserve the sign of the effort parameter
+    to ensure correct forward and backward pass calculations in the network:
+    - For forward pass (early times): effort >= 0, duration >= 0
+    - For backward pass (late times): effort <= 0, duration <= 0
+    - For zero effort: duration = 0
+
+    When base_time is None in the duration callback, it indicates that
+    the function should return a duration estimate without considering
+    time-based resource availability constraints.
 
     For PERT analysis, variance is automatically propagated through the
     network using modified PERT distribution formulas.
@@ -1334,6 +1361,21 @@ class NetworkModel:
 
             This function handles the conversion from resource effort to actual
             duration while properly propagating variance through the network.
+
+            Parameters
+            ----------
+            effort : numpy.ndarray
+                Resource effort array [value, variance, error_bound]
+            activity : _Activity
+                Activity object for context
+            base_time : numpy.ndarray or None
+                Base time array [value, variance, error_bound] for time computations,
+                or None for network post-processing
+
+            Returns
+            -------
+            numpy.ndarray
+                Duration array [value, variance, error_bound]
             """
             # Optimize for default duration function
             if _default_duration == self._duration:
@@ -1342,8 +1384,9 @@ class NetworkModel:
             dur = np.zeros((3,), dtype=float)
 
             # Compute duration value and error bound
+            # effort[RES] is float: positive for forward pass, negative for backward pass
             dur[RES] = self._duration(effort[RES], activity, base_time[RES])
-            dur[ERR] = EPS * dur[RES]
+            dur[ERR] = EPS * abs(dur[RES])  # Error bound based on absolute duration
 
             if 0. == effort[VAR] or not self.is_pert:
                 # Deterministic or fake activity
@@ -1362,15 +1405,23 @@ class NetworkModel:
             # will compute duration variance using modified PERT formula
 
             # Compute optimistic and pessimistic duration estimates
+            # For variance calculation, use base_time=None to get estimates
+            # without time-based constraints
             if effort[RES] >= 0.:
+                # Forward pass: use positive effort values
                 opt_dur  = self._duration(activity.optimistic,  activity, base_time[RES])
                 pess_dur = self._duration(activity.pessimistic, activity, base_time[RES])
             else:
+                # Backward pass: use negative effort values
                 opt_dur  = self._duration( -activity.optimistic,  activity, base_time[RES])
                 pess_dur = self._duration( -activity.pessimistic, activity, base_time[RES])
 
             # Use modified PERT formula for variance calculation:
             # D = (M - a) * (b - M) / (3 + g)
+            # Note:
+            # We don't care positive or negative values here as
+            # sign(dur[RES]) == sign(opt_dur) == sign(pess_dur)
+            # and so numerator is allways positive
             dur[VAR] = (dur[RES] - opt_dur) * (pess_dur - dur[RES]) / (3 + g)
 
             return dur
@@ -1770,25 +1821,54 @@ if __name__ == '__main__':
         - Team size allocation
         - Productivity factors
         - Resource availability based on time
+
+        Parameters
+        ----------
+        effort : float
+            Resource effort estimate:
+            - Positive number or zero for forward pass
+            - Negative number or zero for backward pass
+        activity : _Activity
+            Activity object containing resource data
+        base_time : float or None
+            Base time for availability calculations during network traversal,
+            or None for network post-processing
+
+        Returns
+        -------
+        float
+            Actual duration with the same sign as effort
         """
         # Get resource allocation from activity data
         team_size = activity.data.get('team_size', 1)
         productivity = activity.data.get('productivity', 1.0)
 
-        # Simulate resource availability (e.g., weekends, holidays)
-        # This is a simplified example - real implementation would use calendar
-        availability = 1.0
+        # Calculate absolute duration from absolute effort
+        abs_effort = abs(effort)
+
         if base_time is not None:
+            # Time-dependent resource availability during network traversal
+            # Simulate resource availability (e.g., weekends, holidays)
+            availability = 1.0
             # Example: reduce availability on weekends (simplified)
             day_of_week = int(base_time) % 7
             if day_of_week >= 5:  # Weekend
                 availability = 0.5
 
-        # Calculate duration: effort / (resources * productivity * availability)
-        if team_size * productivity * availability > 0:
-            return effort / (team_size * productivity * availability)
+            # Calculate absolute duration with time-based availability
+            if team_size * productivity * availability > 0:
+                abs_duration = abs_effort / (team_size * productivity * availability)
+            else:
+                abs_duration = abs_effort  # Fallback to direct mapping
         else:
-            return effort  # Fallback to direct mapping
+            # No time-based constraints for post-processing
+            if team_size * productivity > 0:
+                abs_duration = abs_effort / (team_size * productivity)
+            else:
+                abs_duration = abs_effort  # Fallback to direct mapping
+
+        # Return duration with original sign to preserve forward/backward pass logic
+        return abs_duration if effort >= 0 else -abs_duration
 
     # WBS with resource information
     wbs_resource = {

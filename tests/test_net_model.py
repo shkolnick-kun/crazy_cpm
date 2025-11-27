@@ -100,14 +100,14 @@ if __name__ == '__main__':
             for d in vacation:
                 if d <= end and d >= start:
                     end += 1
-            return end - start
+            return end - start # Return positive value
         else:
             end   = base_time
             start = end + effort
             for d in vacation:
                 if d <= end and d >= start:
                     start -= 1
-            return start - end
+            return start - end # Return negative value
 
     src = np.array([1, 1, 1,  2, 3, 4,  5, 5, 5,  6, 7, 8,  9,  9,  9, ])
     dst = np.array([2, 3, 4,  5, 5, 5,  6, 7, 8,  9, 9, 9,  10, 11, 12 ])
