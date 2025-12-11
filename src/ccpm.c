@@ -388,8 +388,7 @@ ccpmResultEn ccpm_build_full_deps(size_t     n_act,    size_t  n_max,
     for (i = 0; i < n_act; i++)
     {
         /*len(full_act_dep[i])*/
-        p = CCPM_LLEN(full_act_dep + n_max * i);
-        for (j = 0; j < p; j++)
+        for (j = 0; j < CCPM_LLEN(full_act_dep + n_max * i); j++)
         {
             /*k = full_act_dep[i][j]*/
             k = CCPM_LITEM(full_act_dep + n_max * i, j);
