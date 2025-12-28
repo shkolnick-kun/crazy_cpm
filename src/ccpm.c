@@ -361,6 +361,9 @@ ccpmResultEn ccpm_populate_dep_info(size_t   n_max,
         /*dep_map[j, i] = True*/
         dep_map[n_max * j + i] = true;
 
+        /*Must check here to enable error tracking*/
+        CCPM_CHECK_RETURN(i != j, CCPM_ELOOP);
+
         /*Append dependencies*/
         /*dep[j].append(i)*/
         CCPM_LAPP(dep + n_max * j, i);
