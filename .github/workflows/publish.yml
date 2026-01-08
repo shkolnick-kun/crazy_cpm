@@ -2,8 +2,8 @@ name: Publish Python Package
 
 on:
   release:
-    types: [created, published]
-  workflow_dispatch:  # Ручной запуск
+    types: [published]
+  workflow_dispatch:
 
 jobs:
   build-and-publish:
@@ -27,16 +27,24 @@ jobs:
       run: |
         python -m build --sdist
 
-    - name: Publish to TestPyPI (draft releases)
-      if: github.event.action == 'created' || github.event_name == 'workflow_dispatch'
+    - name: Publish to TestPyPI (by hand)
+      if: github.event_name == 'workflow_dispatch'
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
       run: |
         twine upload --repository-url https://test.pypi.org/legacy/ --skip-existing dist/*
 
-    - name: Publish to PyPI (official releases)
-      if: github.event.action == 'published'
+    - name: Publish to TestPyPI (pre release)
+      if: github.event_name == 'release' && github.event.release.prerelease == true
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      run: |
+        twine upload --repository-url https://test.pypi.org/legacy/ --skip-existing dist/*
+
+    - name: Publish to PyPI (release)
+      if: github.event_name == 'release' && github.event.release.prerelease == false
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
