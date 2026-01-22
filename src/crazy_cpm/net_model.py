@@ -1634,7 +1634,7 @@ class NetworkModel:
         model_dict = self.to_dict()
 
         # Create events DataFrame (straightforward)
-        events_df = pd.DataFrame(model_dict['events'])
+        events_df = pd.DataFrame(model_dict['events'], dtype=object)
 
         # Create activities DataFrame with data fields expanded
         activities_list = model_dict['activities']
