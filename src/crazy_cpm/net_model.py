@@ -1651,7 +1651,7 @@ class NetworkModel:
 
             expanded_activities.append(activity_data)
 
-        activities_df = pd.DataFrame(expanded_activities).fillna(value='')
+        activities_df = pd.DataFrame(expanded_activities, dtype=object).fillna(value='')
 
         return activities_df, events_df
 
