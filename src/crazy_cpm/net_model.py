@@ -604,10 +604,9 @@ class _Activity:
             'early_end': self.early_end[RES],
             'late_end': self.late_end[RES],
             'reserve': self.reserve[RES],
-
-            # Additional data copy
-            'data': self.data.copy()  # Return a copy to avoid modifying original
         }
+        # Add user data to dictionary
+        ret.update(self.data.copy())
 
         if self.model.is_pert:
             # PERT analysis fields
@@ -1024,7 +1023,8 @@ class NetworkModel:
     """
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
-                 duration=_default_duration, p=0.95, default_risk=0.3, debug=False):
+                 duration=_default_duration, p=0.95, default_risk=0.3,
+                 next_act_id=1, debug=False):
         assert isinstance(wbs_dict, dict)
 
         self.debug = debug
@@ -1036,7 +1036,7 @@ class NetworkModel:
         lnk_src, lnk_dst = self._parse_links(lnk_src, lnk_dst, links)
 
         # Create network model
-        self._create_model(wbs_dict, lnk_src, lnk_dst, default_risk)
+        self._create_model(wbs_dict, lnk_src, lnk_dst, default_risk, next_act_id)
         assert 0 < len(self.events)
 
         # Compute stages of project
@@ -1106,7 +1106,7 @@ class NetworkModel:
         else:
             raise ValueError(f"Unsupported links format: {type(links)}")
 
-    def _create_model(self, wbs_dict, lnk_src, lnk_dst, default_risk):
+    def _create_model(self, wbs_dict, lnk_src, lnk_dst, default_risk, next_act_id):
         """
         Create network model from WBS data and links.
 
@@ -1139,7 +1139,7 @@ class NetworkModel:
         assert _ccpm.OK == status
 
         self.events = []
-        self.next_act = 1
+        self.next_act = next_act_id
         self.activities = []
 
         # Create events
@@ -1635,23 +1635,7 @@ class NetworkModel:
 
         # Create events DataFrame (straightforward)
         events_df = pd.DataFrame(model_dict['events'], dtype=object)
-
-        # Create activities DataFrame with data fields expanded
-        activities_list = model_dict['activities']
-
-        # Expand data fields into separate columns
-        expanded_activities = []
-        for activity in activities_list:
-            # Start with basic activity data
-            activity_data = {k: v for k, v in activity.items() if k != 'data'}
-
-            # Add data fields as separate columns
-            if 'data' in activity and activity['data']:
-                activity_data.update(activity['data'])
-
-            expanded_activities.append(activity_data)
-
-        activities_df = pd.DataFrame(expanded_activities, dtype=object).fillna(value='')
+        activities_df = pd.DataFrame(model_dict['activities'], dtype=object).fillna(value='')
 
         return activities_df, events_df
 
