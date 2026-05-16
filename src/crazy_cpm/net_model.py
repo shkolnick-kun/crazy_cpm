@@ -786,7 +786,7 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
        variance = ((pessimistic - optimistic)/6)²
 
     2. **Two-point PERT**: Uses optimistic and pessimistic effort estimates
-       with formula: mean = (optimistic + 4*pessimistic)/5,
+       with formula: mean = (3 * optimistic + 2 * pessimistic)/5,
        variance = ((pessimistic - optimistic)/5)²
 
     3. **Direct parameters**: Uses directly provided expected and variance values
@@ -1639,7 +1639,7 @@ class NetworkModel:
 
         return activities_df, events_df
 
-    def viz(self, output_path=None):
+    def viz(self, output_path=None, group_by_stage=False):
         """
         Create Graphviz visualization of the CPM network.
 
@@ -1647,12 +1647,15 @@ class NetworkModel:
         ----------
         output_path : str, optional
             Custom output path for saving the visualization file.
-            If None, uses default location.
+            If None, the graph is not rendered to a file (only the Digraph object is returned).
+        group_by_stage : bool, default=False
+            If True, events are grouped into \"layers\" by their topological order.
+            If False, events are placed freely by Graphviz default layout.
 
         Returns
         -------
         graphviz.Digraph
-            Graphviz object for rendering or saving
+            Graphviz object for rendering or saving.
 
         Notes
         -----
@@ -1666,38 +1669,56 @@ class NetworkModel:
         - Event nodes with early/late times and reserves
         - Activity edges with duration and reserve information
         - Critical paths highlighted in red
+
+        When ``group_by_stage=True``, the topological order of events is preserved
+        by clustering events with the same stage together, improving readability
+        for large networks.
         """
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style': 'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
-        #dot.graph_attr['dpi'] = '300'
 
         def _cl(res, p):
-            """Choose color based on reserve (red for critical path)"""
-            if abs(res[RES]) <= res[ERR]:  # Absolute precision is nonsense
+            if abs(res[RES]) <= res[ERR]:
                 return '#ff0000'  # Critical path
             elif p < self.p:
-                return '#ffa000'  # May consume the time reserve before completion
+                return '#ffa000'  # May consume reserve
             else:
                 return '#000000'
 
-        # Add events/nodes
-        for e in self.events:
-            # Format time values to 1 decimal place
-            dot.node(str(e.id),
-                     '{{%d |{%.1f|%.1f}| %.2f}}' % (e.id,
-                                                     e.early[RES],
-                                                     e.late[RES],
-                                                     e.reserve[RES]),
-                     color=_cl(e.reserve, e.early_prob(e.late[RES])))
+        def _label(e):
+            return '{{%d |{%.1f|%.1f}| %.2f}}' % (
+                e.id,
+                e.early[RES],
+                e.late[RES],
+                e.reserve[RES])
 
-        # Add activities/edges
+        if group_by_stage:
+            # Group events by stage
+            stages = {}
+            for e in self.events:
+                stages.setdefault(e.stage, []).append(e)
+
+            # Create subgraphs (clusters) for each stage with rank=same
+            # Sort stages to ensure consistent order (optional)
+            for stage in sorted(stages.keys()):
+                with dot.subgraph() as s:
+                    s.attr(rank='same')
+                    # Name the subgraph to avoid conflicts (use 'cluster_' prefix optional but not required for rank)
+                    s.attr(id=f'stage_{stage}')  # optional, for debugging
+                    for e in stages[stage]:
+                        s.node(str(e.id), _label(e), color=_cl(e.reserve, e.early_prob(e.late[RES])))
+        else:
+            # Just add events/nodes
+            for e in self.events:
+                # Format time values to 1 decimal place
+                dot.node(str(e.id), _label(e), color=_cl(e.reserve, e.early_prob(e.late[RES])))
+
+        # Add edges (activities) after nodes are defined
         for a in self.activities:
             lbl = a.letter
-            if a.wbs_id:  # Real activity
-                # Use letter instead of wbs_id in visualization
-                # Format duration and reserve to 1 decimal place
+            if a.wbs_id:
                 lbl += '\n t=' + format(a.duration[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
-            else:  # Dummy activity
+            else:
                 lbl += '\n r=' + format(a.reserve[RES], '.2f')
 
             dot.edge(str(a.src.id), str(a.dst.id),
@@ -1706,7 +1727,6 @@ class NetworkModel:
                      style='dashed' if a.expected[RES] == 0.0 else 'solid'
                      )
 
-        # If output path is specified, render to that location
         if output_path is not None:
             dot.render(output_path, format='png', cleanup=True)
 
