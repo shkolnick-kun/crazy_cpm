@@ -1641,15 +1641,15 @@ class NetworkModel:
 
     def viz(self, output_path=None, group_by_stage=False):
         """
-        Create Graphviz visualization of the CPM network.
+        Create Graphviz visualization of the CPM/PERT network.
 
         Parameters
         ----------
         output_path : str, optional
-            Custom output path for saving the visualization file.
+            Custom output path for saving the visualization file (without extension).
             If None, the graph is not rendered to a file (only the Digraph object is returned).
         group_by_stage : bool, default=False
-            If True, events are grouped into \"layers\" by their topological order.
+            If True, events are grouped into "layers" by their topological order (stage).
             If False, events are placed freely by Graphviz default layout.
 
         Returns
@@ -1659,16 +1659,15 @@ class NetworkModel:
 
         Notes
         -----
-        The visualization uses the following color coding:
-        - Red: Critical path (zero reserve)
-        - Orange: Near-critical activities
-        - Black: Non-critical activities
-        - Dashed lines: Dummy activities
-
         The visualization shows:
-        - Event nodes with early/late times and reserves
-        - Activity edges with duration and reserve information
-        - Critical paths highlighted in red
+            - Event nodes with early/late times and reserves
+            - Activity edges with duration and reserve information
+
+        The visualization uses the following coding:
+            - Critical paths: Red (#ff0000), penwidth=4, fontsize=16, weight=3
+            - Sub-critical paths: Orange (#ffa000), penwidth=3, fontsize=16, weight=2
+            - Non-critical paths: Black (#000000), penwidth=2, fontsize=14, weight=1
+            - Dashed arrows: Dummy activities
 
         When ``group_by_stage=True``, the topological order of events is preserved
         by clustering events with the same stage together, improving readability
@@ -1676,57 +1675,150 @@ class NetworkModel:
         """
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style': 'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
+        dot.graph_attr['splines'] = 'polyline'
 
-        def _cl(res, p):
+        def _get_style(res, prob_crit, element_type='event'):
+            """
+            Determine styling (color, penwidth, fontsize, weight) based on criticality.
+
+            Parameters
+            ----------
+            res : numpy.ndarray
+                Time reserve array [value, variance, error_bound]
+            prob_crit : float
+                Probability that the element is on critical path
+            element_type : str, optional
+                Type of element: 'event', 'activity', or 'label' (unused but kept for API)
+
+            Returns
+            -------
+            dict
+                Dictionary with styling attributes for Graphviz
+            """
             if abs(res[RES]) <= res[ERR]:
-                return '#ff0000'  # Critical path
-            elif p < self.p:
-                return '#ffa000'  # May consume reserve
+                # Critical path element
+                return {
+                    'color': '#ff0000',
+                    'penwidth': '4',
+                    'fontsize': '16',
+                    'weight': '3'
+                }
+            elif prob_crit < self.p:
+                # Sub-critical element (may consume reserve)
+                return {
+                    'color': '#ffa000',
+                    'penwidth': '3',
+                    'fontsize': '16',
+                    'weight': '2'
+                }
             else:
-                return '#000000'
+                # Non-critical element
+                return {
+                    'color': '#000000',
+                    'penwidth': '2',
+                    'fontsize': '14',
+                    'weight': '1'
+                }
 
-        def _label(e):
+        def _label_event(e):
+            """Format event node label (early/late times, reserve)."""
+            style = _get_style(e.reserve, e.early_prob(e.late[RES]), 'event')
+            # Simple record label without HTML tags
             return '{{%d |{%.1f|%.1f}| %.2f}}' % (
-                e.id,
-                e.early[RES],
-                e.late[RES],
-                e.reserve[RES])
+                e.id, e.early[RES], e.late[RES], e.reserve[RES]
+            ), style
 
+        # 1. Add event nodes (optionally grouped by stage)
         if group_by_stage:
-            # Group events by stage
             stages = {}
             for e in self.events:
                 stages.setdefault(e.stage, []).append(e)
 
-            # Create subgraphs (clusters) for each stage with rank=same
-            # Sort stages to ensure consistent order (optional)
             for stage in sorted(stages.keys()):
                 with dot.subgraph() as s:
                     s.attr(rank='same')
-                    # Name the subgraph to avoid conflicts (use 'cluster_' prefix optional but not required for rank)
-                    s.attr(id=f'stage_{stage}')  # optional, for debugging
+                    s.attr(id=f'stage_{stage}')
                     for e in stages[stage]:
-                        s.node(str(e.id), _label(e), color=_cl(e.reserve, e.early_prob(e.late[RES])))
+                        label, style = _label_event(e)
+                        s.node(str(e.id), label,
+                               color=style['color'],
+                               penwidth=style['penwidth'],
+                               fontsize=style['fontsize'])
         else:
-            # Just add events/nodes
             for e in self.events:
-                # Format time values to 1 decimal place
-                dot.node(str(e.id), _label(e), color=_cl(e.reserve, e.early_prob(e.late[RES])))
+                label, style = _label_event(e)
+                dot.node(str(e.id), label,
+                         color=style['color'],
+                         penwidth=style['penwidth'],
+                         fontsize=style['fontsize'])
 
-        # Add edges (activities) after nodes are defined
+        # 2. Add edges through invisible nodes with separate labels
         for a in self.activities:
-            lbl = a.letter
-            if a.wbs_id:
-                lbl += '\n t=' + format(a.duration[RES], '.1f') + '\n r=' + format(a.reserve[RES], '.2f')
-            else:
-                lbl += '\n r=' + format(a.reserve[RES], '.2f')
+            # Get style for this activity based on its criticality
+            activity_style = _get_style(a.reserve, a.early_end_prob(a.late_end[RES]), 'activity')
 
-            dot.edge(str(a.src.id), str(a.dst.id),
-                     label=lbl,
-                     color=_cl(a.reserve, a.early_end_prob(a.late_end[RES])),
-                     style='dashed' if a.expected[RES] == 0.0 else 'solid'
-                     )
+            # Build label text for the visible label node
+            if a.wbs_id:   # real activity
+                lbl = f"{a.letter}\\nt={a.duration[RES]:.1f}\\nr={a.reserve[RES]:.2f}"
+            else:          # dummy activity
+                lbl = f"{a.letter}\\nr={a.reserve[RES]:.2f}"
 
+            # Unique identifiers for auxiliary nodes
+            invis_node_id = f"invis_{a.id}"
+            label_node_id = f"label_{a.id}"
+
+            # Determine edge style (solid for real, dashed for dummy)
+            edge_style = 'dashed' if a.expected[RES] == 0.0 else 'solid'
+
+            # Create a subgraph to force same rank for invisible and label nodes
+            with dot.subgraph() as s:
+                s.attr(rank='same')
+                s.attr(id=f'rank_{a.id}')  # Unique subgraph ID for this activity
+
+                # Create invisible intermediate node (zero size, no label)
+                s.node(invis_node_id,
+                       label='',
+                       shape='point',
+                       style='invis',
+                       width='0',
+                       height='0')
+
+                # Create visible label node (light gray, rounded box)
+                # Label uses fontsize=12 for all activities as specified
+                s.node(label_node_id,
+                       label=lbl,
+                       shape='box',
+                       style='filled,rounded',
+                       fillcolor='#f0f0f0',
+                       fontsize='12',
+                       margin='0.05,0.05')
+
+            # Main edge: source -> invisible node (no arrowhead)
+            dot.edge(str(a.src.id), invis_node_id,
+                     style=edge_style,
+                     color=activity_style['color'],
+                     penwidth=activity_style['penwidth'],
+                     weight=activity_style['weight'],
+                     arrowhead='none')
+
+            # Main edge: invisible node -> destination (with arrowhead)
+            dot.edge(invis_node_id, str(a.dst.id),
+                     style=edge_style,
+                     color=activity_style['color'],
+                     penwidth=activity_style['penwidth'],
+                     weight=activity_style['weight'],
+                     arrowhead='normal')
+
+            # Auxiliary edge: label node -> invisible node (dashed gray, no arrowhead)
+            # This attaches the label to the bend point without interfering with routing
+            # Weight for auxiliary edges is kept low (1) to not interfere with main layout
+            dot.edge(label_node_id, invis_node_id,
+                     style='dashed',
+                     color='#606060',
+                     weight='1',
+                     arrowhead='none')
+
+        # 3. Save to file if output path provided
         if output_path is not None:
             dot.render(output_path, format='png', cleanup=True)
 
