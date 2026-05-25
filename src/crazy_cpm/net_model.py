@@ -1635,7 +1635,8 @@ class NetworkModel:
 
         # Create events DataFrame (straightforward)
         events_df = pd.DataFrame(model_dict['events'], dtype=object)
-        activities_df = pd.DataFrame(model_dict['activities'], dtype=object).fillna(value='')
+        activities_df = pd.DataFrame(model_dict['activities'], dtype=object)
+        activities_df = activities_df.infer_objects().replace({np.nan: ''})
 
         return activities_df, events_df
 
