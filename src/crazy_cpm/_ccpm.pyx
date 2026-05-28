@@ -113,11 +113,12 @@ def make_aoa(act_ids, lnk_src, lnk_dst):
     cdef size_t n_act = len(act_ids)
     cdef size_t n_lnk = len(lnk_src)
     cdef size_t n_max = n_act + (n_lnk if n_lnk > n_act else n_act)
+    cdef size_t n_lnk_plus = n_lnk if n_lnk > 0 else 1 #  Zero links is valid case!!!
 
     # Create buffer arrays
     act_ids_arr = np.zeros(n_max + 1, dtype=np.uint16)
-    lnk_src_arr = np.zeros(n_lnk, dtype=np.uint16)
-    lnk_dst_arr = np.zeros(n_lnk, dtype=np.uint16)
+    lnk_src_arr = np.zeros(n_lnk_plus, dtype=np.uint16)
+    lnk_dst_arr = np.zeros(n_lnk_plus, dtype=np.uint16)
     act_src_arr = np.zeros(n_max + 1, dtype=np.uint16)
     act_dst_arr = np.zeros(n_max + 1, dtype=np.uint16)
 
