@@ -1635,12 +1635,17 @@ class NetworkModel:
 
         # Create events DataFrame (straightforward)
         events_df = pd.DataFrame(model_dict['events'], dtype=object)
+
         activities_df = pd.DataFrame(model_dict['activities'], dtype=object)
-        activities_df = activities_df.infer_objects().replace({np.nan: ''})
+        try:
+            with pd.option_context('future.no_silent_downcasting', True):
+                activities_df = activities_df.replace({np.nan: ''})
+        except pd.errors.OptionError:
+            activities_df = activities_df.replace({np.nan: ''})
 
         return activities_df, events_df
 
-    def viz(self, output_path=None, group_by_stage=False):
+    def viz(self, output_path=None, group_by_stage=False, embed_dsc=False):
         """
         Create Graphviz visualization of the CPM/PERT network.
 
@@ -1678,7 +1683,7 @@ class NetworkModel:
         dot.graph_attr['rankdir'] = 'LR'
         dot.graph_attr['splines'] = 'polyline'
 
-        def _get_style(res, prob_crit, element_type='event'):
+        def _get_style(res, prob_crit):
             """
             Determine styling (color, penwidth, fontsize, weight) based on criticality.
 
@@ -1688,8 +1693,6 @@ class NetworkModel:
                 Time reserve array [value, variance, error_bound]
             prob_crit : float
                 Probability that the element is on critical path
-            element_type : str, optional
-                Type of element: 'event', 'activity', or 'label' (unused but kept for API)
 
             Returns
             -------
@@ -1723,7 +1726,7 @@ class NetworkModel:
 
         def _label_event(e):
             """Format event node label (early/late times, reserve)."""
-            style = _get_style(e.reserve, e.early_prob(e.late[RES]), 'event')
+            style = _get_style(e.reserve, e.early_prob(e.late[RES]))
             # Simple record label without HTML tags
             return '{{%d |{%.1f|%.1f}| %.2f}}' % (
                 e.id, e.early[RES], e.late[RES], e.reserve[RES]
@@ -1756,7 +1759,7 @@ class NetworkModel:
         # 2. Add edges through invisible nodes with separate labels
         for a in self.activities:
             # Get style for this activity based on its criticality
-            activity_style = _get_style(a.reserve, a.early_end_prob(a.late_end[RES]), 'activity')
+            activity_style = _get_style(a.reserve, a.early_end_prob(a.late_end[RES]))
 
             # Build label text for the visible label node
             if a.wbs_id:   # real activity
@@ -1765,37 +1768,67 @@ class NetworkModel:
                 lbl = f"{a.letter}\\nr={a.reserve[RES]:.2f}"
 
             # Unique identifiers for auxiliary nodes
-            invis_node_id = f"invis_{a.id}"
             label_node_id = f"label_{a.id}"
 
             # Determine edge style (solid for real, dashed for dummy)
             edge_style = 'dashed' if a.expected[RES] == 0.0 else 'solid'
 
             # Create a subgraph to force same rank for invisible and label nodes
-            with dot.subgraph() as s:
-                s.attr(rank='same')
-                s.attr(id=f'rank_{a.id}')  # Unique subgraph ID for this activity
-
-                # Create invisible intermediate node (zero size, no label)
-                s.node(invis_node_id,
-                       label='',
-                       shape='point',
-                       style='invis',
-                       width='0',
-                       height='0')
-
+            if embed_dsc:
+                eddge_node_id = label_node_id
                 # Create visible label node (light gray, rounded box)
                 # Label uses fontsize=12 for all activities as specified
-                s.node(label_node_id,
-                       label=lbl,
-                       shape='box',
-                       style='filled,rounded',
-                       fillcolor='#f0f0f0',
-                       fontsize='12',
-                       margin='0.05,0.05')
+                dot.node(label_node_id,
+                         label=lbl,
+                         shape='box',
+                         style='filled,rounded',
+                         color=activity_style['color'],
+                         penwidth=activity_style['penwidth'],
+                         fillcolor='#f0f0f0',
+                         fontsize='12',
+                         margin='0.05,0.05')
+            else:
+                # Unique identifiers for auxiliary
+                invis_node_id = f"invis_{a.id}"
+                eddge_node_id = invis_node_id
+
+                with dot.subgraph() as s:
+                    s.attr(rank='same')
+                    s.attr(id=f'rank_{a.id}')  # Unique subgraph ID for this activity
+
+                    # Create invisible intermediate node (zero size, no label)
+                    s.node(invis_node_id,
+                           label='',
+                           shape='point',
+                           style='invis',
+                           color=activity_style['color'],
+                           penwidth=activity_style['penwidth'],
+                           width='0',
+                           height='0')
+
+                    # Create visible label node (light gray, rounded box)
+                    # Label uses fontsize=12 for all activities as specified
+                    s.node(label_node_id,
+                           label=lbl,
+                           shape='box',
+                           style='filled,rounded',
+                           color=activity_style['color'],
+                           penwidth=activity_style['penwidth'],
+                           fillcolor='#f0f0f0',
+                           fontsize='12',
+                           margin='0.05,0.05')
+
+                # Auxiliary edge: label node -> invisible node (dashed gray, no arrowhead)
+                # This attaches the label to the bend point without interfering with routing
+                # Weight for auxiliary edges is kept low (1) to not interfere with main layout
+                dot.edge(label_node_id, invis_node_id,
+                         style='dashed',
+                         color=activity_style['color'],
+                         weight='1',
+                         arrowhead='none')
 
             # Main edge: source -> invisible node (no arrowhead)
-            dot.edge(str(a.src.id), invis_node_id,
+            dot.edge(str(a.src.id), eddge_node_id,
                      style=edge_style,
                      color=activity_style['color'],
                      penwidth=activity_style['penwidth'],
@@ -1803,21 +1836,13 @@ class NetworkModel:
                      arrowhead='none')
 
             # Main edge: invisible node -> destination (with arrowhead)
-            dot.edge(invis_node_id, str(a.dst.id),
+            dot.edge(eddge_node_id, str(a.dst.id),
                      style=edge_style,
                      color=activity_style['color'],
                      penwidth=activity_style['penwidth'],
                      weight=activity_style['weight'],
                      arrowhead='normal')
 
-            # Auxiliary edge: label node -> invisible node (dashed gray, no arrowhead)
-            # This attaches the label to the bend point without interfering with routing
-            # Weight for auxiliary edges is kept low (1) to not interfere with main layout
-            dot.edge(label_node_id, invis_node_id,
-                     style='dashed',
-                     color='#606060',
-                     weight='1',
-                     arrowhead='none')
 
         # 3. Save to file if output path provided
         if output_path is not None:
