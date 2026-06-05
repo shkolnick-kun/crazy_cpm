@@ -32,4 +32,4 @@ management.
 
 from _ccpm import (make_aoa, make_full_map,
                    EINVAL, ELOOP, ENOMEM, ELIM, EUNK, OK)
-from .net_model import NetworkModel
+from .net_model import NetworkModel, mpert, fit_mpert
