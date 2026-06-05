@@ -99,7 +99,7 @@ VAR = 1  # Result variance estimation (used for PERT)
 ERR = 2  # Computation error upper limit
 
 #==============================================================================
-def fit_mpert(M, D, a, b):
+def fit_mpert(M, D, a, b, err):
     """
     Fit modified PERT distribution parameters to match mean and variance.
 
@@ -116,6 +116,9 @@ def fit_mpert(M, D, a, b):
         Optimistic (minimum) value
     b : float
         Pessimistic (maximum) value
+
+    err : float
+        M computation error, used as tolerance in fit procedure
 
     Returns
     -------
@@ -141,13 +144,19 @@ def fit_mpert(M, D, a, b):
     if not (a <= M <= b):
         raise ValueError(f"Mean ({M}) must be between optimistic ({a}) and pessimistic ({b})")
 
-    _tol = np.sqrt(EPS)
+    if err < 0.0:
+        raise ValueError(f"Invalid error ({err}) must be >= 0.0")
 
-    if b - a < 2 * _tol * (a + b):
+    if b - a <= 2 * EPS * b: # b - a must be big enough
         # This is the chain of deterministic processes, use M without g computation
         return M, None
 
-    _thr = _tol * (b - a)
+    # Calculate tolerance
+    # _thr must be > 2 * EPS * b, see ml and gmin calc
+    if err < 4 * EPS * b:
+        _thr = 4 * EPS * b
+    else:
+        _thr = err
 
     if np.sqrt(D) < _thr:
         # This is the chain of deterministic processes and D is computation error
@@ -162,10 +171,14 @@ def fit_mpert(M, D, a, b):
 
     # Compute g lower limit, make sure that ml is far from M enough
     if M < (a + b) / 2:
-        ml = a + _thr / 2
+        ml = a + _thr / 2 # (_thr / 2) must be > EPS * a
     else:
-        ml = b - _thr / 2
+        ml = b - _thr / 2 # (_thr / 2) must be > EPS * b
+
     # Now compute min safe g value
+    # We must limit gmin.
+    # Worst case is: gmin = (2 * (b - a - 2 * thr) / thr) < (2 * b / thr)
+    # _thr >= 4 * EPS * b guarantees that we won't get an overflow during division
     gmin = (a + b - 2 * M) / (M - ml)
 
     # Compute g, make sure that computed m will be in range of (a,b)
@@ -206,7 +219,7 @@ def _p_quantile_estimate(p, tm, optimistic, pessimistic):
     if s <= EPS * tm[RES]:
         return tm[RES]
 
-    mode, lambd = fit_mpert(tm[RES], tm[VAR], optimistic, pessimistic)
+    mode, lambd = fit_mpert(tm[RES], tm[VAR], optimistic, pessimistic, tm[ERR])
     if not lambd:
         return tm[RES]
 
@@ -241,7 +254,7 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
     if s <= EPS * tm[RES]:
         return 1.0 if val > tm[RES] else 0.0
 
-    mode, lambd = fit_mpert(tm[RES], tm[VAR], optimistic, pessimistic)
+    mode, lambd = fit_mpert(tm[RES], tm[VAR], optimistic, pessimistic, tm[ERR])
     if not lambd:
         return 1.0 if val > tm[RES] else 0.0
 
@@ -1287,9 +1300,17 @@ class NetworkModel:
             # Round off insignificant values
             r = e.late[RES] - e.early[RES]
             e.reserve[RES] = r if abs(r) > e.reserve[ERR] else 0.0
+
             # Check for programming errors
             if r < -e.reserve[ERR]:
                 raise RuntimeError("Events can not have negative time reserves!!!")
+
+            # Time params lower limit
+            if e.early[RES] < 0.0:
+                e.early[RES] = 0.0
+
+            if e.late[RES] < 0.0:
+                e.late[RES] = 0.0
 
         for a in self.activities:
             # Compute start and end reserve values separately
@@ -1314,6 +1335,19 @@ class NetworkModel:
             # Check for programming errors
             if r < -a.reserve[ERR]:
                 raise RuntimeError("Actions can not have negative time reserves!!!")
+
+            # Time params lower limit
+            if a.early_start[RES] < 0.0:
+                a.early_start[RES] = 0.0
+
+            if a.late_start[RES] < 0.0:
+                a.late_start[RES] = 0.0
+
+            if a.early_end[RES] < 0.0:
+                a.early_end[RES] = 0.0
+
+            if a.late_end[RES] < 0.0:
+                a.late_end[RES] = 0.0
 
         if self.is_pert:
             # For PERT models we must compute optimistic and pessimistic scenarios
@@ -1395,7 +1429,8 @@ class NetworkModel:
 
             # Compute shape parameter for modified PERT distribution
             _,g = fit_mpert(activity.expected[RES], activity.expected[VAR],
-                            activity.optimistic, activity.pessimistic)
+                            activity.optimistic, activity.pessimistic,
+                            activity.expected[ERR])
 
             if not g:
                 # Deterministic activity
