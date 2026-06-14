@@ -147,14 +147,16 @@ def fit_mpert(M, D, a, b, err):
     if err < 0.0:
         raise ValueError(f"Invalid error ({err}) must be >= 0.0")
 
-    if b - a <= 2 * EPS * b: # b - a must be big enough
+    ul = max(abs(a), abs(b))
+
+    if b - a <= 2 * EPS * ul: # b - a must be big enough
         # This is the chain of deterministic processes, use M without g computation
         return M, None
 
     # Calculate tolerance
-    # _thr must be > 2 * EPS * b, see ml and gmin calc
-    if err < 4 * EPS * b:
-        _thr = 4 * EPS * b
+    # (_thr / 2) must be >= 2 * EPS * ul, see ml and gmin calc
+    if err < 4 * EPS * ul:
+        _thr = 4 * EPS * ul
     else:
         _thr = err
 
@@ -177,8 +179,8 @@ def fit_mpert(M, D, a, b, err):
 
     # Now compute min safe g value
     # We must limit gmin.
-    # Worst case is: gmin = (2 * (b - a - 2 * thr) / thr) < (2 * b / thr)
-    # _thr >= 4 * EPS * b guarantees that we won't get an overflow during division
+    # Worst case is: gmin = (2 * (b - a - 2 * thr) / thr) < (2 * ul / thr)
+    # _thr >= 4 * EPS * ul guarantees that we won't get an overflow during division
     gmin = (a + b - 2 * M) / (M - ml)
 
     # Compute g, make sure that computed m will be in range of (a,b)
@@ -189,8 +191,8 @@ def fit_mpert(M, D, a, b, err):
     m = ((2 + g) * M - a - b) / g
 
     # Make sure that m is in range of (a,b) even in case of dramatic roundoff errors
-    m = m if m >= a else (a + _thr / 2)
-    m = m if m <= b else (b - _thr / 2)
+    m = m if m > a else (a + _thr / 2)
+    m = m if m < b else (b - _thr / 2)
 
     return m, g
 
