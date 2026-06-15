@@ -48,11 +48,9 @@ Basic usage with direct resource effort estimates:
 Advanced usage with resource-aware duration:
 
 >>> def resource_duration(effort, activity, base_time):
-...
 ...     # Calculate actual duration based on resource allocation
 ...     resource_count = 2  # Two people assigned
 ...     productivity = 0.8  # 80% productivity
-...
 ...     return effort / (resource_count * productivity)
 ...
 >>> model = NetworkModel(wbs, links=links, duration=resource_duration)
@@ -83,28 +81,30 @@ Advanced usage with resource-aware duration:
 """
 
 #==============================================================================
-from betapert import mpert
 import graphviz
 import numpy as np
 import pandas as pd
+import scipy
 
 import os
+
 import _ccpm
 
+# Machine epsilon
+EPS = np.finfo(float).eps
 
 # Constants for array indexing in time computations
-EPS = np.finfo(float).eps
 RES = 0  # Result of time computation
 VAR = 1  # Result variance estimation (used for PERT)
 ERR = 2  # Computation error upper limit
 
 #==============================================================================
-def fit_mpert(M, D, a, b, err):
+def fit_beta(M, D, a, b, err):
     """
-    Fit modified PERT distribution parameters to match mean and variance.
+    Fit modified beta distribution parameters to match mean and variance.
 
     This function calculates the most likely value and shape parameter
-    for a modified PERT distribution given target mean and variance.
+    for a beta distribution given target mean and variance.
 
     Parameters
     ----------
@@ -116,27 +116,18 @@ def fit_mpert(M, D, a, b, err):
         Optimistic (minimum) value
     b : float
         Pessimistic (maximum) value
-
     err : float
-        M computation error, used as tolerance in fit procedure
+        Computation error threshold (non-negative)
 
     Returns
     -------
     tuple
-        (m, g) where:
-        - m: most likely value
-        - g: shape parameter (None for deterministic case)
+        (alpha, beta) or (None, None) if distribution is deterministic
 
     Raises
     ------
     ValueError
         If invalid bounds are provided or mean is outside [a,b] range
-
-    Notes
-    -----
-    The modified PERT distribution uses the formula:
-    M = (a + g * m + b) / (2 + g)
-    D = (M - a) * (b - M) / (3 + g)
     """
     if a > b:
         raise ValueError(f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})")
@@ -149,52 +140,106 @@ def fit_mpert(M, D, a, b, err):
 
     ul = max(abs(a), abs(b))
 
-    if b - a <= 2 * EPS * ul: # b - a must be big enough
+    if b - a <= 2 * EPS * ul:  # b - a must be big enough
         # This is the chain of deterministic processes, use M without g computation
-        return M, None
+        return None, None
 
-    # Calculate tolerance
-    # (_thr / 2) must be >= 2 * EPS * ul, see ml and gmin calc
-    if err < 4 * EPS * ul:
-        _thr = 4 * EPS * ul
+    if err < 2 * EPS * ul:
+        _thr = 2 * EPS * ul
     else:
         _thr = err
 
     if np.sqrt(D) < _thr:
         # This is the chain of deterministic processes and D is computation error
-        return M, None
+        return None, None
 
-    # Make sure that M is in range of (a + _thr, b - _thr)
-    if (M - a) < _thr:
-        M = a + _thr
+    mu = (M - a) / (b - a)
+    var = D / (b - a) ** 2
 
-    if (b - M) < _thr:
-        M = b - _thr
+    ratio = mu * (1 - mu) / var
+    if ratio <= 1:
+        ratio = 1 + 2 * EPS
 
-    # Compute g lower limit, make sure that ml is far from M enough
-    if M < (a + b) / 2:
-        ml = a + _thr / 2 # (_thr / 2) must be > EPS * a
-    else:
-        ml = b - _thr / 2 # (_thr / 2) must be > EPS * b
+    alpha = mu * (ratio - 1)
+    beta = (1 - mu) * (ratio - 1)
 
-    # Now compute min safe g value
-    # We must limit gmin.
-    # Worst case is: gmin = (2 * (b - a - 2 * thr) / thr) < (2 * ul / thr)
-    # _thr >= 4 * EPS * ul guarantees that we won't get an overflow during division
-    gmin = (a + b - 2 * M) / (M - ml)
+    return alpha, beta
 
-    # Compute g, make sure that computed m will be in range of (a,b)
-    g = (M - a) * (b - M) / D - 3
-    g = g if g > gmin else gmin
+#==============================================================================
+def calc_ppf(p, M, D, a, b, err=0.0):
+    """
+    Calculate the quantile (percent point function) for a modified beta distribution.
 
-    # Compute m
-    m = ((2 + g) * M - a - b) / g
+    Parameters
+    ----------
+    p : float
+        Probability level (0 < p < 1)
+    M : float
+        Mean value
+    D : float
+        Variance
+    a : float
+        Optimistic (minimum) value
+    b : float
+        Pessimistic (maximum) value
+    err : float, optional
+        Computation error threshold (default 0.0)
 
-    # Make sure that m is in range of (a,b) even in case of dramatic roundoff errors
-    m = m if m > a else (a + _thr / 2)
-    m = m if m < b else (b - _thr / 2)
+    Returns
+    -------
+    float
+        Quantile estimate for the given probability
+    """
+    if np.sqrt(D) <= EPS * M:
+        return M
 
-    return m, g
+    alpha, beta = fit_beta(M, D, a, b, err)
+    if not alpha:
+        return M
+
+    estimate = scipy.stats.beta.ppf(p, alpha, beta)
+    if np.isnan(estimate):
+        return M
+
+    return a + (b - a) * estimate
+
+#==============================================================================
+def calc_cdf(val, M, D, a, b, err=0.0):
+    """
+    Calculate the cumulative distribution function for a modified beta distribution.
+
+    Parameters
+    ----------
+    val : float
+        Value at which to evaluate the CDF
+    M : float
+        Mean value
+    D : float
+        Variance
+    a : float
+        Optimistic (minimum) value
+    b : float
+        Pessimistic (maximum) value
+    err : float, optional
+        Computation error threshold (default 0.0)
+
+    Returns
+    -------
+    float
+        Probability P(X <= val)
+    """
+    if np.sqrt(D) <= EPS * M:
+        return 1.0 if val > M else 0.0
+
+    alpha, beta = fit_beta(M, D, a, b, err)
+    if not alpha:
+        return 1.0 if val > M else 0.0
+
+    prob = scipy.stats.beta.cdf((val - a) / (b - a), alpha, beta)
+    if np.isnan(prob):
+        return 0
+
+    return prob
 
 #==============================================================================
 def _p_quantile_estimate(p, tm, optimistic, pessimistic):
@@ -217,19 +262,7 @@ def _p_quantile_estimate(p, tm, optimistic, pessimistic):
     float
         Quantile estimate for the given probability
     """
-    s = np.sqrt(tm[VAR])
-    if s <= EPS * tm[RES]:
-        return tm[RES]
-
-    mode, lambd = fit_mpert(tm[RES], tm[VAR], optimistic, pessimistic, tm[ERR])
-    if not lambd:
-        return tm[RES]
-
-    estimate = mpert.ppf(p, optimistic, mode, pessimistic, lambd)
-    if np.isnan(estimate):
-        return tm[RES]
-
-    return estimate
+    return calc_ppf(p, tm[RES], tm[VAR], optimistic, pessimistic, err=tm[ERR])
 
 #==============================================================================
 def _prob_estimate(val, tm, optimistic, pessimistic):
@@ -252,18 +285,7 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
     float
         Probability P(tm < val)
     """
-    s = np.sqrt(tm[VAR])
-    if s <= EPS * tm[RES]:
-        return 1.0 if val > tm[RES] else 0.0
-
-    mode, lambd = fit_mpert(tm[RES], tm[VAR], optimistic, pessimistic, tm[ERR])
-    if not lambd:
-        return 1.0 if val > tm[RES] else 0.0
-
-    prob = mpert.cdf(val, optimistic, mode, pessimistic, lambd)
-    if np.isnan(prob):
-        return 0
-    return prob
+    return calc_cdf(val, tm[RES], tm[VAR], optimistic, pessimistic, err=tm[ERR])
 
 #==============================================================================
 def _choice(old, new, delta):
@@ -344,10 +366,8 @@ def _default_duration(effort, activity, base_time):
     >>> def custom_duration(effort, activity, base_time):
     ...     team_size = activity.data.get('team_size', 1)
     ...     productivity = activity.data.get('productivity', 1.0)
-    ...
     ...     # Calculate absolute duration
     ...     abs_duration = abs(effort) / (team_size * productivity)
-    ...
     ...     # Return with original sign
     ...     return abs_duration if effort >= 0 else -abs_duration
     """
@@ -379,7 +399,7 @@ class _Activity:
         Destination event of the activity
     expected : float
         Activity expected resource effort (mathematical expectation)
-    variance : float
+    exp_var : float
         Activity effort variance
     optimistic : float
         Optimistic effort estimate
@@ -501,8 +521,8 @@ class _Activity:
         """
         # Early duration calculation
         # Note:
-        # ealy_end[[RES,VAR]] == ealy_atsrt[[RES,VAR]] + early[[RES,VAR]]
-        early      = self.early_end - self.early_start
+        # early_end[[RES,VAR]] == early_start[[RES,VAR]] + early[[RES,VAR]]
+        early = self.early_end - self.early_start
         early[ERR] = self.early_end[ERR] + self.early_start[ERR]
 
         # Late duration calculation
@@ -510,9 +530,9 @@ class _Activity:
         # late_start[RES] == late_end[RES] - late[RES]
         # late_start[VAR] == late_end[VAR] + late[VAR]
         late = np.zeros_like(early)
-        late[RES] = self.late_end[RES]   - self.late_start[RES]
+        late[RES] = self.late_end[RES] - self.late_start[RES]
         late[VAR] = self.late_start[VAR] - self.late_end[VAR]
-        late[ERR] = self.late_end[ERR]   + self.late_start[ERR]
+        late[ERR] = self.late_end[ERR] + self.late_start[ERR]
 
         # Choose most certain estimate
         return _choice(early, late, late[RES] - early[RES])
@@ -631,9 +651,9 @@ class _Activity:
             ret['opt_start'] = self.opt_start     # Optimistic start time
             ret['opt_end'] = self.opt_end         # Optimistic end time
 
-            ret['pessimistic'] = self.pessimistic # Pessimistic effort
-            ret['pes_start'] = self.pes_start     # Pessimistic start time
-            ret['pes_end'] = self.pes_end         # Pessimistic end time
+            ret['pessimistic'] = self.pessimistic  # Pessimistic effort
+            ret['pes_start'] = self.pes_start      # Pessimistic start time
+            ret['pes_end'] = self.pes_end          # Pessimistic end time
 
             ret['early_start_var'] = self.early_start[VAR]
             ret['early_end_var'] = self.early_end[VAR]
@@ -801,7 +821,7 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
        variance = ((pessimistic - optimistic)/6)²
 
     2. **Two-point PERT**: Uses optimistic and pessimistic effort estimates
-       with formula: mean = (3 * optimistic + 2 * pessimistic)/5,
+       with formula: mean = (3*optimistic + 2*pessimistic)/5,
        variance = ((pessimistic - optimistic)/5)²
 
     3. **Direct parameters**: Uses directly provided expected and variance values
@@ -841,7 +861,7 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     >>> data = {'optimistic': 3, 'pessimistic': 8}
     >>> mean, var, a, m, b = _calculate_action_time_params(data)
     >>> print(f"Mean effort: {mean:.2f}, Variance: {var:.2f}")
-    Mean effort: 7.00, Variance: 1.00
+    Mean effort: 5.80, Variance: 1.00
 
     Direct parameters:
 
@@ -961,6 +981,8 @@ class NetworkModel:
         Probability level for PERT quantile estimates
     default_risk : float, default=0.3
         Default risk factor for effort estimation
+    next_act_id : int, default=1
+        Starting ID for automatically generated activities (used internally)
     debug : bool, default=False
         Enable debug mode to include computation error bounds
 
@@ -1008,10 +1030,8 @@ class NetworkModel:
     >>> def team_duration(effort, activity, base_time):
     ...     team_size = activity.data.get('team_size', 1)
     ...     productivity = activity.data.get('productivity', 1.0)
-    ...
     ...     # Calculate absolute duration
     ...     abs_duration = abs(effort) / (team_size * productivity)
-    ...
     ...     # Return with original sign
     ...     return abs_duration if effort >= 0 else -abs_duration
     ...
@@ -1138,6 +1158,8 @@ class NetworkModel:
             Destination activity IDs
         default_risk : float
             Default risk factor for effort estimation
+        next_act_id : int
+            Starting ID for automatically generated activities
 
         Notes
         -----
@@ -1164,7 +1186,7 @@ class NetworkModel:
         # Create activities (real and dummy)
         na = len(act_ids)  # Number of actions
         nd = 0  # Number of dummy actions
-        dsrc = [] # Dummy event sources
+        dsrc = []  # Dummy event sources
         for i in range(len(net_src)):
             if i < na:
                 # Real activity - get data from WBS
@@ -1356,7 +1378,6 @@ class NetworkModel:
             self._compute_target('optimistic')
             self._compute_target('pessimistic')
 
-
     def _compute_target(self, target=None):
         """
         Compute CPM parameters for events and activities.
@@ -1430,11 +1451,11 @@ class NetworkModel:
                 return dur
 
             # Compute shape parameter for modified PERT distribution
-            _,g = fit_mpert(activity.expected[RES], activity.expected[VAR],
-                            activity.optimistic, activity.pessimistic,
-                            activity.expected[ERR])
+            alpha, beta = fit_beta(activity.expected[RES], activity.expected[VAR],
+                                   activity.optimistic, activity.pessimistic,
+                                   activity.expected[ERR])
 
-            if not g:
+            if not alpha:
                 # Deterministic activity
                 return dur
 
@@ -1446,20 +1467,16 @@ class NetworkModel:
             # without time-based constraints
             if effort[RES] >= 0.:
                 # Forward pass: use positive effort values
-                opt_dur  = self._duration(activity.optimistic,  activity, base_time[RES])
-                pess_dur = self._duration(activity.pessimistic, activity, base_time[RES])
+                a = self._duration(activity.optimistic, activity, base_time[RES])
+                b = self._duration(activity.pessimistic, activity, base_time[RES])
             else:
                 # Backward pass: use negative effort values
-                opt_dur  = self._duration( -activity.optimistic,  activity, base_time[RES])
-                pess_dur = self._duration( -activity.pessimistic, activity, base_time[RES])
+                a = self._duration(-activity.optimistic, activity, base_time[RES])
+                b = self._duration(-activity.pessimistic, activity, base_time[RES])
 
-            # Use modified PERT formula for variance calculation:
-            # D = (M - a) * (b - M) / (3 + g)
-            # Note:
-            # We don't care positive or negative values here as
-            # sign(dur[RES]) == sign(opt_dur) == sign(pess_dur)
-            # and so numerator is allways positive
-            dur[VAR] = (dur[RES] - opt_dur) * (pess_dur - dur[RES]) / (3 + g)
+            # Use beta-distribution formula for variance calculation:
+            var_beta = alpha * beta / (alpha + beta + 1) / ((alpha + beta) ** 2)
+            dur[VAR] = var_beta * ((b - a) ** 2)
 
             return dur
 
@@ -1694,6 +1711,9 @@ class NetworkModel:
         group_by_stage : bool, default=False
             If True, events are grouped into "layers" by their topological order (stage).
             If False, events are placed freely by Graphviz default layout.
+        embed_dsc : bool, default=False
+            If True, activity labels are embedded directly on edges (simpler layout).
+            If False, an invisible intermediate node is used for label placement.
 
         Returns
         -------
@@ -1812,7 +1832,7 @@ class NetworkModel:
 
             # Create a subgraph to force same rank for invisible and label nodes
             if embed_dsc:
-                eddge_node_id = label_node_id
+                edge_node_id = label_node_id
                 # Create visible label node (light gray, rounded box)
                 # Label uses fontsize=12 for all activities as specified
                 dot.node(label_node_id,
@@ -1827,7 +1847,7 @@ class NetworkModel:
             else:
                 # Unique identifiers for auxiliary
                 invis_node_id = f"invis_{a.id}"
-                eddge_node_id = invis_node_id
+                edge_node_id = invis_node_id
 
                 with dot.subgraph() as s:
                     s.attr(rank='same')
@@ -1865,7 +1885,7 @@ class NetworkModel:
                          arrowhead='none')
 
             # Main edge: source -> invisible node (no arrowhead)
-            dot.edge(str(a.src.id), eddge_node_id,
+            dot.edge(str(a.src.id), edge_node_id,
                      style=edge_style,
                      color=activity_style['color'],
                      penwidth=activity_style['penwidth'],
@@ -1873,13 +1893,12 @@ class NetworkModel:
                      arrowhead='none')
 
             # Main edge: invisible node -> destination (with arrowhead)
-            dot.edge(eddge_node_id, str(a.dst.id),
+            dot.edge(edge_node_id, str(a.dst.id),
                      style=edge_style,
                      color=activity_style['color'],
                      penwidth=activity_style['penwidth'],
                      weight=activity_style['weight'],
                      arrowhead='normal')
-
 
         # 3. Save to file if output path provided
         if output_path is not None:
