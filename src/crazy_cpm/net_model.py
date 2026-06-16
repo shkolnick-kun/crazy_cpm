@@ -186,6 +186,11 @@ def calc_ppf(p, M, D, a, b, err=0.0):
     -------
     float
         Quantile estimate for the given probability
+
+    Raises
+    ------
+    ValueError
+        If `fit_beta` raises an error due to invalid bounds or parameters.
     """
     if np.sqrt(D) <= EPS * M:
         return M
@@ -224,6 +229,11 @@ def calc_cdf(val, M, D, a, b, err=0.0):
     -------
     float
         Probability P(X <= val)
+
+    Raises
+    ------
+    ValueError
+        If `fit_beta` raises an error due to invalid bounds or parameters.
     """
     if np.sqrt(D) <= EPS * M:
         return 1.0 if val > M else 0.0
@@ -258,6 +268,11 @@ def _p_quantile_estimate(p, tm, optimistic, pessimistic):
     -------
     float
         Quantile estimate for the given probability
+
+    Raises
+    ------
+    ValueError
+        If `calc_ppf` raises an error due to invalid parameters.
     """
     return calc_ppf(p, tm[RES], tm[VAR], optimistic, pessimistic, err=tm[ERR])
 
@@ -281,6 +296,11 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
     -------
     float
         Probability P(tm < val)
+
+    Raises
+    ------
+    ValueError
+        If `calc_cdf` raises an error due to invalid parameters.
     """
     return calc_cdf(val, tm[RES], tm[VAR], optimistic, pessimistic, err=tm[ERR])
 
@@ -299,7 +319,8 @@ def _choice(old, new, delta):
     new : numpy.ndarray
         New time estimate [value, variance, error_bound]
     delta : float
-        Difference threshold for decision making
+        Difference between the new and old estimates (new[RES] - old[RES]).
+        Used to decide which estimate is more certain.
 
     Returns
     -------
@@ -387,7 +408,12 @@ def _default_style(res, prob_crit, prob_thr):
     Returns
     -------
     dict
-        Dictionary with styling attributes for Graphviz
+        Dictionary with styling attributes for Graphviz.
+        Contains the following keys:
+            - ``color``: string with CSS color (e.g., '#ff0000', '#ffa000', '#000000')
+            - ``penwidth``: string with line width (e.g., '4', '3', '2')
+            - ``fontsize``: string with font size (e.g., '16', '14')
+            - ``weight``: string with edge weight for Graphviz (e.g., '3', '2', '1')
     """
     if abs(res[RES]) <= res[ERR]:
         # Critical path element
@@ -493,6 +519,13 @@ class _Activity:
     - Resource effort arrays follow the format: [RES (value), VAR (variance), ERR (error bound)]
     - Duration is calculated dynamically considering resource allocation and availability
     - The ``duration`` property computes actual time from early and late time analyses
+
+    Raises
+    ------
+    TypeError
+        If any argument has an incorrect type.
+    ValueError
+        If `expected` or `exp_var` is negative, or if `data` is not a dict when provided.
     """
 
     def __init__(self, id, wbs_id, letter, model, src, dst, expected=0.0,
@@ -756,6 +789,11 @@ class _Event:
         Optimistic time estimate
     pessimistic : float
         Pessimistic time estimate
+
+    Raises
+    ------
+    TypeError
+        If `id` is not an integer or `model` is not a NetworkModel instance.
     """
 
     def __init__(self, id, model):
@@ -1196,10 +1234,10 @@ class NetworkModel:
 
         Raises
         ------
-        ValueError
-            If links format is invalid or insufficient data provided
         TypeError
-            If input types are not as expected.
+            If any input is not an iterable or cannot be converted to a list.
+        ValueError
+            If link data is insufficient, lengths mismatch, or format is unsupported.
         """
         # Case 1: Old format (lnk_src and lnk_dst provided)
         if lnk_src is not None and lnk_dst is not None:
@@ -1426,7 +1464,8 @@ class NetworkModel:
         Raises
         ------
         RuntimeError
-            If reserves become negative (programming error).
+            If any event or activity has a negative time reserve,
+            indicating a programming error or corrupted network.
 
         Notes
         -----
@@ -1714,7 +1753,14 @@ class NetworkModel:
                 break
 
     def _add_event(self, i):
-        """Add a new event to the network."""
+        """
+        Add a new event to the network.
+
+        Parameters
+        ----------
+        i : int
+            Unique event identifier (positive integer).
+        """
         self.events.append(_Event(i, self))
 
     def _add_activity(self, wbs_id, src_id, dst_id, expected, exp_var,
