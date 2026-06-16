@@ -21,6 +21,10 @@ Constants:
     ENOMEM: Memory allocation failure
     ELOOP: Circular dependency detected in network
 
+Exceptions:
+    ValueError: If input data is invalid (types, ranges, or lengths).
+    RuntimeError: If C library returns an error code.
+
 """
 ###############################################################################
 """
@@ -49,6 +53,8 @@ Constants:
 
 from libc cimport stdint
 from libcpp cimport bool
+import numpy as np
+cimport numpy as cnp
 
 ctypedef stdint.uint8_t  _uint8_t
 ctypedef stdint.uint16_t _uint16_t
@@ -80,9 +86,6 @@ cdef extern from "ccpm.c":
                                          _uint8_t  * full_dep_map
                                          )
 
-import  numpy as np
-cimport numpy as cnp
-
 # Define constants
 OK     = CCPM_OK
 EINVAL = CCPM_EINVAL
@@ -91,29 +94,59 @@ ELOOP  = CCPM_ELOOP
 ELIM   = CCPM_ELIM
 EUNK   = CCPM_EUNK
 
+# Helper to validate iterable of integers
+def _validate_int_iterable(iterable, name):
+    """Check that iterable is a sequence of non-negative integers < 65536."""
+    if not hasattr(iterable, '__len__') and not hasattr(iterable, '__iter__'):
+        raise TypeError(f"'{name}' must be an iterable, got {type(iterable)}")
+    for idx, val in enumerate(iterable):
+        if val < 0:
+            raise ValueError(f"Element {idx} of '{name}' is negative ({val})")
+        if val > 65535:
+            raise ValueError(f"Element {idx} of '{name}' exceeds uint16 limit ({val} > 65535)")
+    return True
+
 ###############################################################################
 def make_aoa(act_ids, lnk_src, lnk_dst):
     """
     Cython wrapper for ccpm_make_aoa - converts Python lists to C arrays and back
 
     Args:
-        act_ids: List of activity IDs
-        lnk_src: List of link sources
-        lnk_dst: List of link destinations
+        act_ids: List of activity IDs (non‑negative integers < 65536)
+        lnk_src: List of link source activity IDs (non‑negative integers < 65536)
+        lnk_dst: List of link destination activity IDs (non‑negative integers < 65536)
 
     Returns:
-        tuple: (status_code, status_message, act_ids, act_src, act_dst)
+        tuple: (status_code, act_ids, act_src, act_dst)
         where:
-          status_code: integer status code (0 = success)
-          status_message: human-readable status description
-          act_ids: resulting activity IDs
-          act_src: resulting activity source events
-          act_dst: resulting activity destination events
+          status_code: integer status code (0 = success) — unused, errors raise exception
+          act_ids: resulting activity IDs (same as input but may be reordered)
+          act_src: resulting activity source event IDs
+          act_dst: resulting activity destination event IDs
+
+    Raises:
+        TypeError: If any input is not an iterable or contains non‑integer elements.
+        ValueError: If element values are out of range (negative or > 65535)
+                    or if lnk_src and lnk_dst have different lengths.
+        RuntimeError: If the C library returns an error (e.g., circular dependency).
+
+    .. note::
+        The C function may also return error codes for memory allocation failure
+        or loop detection; these are translated into RuntimeError with a
+        descriptive message.
     """
+    # Input validation
+    _validate_int_iterable(act_ids, "act_ids")
+    _validate_int_iterable(lnk_src, "lnk_src")
+    _validate_int_iterable(lnk_dst, "lnk_dst")
+
     cdef size_t n_act = len(act_ids)
     cdef size_t n_lnk = len(lnk_src)
+    if len(lnk_dst) != n_lnk:
+        raise ValueError(f"lnk_src and lnk_dst must have same length, got {n_lnk} and {len(lnk_dst)}")
+
     cdef size_t n_max = n_act + (n_lnk if n_lnk > n_act else n_act)
-    cdef size_t n_lnk_plus = n_lnk if n_lnk > 0 else 1 #  Zero links is valid case!!!
+    cdef size_t n_lnk_plus = n_lnk if n_lnk > 0 else 1 # Zero links is valid case
 
     # Create buffer arrays
     act_ids_arr = np.zeros(n_max + 1, dtype=np.uint16)
@@ -154,7 +187,6 @@ def make_aoa(act_ids, lnk_src, lnk_dst):
 
     py_act_src = []
     py_act_dst = []
-
     for i in range(act_src_arr[0]):
         py_act_src.append(act_src_arr[i + 1])
         py_act_dst.append(act_dst_arr[i + 1])
@@ -167,19 +199,32 @@ def make_full_map(act_ids, lnk_src, lnk_dst):
     Build full dependency map for activities
 
     Args:
-        act_ids: List of activity IDs
-        lnk_src: List of link sources
-        lnk_dst: List of link destinations
+        act_ids: List of activity IDs (non‑negative integers < 65536)
+        lnk_src: List of link source activity IDs (non‑negative integers < 65536)
+        lnk_dst: List of link destination activity IDs (non‑negative integers < 65536)
 
     Returns:
-        tuple: (status_code, status_message, full_dep_map)
+        tuple: (status_code, full_dep_map)
         where:
-          status_code: integer status code (0 = success)
-          status_message: human-readable status description
+          status_code: integer status code (0 = success) — unused, errors raise exception
           full_dep_map: 2D numpy array with dtype=bool representing the full dependency matrix
+
+    Raises:
+        TypeError: If any input is not an iterable or contains non‑integer elements.
+        ValueError: If element values are out of range (negative or > 65535)
+                    or if lnk_src and lnk_dst have different lengths.
+        RuntimeError: If the C library returns an error (e.g., circular dependency).
     """
+    # Input validation
+    _validate_int_iterable(act_ids, "act_ids")
+    _validate_int_iterable(lnk_src, "lnk_src")
+    _validate_int_iterable(lnk_dst, "lnk_dst")
+
     cdef size_t n_act = len(act_ids)
     cdef size_t n_lnk = len(lnk_src)
+    if len(lnk_dst) != n_lnk:
+        raise ValueError(f"lnk_src and lnk_dst must have same length, got {n_lnk} and {len(lnk_dst)}")
+
     cdef size_t n_max = n_act
 
     # Create buffer arrays
@@ -215,7 +260,7 @@ def make_full_map(act_ids, lnk_src, lnk_dst):
                                                   &full_dep_map_view[0]
                                                   )
 
-    # Конвертируем результат в numpy bool array
+    # Convert result to numpy bool array using explicit loops (as requested)
     full_dep_map_np = np.zeros((n_act, n_act), dtype=np.bool_)
     for i in range(n_act):
         for j in range(n_act):

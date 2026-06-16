@@ -85,7 +85,6 @@ import graphviz
 import numpy as np
 import pandas as pd
 import scipy
-
 import os
 
 import _ccpm
@@ -127,19 +126,17 @@ def fit_beta(M, D, a, b, err):
     Raises
     ------
     ValueError
-        If invalid bounds are provided or mean is outside [a,b] range
+        If invalid bounds are provided or mean is outside [a,b] range,
+        or if error is negative.
     """
     if a > b:
         raise ValueError(f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})")
-
     if not (a <= M <= b):
         raise ValueError(f"Mean ({M}) must be between optimistic ({a}) and pessimistic ({b})")
-
     if err < 0.0:
         raise ValueError(f"Invalid error ({err}) must be >= 0.0")
 
     ul = max(abs(a), abs(b))
-
     if b - a <= 2 * EPS * ul:  # b - a must be big enough
         # This is the chain of deterministic processes, use M without g computation
         return None, None
@@ -500,16 +497,29 @@ class _Activity:
 
     def __init__(self, id, wbs_id, letter, model, src, dst, expected=0.0,
                  exp_var=0.0, optimistic=0.0, pessimistic=0.0, data=None):
-        assert isinstance(id, int)
-        assert isinstance(wbs_id, int)
-        assert isinstance(letter, str)
-        assert isinstance(model, NetworkModel)
-        assert isinstance(src, _Event)
-        assert isinstance(dst, _Event)
-        assert isinstance(expected, float)
-        assert expected >= 0.0
-        assert exp_var >= 0.0
-        assert data is None or isinstance(data, dict)
+        # Validate types and values (explicit checks instead of asserts)
+        if not isinstance(id, int):
+            raise TypeError(f"id must be int, got {type(id)}")
+        if not isinstance(wbs_id, int):
+            raise TypeError(f"wbs_id must be int, got {type(wbs_id)}")
+        if not isinstance(letter, str):
+            raise TypeError(f"letter must be str, got {type(letter)}")
+        if not isinstance(model, NetworkModel):
+            raise TypeError(f"model must be NetworkModel, got {type(model)}")
+        if not isinstance(src, _Event):
+            raise TypeError(f"src must be _Event, got {type(src)}")
+        if not isinstance(dst, _Event):
+            raise TypeError(f"dst must be _Event, got {type(dst)}")
+        if not isinstance(expected, float):
+            raise TypeError(f"expected must be float, got {type(expected)}")
+        if expected < 0.0:
+            raise ValueError(f"expected effort must be non-negative, got {expected}")
+        if not isinstance(exp_var, float):
+            raise TypeError(f"exp_var must be float, got {type(exp_var)}")
+        if exp_var < 0.0:
+            raise ValueError(f"variance must be non-negative, got {exp_var}")
+        if data is not None and not isinstance(data, dict):
+            raise TypeError(f"data must be dict or None, got {type(data)}")
 
         self.id = id
         self.wbs_id = wbs_id
@@ -749,8 +759,10 @@ class _Event:
     """
 
     def __init__(self, id, model):
-        assert isinstance(id, int)
-        assert isinstance(model, NetworkModel)
+        if not isinstance(id, int):
+            raise TypeError(f"id must be int, got {type(id)}")
+        if not isinstance(model, NetworkModel):
+            raise TypeError(f"model must be NetworkModel, got {type(model)}")
 
         self.id = id
         self.model = model
@@ -888,6 +900,7 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     ------
     ValueError
         If insufficient data is provided or estimates are invalid
+        (e.g., optimistic > most_likely > pessimistic not satisfied).
 
     Examples
     --------
@@ -912,6 +925,11 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     >>> print(f"Mean effort: {mean:.2f}, Variance: {var:.2f}")
     Mean effort: 6.50, Variance: 0.50
     """
+    if not isinstance(work_data, dict):
+        raise TypeError(f"work_data must be dict, got {type(work_data)}")
+    if not isinstance(default_risk, float) or default_risk < 0.0 or default_risk > 1.0:
+        raise ValueError(f"default_risk must be a float between 0 and 1, got {default_risk}")
+
     # 1. Check for three-point PERT estimation (highest priority)
     if all(key in work_data for key in ['optimistic', 'most_likely', 'pessimistic']):
         a = work_data['optimistic']
@@ -1031,9 +1049,12 @@ class NetworkModel:
     Raises
     ------
     ValueError
-        If insufficient link data is provided or links format is invalid
-    AssertionError
-        If network construction fails
+        If insufficient link data is provided or links format is invalid,
+        or if network construction fails (e.g., circular dependencies).
+    TypeError
+        If input types are incorrect.
+    RuntimeError
+        If internal network consistency checks fail.
 
     Attributes
     ----------
@@ -1102,7 +1123,32 @@ class NetworkModel:
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
                  duration=_default_duration, p=0.95, default_risk=0.3,
                  next_act_id=1, debug=False):
-        assert isinstance(wbs_dict, dict)
+        # Validate wbs_dict
+        if not isinstance(wbs_dict, dict):
+            raise TypeError(f"wbs_dict must be dict, got {type(wbs_dict)}")
+        if not wbs_dict:
+            raise ValueError("wbs_dict cannot be empty")
+        # Validate each key/value
+        for act_id, act_data in wbs_dict.items():
+            if not isinstance(act_id, int):
+                raise TypeError(f"Activity ID must be int, got {type(act_id)} for key {act_id}")
+            if not isinstance(act_data, dict):
+                raise TypeError(f"Activity data must be dict, got {type(act_data)} for activity {act_id}")
+            if 'letter' not in act_data:
+                raise ValueError(f"Activity {act_id} missing required 'letter' field")
+            if not isinstance(act_data['letter'], str):
+                raise TypeError(f"Activity {act_id} 'letter' must be str, got {type(act_data['letter'])}")
+
+        if not callable(duration):
+            raise TypeError(f"duration must be callable, got {type(duration)}")
+        if not isinstance(p, float) or not (0.0 < p < 1.0):
+            raise ValueError(f"p must be float between 0 and 1, got {p}")
+        if not isinstance(default_risk, float) or default_risk < 0.0 or default_risk > 1.0:
+            raise ValueError(f"default_risk must be float between 0 and 1, got {default_risk}")
+        if not isinstance(next_act_id, int) or next_act_id < 1:
+            raise ValueError(f"next_act_id must be positive int, got {next_act_id}")
+        if not isinstance(debug, bool):
+            raise TypeError(f"debug must be bool, got {type(debug)}")
 
         self.debug = debug
         self.is_pert = False
@@ -1114,7 +1160,10 @@ class NetworkModel:
 
         # Create network model
         self._create_model(wbs_dict, lnk_src, lnk_dst, default_risk, next_act_id)
-        assert 0 < len(self.events)
+
+        # After _create_model, events must be non-empty
+        if len(self.events) == 0:
+            raise RuntimeError("Network construction resulted in no events. Check input data.")
 
         # Compute stages of project
         self._compute_target('stage')
@@ -1149,10 +1198,20 @@ class NetworkModel:
         ------
         ValueError
             If links format is invalid or insufficient data provided
+        TypeError
+            If input types are not as expected.
         """
         # Case 1: Old format (lnk_src and lnk_dst provided)
         if lnk_src is not None and lnk_dst is not None:
-            return list(lnk_src), list(lnk_dst)
+            # They must be iterables
+            try:
+                src_list = list(lnk_src)
+                dst_list = list(lnk_dst)
+            except TypeError as e:
+                raise TypeError(f"lnk_src and lnk_dst must be iterable, got {type(lnk_src)} and {type(lnk_dst)}") from e
+            if len(src_list) != len(dst_list):
+                raise ValueError(f"lnk_src and lnk_dst must have same length, got {len(src_list)} and {len(dst_list)}")
+            return src_list, dst_list
 
         # Case 2: New formats via links parameter
         if links is None:
@@ -1162,21 +1221,38 @@ class NetworkModel:
         if (isinstance(links, (list, tuple)) and len(links) == 2 and
                 isinstance(links[0], (list, tuple, np.ndarray)) and
                 isinstance(links[1], (list, tuple, np.ndarray))):
-            return list(links[0]), list(links[1])
+            try:
+                src_list = list(links[0])
+                dst_list = list(links[1])
+            except TypeError as e:
+                raise TypeError("Could not convert links rows to lists") from e
+            if len(src_list) != len(dst_list):
+                raise ValueError(f"Two-row links: source and destination rows must have same length, got {len(src_list)} and {len(dst_list)}")
+            return src_list, dst_list
 
         # Format 2: Two columns [[src, dst], [src, dst], ...]
         elif (isinstance(links, (list, tuple, np.ndarray)) and
               len(links) > 0 and
               isinstance(links[0], (list, tuple, np.ndarray)) and
               len(links[0]) == 2):
-            src_list = [item[0] for item in links]
-            dst_list = [item[1] for item in links]
+            try:
+                src_list = [item[0] for item in links]
+                dst_list = [item[1] for item in links]
+            except Exception as e:
+                raise ValueError("Invalid two-column links format") from e
             return src_list, dst_list
 
         # Format 3: Dictionary {'src': [...], 'dst': [...]}
         elif isinstance(links, dict):
             if 'src' in links and 'dst' in links:
-                return list(links['src']), list(links['dst'])
+                try:
+                    src_list = list(links['src'])
+                    dst_list = list(links['dst'])
+                except TypeError as e:
+                    raise TypeError("Dictionary links 'src' and 'dst' must be iterable") from e
+                if len(src_list) != len(dst_list):
+                    raise ValueError(f"Dictionary links: 'src' and 'dst' must have same length, got {len(src_list)} and {len(dst_list)}")
+                return src_list, dst_list
             else:
                 raise ValueError("Dictionary links must contain 'src' and 'dst' keys")
 
@@ -1203,26 +1279,34 @@ class NetworkModel:
         next_act_id : int
             Starting ID for automatically generated activities
 
-        Notes
-        -----
-        This method uses the C++ extension _ccpm for efficient AOA
-        (Activity-on-Arrow) network generation and automatically creates
-        dummy activities where needed.
+        Raises
+        ------
+        ValueError
+            If any activity data is invalid or links contain invalid IDs.
+        RuntimeError
+            If C library returns an error or network consistency fails.
         """
-        assert len(lnk_src) == len(lnk_dst)
+        # Validate link lengths
+        if len(lnk_src) != len(lnk_dst):
+            raise ValueError(f"lnk_src and lnk_dst must have same length, got {len(lnk_src)} and {len(lnk_dst)}")
 
         act_ids = list(wbs_dict.keys())
 
         # Generate network graph using C extension
         status, act_ids, net_src, net_dst = _ccpm.make_aoa(act_ids, lnk_src, lnk_dst)
-        assert _ccpm.OK == status
+        if status != _ccpm.OK:
+            # Should not happen because make_aoa raises on error, but keep for safety
+            raise RuntimeError(f"Network generation failed with status {status}")
 
         self.events = []
         self.next_act = next_act_id
         self.activities = []
 
         # Create events
-        for i in range(np.max(net_dst)):
+        if len(net_dst) == 0:
+            raise RuntimeError("No destination events generated. Check input links.")
+        max_event = max(net_dst)
+        for i in range(max_event):
             self._add_event(int(i + 1))
 
         # Create activities (real and dummy)
@@ -1233,14 +1317,16 @@ class NetworkModel:
             if i < na:
                 # Real activity - get data from WBS
                 act_id = act_ids[i]
-                wbs_data = wbs_dict[act_id]  # Get complete WBS data
+                wbs_data = wbs_dict.get(act_id)
+                if wbs_data is None:
+                    raise ValueError(f"Activity ID {act_id} not found in wbs_dict")
 
                 # Calculate expected effort and variance using unified function
                 try:
                     expected, exp_var, optimistic, _, pessimistic = \
                         _calculate_action_time_params(wbs_data, default_risk)
                 except ValueError as e:
-                    raise ValueError(f"Error processing activity {act_id} ({wbs_data.get('letter', 'unknown')}): {e}")
+                    raise ValueError(f"Error processing activity {act_id} ({wbs_data.get('letter', 'unknown')}): {e}") from e
 
                 letter = wbs_data.get('letter', '')
 
@@ -1337,6 +1423,11 @@ class NetworkModel:
         backward pass (late times) through the network, then calculates
         time reserves for both events and activities.
 
+        Raises
+        ------
+        RuntimeError
+            If reserves become negative (programming error).
+
         Notes
         -----
         The computation is performed in two phases:
@@ -1369,7 +1460,7 @@ class NetworkModel:
 
             # Check for programming errors
             if r < -e.reserve[ERR]:
-                raise RuntimeError("Events can not have negative time reserves!!!")
+                raise RuntimeError(f"Event {e.id} has negative time reserve ({r})")
 
             # Time params lower limit
             if e.early[RES] < 0.0:
@@ -1400,7 +1491,7 @@ class NetworkModel:
 
             # Check for programming errors
             if r < -a.reserve[ERR]:
-                raise RuntimeError("Actions can not have negative time reserves!!!")
+                raise RuntimeError(f"Activity {a.id} has negative time reserve ({r})")
 
             # Time params lower limit
             if a.early_start[RES] < 0.0:
@@ -1435,7 +1526,9 @@ class NetworkModel:
         Raises
         ------
         ValueError
-            If target parameter is invalid
+            If target parameter is invalid.
+        RuntimeError
+            If network has more than one starting event or contains cycles.
 
         Notes
         -----
@@ -1572,7 +1665,7 @@ class NetworkModel:
             delta = lambda a: a.pessimistic
             process_delta = self._duration
         else:
-            raise ValueError("Unknown 'target' value!!!")
+            raise ValueError(f"Unknown 'target' value: {target}")
 
         # Initialize activity parameters and processing function
         if target != 'stage':
@@ -1587,7 +1680,7 @@ class NetworkModel:
         evt = [i for i, n in enumerate(n_dep) if 0 == n]
         # Check for programming errors
         if 1 != len(evt):
-            raise RuntimeError("The project can not have more than one starting event!!!")
+            raise RuntimeError(f"The project must have exactly one starting event, but found {len(evt)}")
 
         # Process events in topological order
         i = 0
@@ -1649,16 +1742,36 @@ class NetworkModel:
             Activity letter/code for visualization
         data : dict
             WBS data excluding fields stored as separate attributes
+
+        Raises
+        ------
+        TypeError
+            If arguments have wrong types.
+        ValueError
+            If expected values are invalid (e.g., negative).
         """
-        assert isinstance(wbs_id, int)
-        assert isinstance(src_id, int)
-        assert isinstance(dst_id, int)
-        assert isinstance(expected, float)
-        assert isinstance(exp_var, float)
-        assert isinstance(optimistic, float)
-        assert isinstance(pessimistic, float)
-        assert isinstance(letter, str)
-        assert isinstance(data, dict)
+        if not isinstance(wbs_id, int):
+            raise TypeError(f"wbs_id must be int, got {type(wbs_id)}")
+        if not isinstance(src_id, int):
+            raise TypeError(f"src_id must be int, got {type(src_id)}")
+        if not isinstance(dst_id, int):
+            raise TypeError(f"dst_id must be int, got {type(dst_id)}")
+        if not isinstance(expected, float):
+            raise TypeError(f"expected must be float, got {type(expected)}")
+        if expected < 0.0:
+            raise ValueError(f"expected must be non-negative, got {expected}")
+        if not isinstance(exp_var, float):
+            raise TypeError(f"exp_var must be float, got {type(exp_var)}")
+        if exp_var < 0.0:
+            raise ValueError(f"exp_var must be non-negative, got {exp_var}")
+        if not isinstance(optimistic, float):
+            raise TypeError(f"optimistic must be float, got {type(optimistic)}")
+        if not isinstance(pessimistic, float):
+            raise TypeError(f"pessimistic must be float, got {type(pessimistic)}")
+        if not isinstance(letter, str):
+            raise TypeError(f"letter must be str, got {type(letter)}")
+        if not isinstance(data, dict):
+            raise TypeError(f"data must be dict, got {type(data)}")
 
         act = _Activity(self.next_act, wbs_id, letter, self,
                         self.events[src_id - 1], self.events[dst_id - 1],
@@ -1762,6 +1875,11 @@ class NetworkModel:
         graphviz.Digraph
             Graphviz object for rendering or saving.
 
+        Raises
+        ------
+        TypeError
+            If get_style is not callable.
+
         Notes
         -----
         The visualization shows:
@@ -1779,7 +1897,7 @@ class NetworkModel:
         for large networks.
         """
         if not callable(get_style):
-            raise TypeError(f"Parameter get_stype ({get_style}) must be callable!")
+            raise TypeError(f"Parameter get_style must be callable, got {type(get_style)}")
 
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style': 'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
