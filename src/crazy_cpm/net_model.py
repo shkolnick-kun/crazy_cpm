@@ -376,6 +376,48 @@ def _default_duration(effort, activity, base_time):
     return effort
 
 #==============================================================================
+def _default_style(res, prob_crit, prob_thr):
+    """
+    Determine styling (color, penwidth, fontsize, weight) based on criticality.
+
+    Parameters
+    ----------
+    res : numpy.ndarray
+        Time reserve array [value, variance, error_bound]
+    prob_crit : float
+        Probability that the element is on critical path
+
+    Returns
+    -------
+    dict
+        Dictionary with styling attributes for Graphviz
+    """
+    if abs(res[RES]) <= res[ERR]:
+        # Critical path element
+        return {
+            'color': '#ff0000',
+            'penwidth': '4',
+            'fontsize': '16',
+            'weight': '3'
+        }
+    elif prob_crit < prob_thr:
+        # Sub-critical element (may consume reserve)
+        return {
+            'color': '#ffa000',
+            'penwidth': '3',
+            'fontsize': '16',
+            'weight': '2'
+        }
+    else:
+        # Non-critical element
+        return {
+            'color': '#000000',
+            'penwidth': '2',
+            'fontsize': '14',
+            'weight': '1'
+        }
+
+#==============================================================================
 class _Activity:
     """
     Represents an activity (task) in the network model.
@@ -1699,7 +1741,7 @@ class NetworkModel:
 
         return activities_df, events_df
 
-    def viz(self, output_path=None, group_by_stage=False, embed_dsc=False):
+    def viz(self, output_path=None, group_by_stage=False, embed_dsc=False, get_style=_default_style):
         """
         Create Graphviz visualization of the CPM/PERT network.
 
@@ -1736,54 +1778,16 @@ class NetworkModel:
         by clustering events with the same stage together, improving readability
         for large networks.
         """
+        if not callable(get_style):
+            raise TypeError(f"Parameter get_stype ({get_style}) must be callable!")
+
         dot = graphviz.Digraph(node_attr={'shape': 'record', 'style': 'rounded'})
         dot.graph_attr['rankdir'] = 'LR'
         dot.graph_attr['splines'] = 'polyline'
 
-        def _get_style(res, prob_crit):
-            """
-            Determine styling (color, penwidth, fontsize, weight) based on criticality.
-
-            Parameters
-            ----------
-            res : numpy.ndarray
-                Time reserve array [value, variance, error_bound]
-            prob_crit : float
-                Probability that the element is on critical path
-
-            Returns
-            -------
-            dict
-                Dictionary with styling attributes for Graphviz
-            """
-            if abs(res[RES]) <= res[ERR]:
-                # Critical path element
-                return {
-                    'color': '#ff0000',
-                    'penwidth': '4',
-                    'fontsize': '16',
-                    'weight': '3'
-                }
-            elif prob_crit < self.p:
-                # Sub-critical element (may consume reserve)
-                return {
-                    'color': '#ffa000',
-                    'penwidth': '3',
-                    'fontsize': '16',
-                    'weight': '2'
-                }
-            else:
-                # Non-critical element
-                return {
-                    'color': '#000000',
-                    'penwidth': '2',
-                    'fontsize': '14',
-                    'weight': '1'
-                }
-
         def _label_event(e):
             """Format event node label (early/late times, reserve)."""
-            style = _get_style(e.reserve, e.early_prob(e.late[RES]))
+            style = get_style(e.reserve, e.early_prob(e.late[RES]), self.p)
             # Simple record label without HTML tags
             return '{{%d |{%.1f|%.1f}| %.2f}}' % (
                 e.id, e.early[RES], e.late[RES], e.reserve[RES]
@@ -1816,7 +1820,7 @@ class NetworkModel:
         # 2. Add edges through invisible nodes with separate labels
         for a in self.activities:
             # Get style for this activity based on its criticality
-            activity_style = _get_style(a.reserve, a.early_end_prob(a.late_end[RES]))
+            activity_style = get_style(a.reserve, a.early_end_prob(a.late_end[RES]), self.p)
 
             # Build label text for the visible label node
             if a.wbs_id:   # real activity
