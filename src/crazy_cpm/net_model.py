@@ -47,7 +47,7 @@ Basic usage with direct resource effort estimates:
 
 Advanced usage with resource-aware duration:
 
->>> def resource_duration(effort, activity, base_time):
+>>> def resource_duration(effort, activity, base_time, target):
 ...     # Calculate actual duration based on resource allocation
 ...     resource_count = 2  # Two people assigned
 ...     productivity = 0.8  # 80% productivity
@@ -86,6 +86,7 @@ import numpy as np
 import pandas as pd
 import scipy
 import os
+import inspect
 
 import _ccpm
 
@@ -341,12 +342,11 @@ def _choice(old, new, delta):
         return old  # Certain result
 
 #==============================================================================
-def _default_duration(effort, activity, base_time):
+def _default_duration(effort, activity, base_time, target):
     """
     Default duration callback function.
 
     This function provides the default behavior where duration equals effort.
-    Override this with custom logic to model resource constraints.
 
     Parameters
     ----------
@@ -360,6 +360,9 @@ def _default_duration(effort, activity, base_time):
         Base time from which the activity starts:
         - float for time computations during network traversal
         - None for network post-processing (optimistic/pessimistic scenarios)
+    target : str or None
+        Target scenario identifier: 'early', 'late', 'optimistic', 'pessimistic',
+        or None (for post-processing and triangle optimization).
 
     Returns
     -------
@@ -381,7 +384,7 @@ def _default_duration(effort, activity, base_time):
     --------
     Simple productivity model:
 
-    >>> def custom_duration(effort, activity, base_time):
+    >>> def custom_duration(effort, activity, base_time, target):
     ...     team_size = activity.data.get('team_size', 1)
     ...     productivity = activity.data.get('productivity', 1.0)
     ...     # Calculate absolute duration
@@ -1064,17 +1067,22 @@ class NetworkModel:
 
     duration : callable, default=_default_duration
         Callback function for resource-aware duration calculation.
-        Signature: duration(effort, activity, base_time) -> float
+        Signature: duration(effort, activity, base_time, target) -> float
+
         - effort: float value representing resource effort:
           * Positive number or zero for forward pass (early times calculation)
           * Negative number or zero for backward pass (late times calculation)
         - activity: _Activity object for context
         - base_time: float for time-based availability checks during network traversal,
           or None for network post-processing (optimistic/pessimistic scenarios)
+        - target: str or None indicating the computation scenario:
+          'early', 'late', 'optimistic', 'pessimistic', or None
+          (None for post-processing and triangle optimization).
         Returns: float value representing actual duration with the same sign as effort:
           * Zero if effort is zero
           * Positive number if effort is positive
           * Negative number if effort is negative
+
     p : float, default=0.95
         Probability level for PERT quantile estimates
     default_risk : float, default=0.3
@@ -1128,7 +1136,7 @@ class NetworkModel:
 
     Resource-aware scheduling with custom duration callback:
 
-    >>> def team_duration(effort, activity, base_time):
+    >>> def team_duration(effort, activity, base_time, target):
     ...     team_size = activity.data.get('team_size', 1)
     ...     productivity = activity.data.get('productivity', 1.0)
     ...     # Calculate absolute duration
@@ -1179,6 +1187,13 @@ class NetworkModel:
 
         if not callable(duration):
             raise TypeError(f"duration must be callable, got {type(duration)}")
+        # Verify that duration function accepts at least 4 parameters
+        sig = inspect.signature(duration)
+        if len(sig.parameters) < 4:
+            raise TypeError(
+                f"duration function must accept at least 4 parameters "
+                f"(effort, activity, base_time, target), got {len(sig.parameters)}"
+            )
         if not isinstance(p, float) or not (0.0 < p < 1.0):
             raise ValueError(f"p must be float between 0 and 1, got {p}")
         if not isinstance(default_risk, float) or default_risk < 0.0 or default_risk > 1.0:
@@ -1417,7 +1432,8 @@ class NetworkModel:
             # Maximum duration candidate
             maxa = grpoi[k][0]
             for a in aoi:
-                if self._duration(a.expected[RES], a, None) > self._duration(maxa.expected[RES], maxa, None):
+                # target is None because this is post-processing without scenario
+                if self._duration(a.expected[RES], a, None, None) > self._duration(maxa.expected[RES], maxa, None, None):
                     a.dst, maxa.dst = maxa.dst, a.dst
                     maxa = a
 
@@ -1586,7 +1602,7 @@ class NetworkModel:
             ret[RES] = -a.expected[RES]
             return ret
 
-        def _duration_vec(effort, activity, base_time):
+        def _duration_vec(effort, activity, base_time, target):
             """
             Compute duration vector with variance propagation for PERT analysis.
 
@@ -1602,6 +1618,8 @@ class NetworkModel:
             base_time : numpy.ndarray or None
                 Base time array [value, variance, error_bound] for time computations,
                 or None for network post-processing
+            target : str or None
+                Target scenario identifier
 
             Returns
             -------
@@ -1616,7 +1634,7 @@ class NetworkModel:
 
             # Compute duration value and error bound
             # effort[RES] is float: positive for forward pass, negative for backward pass
-            dur[RES] = self._duration(effort[RES], activity, base_time[RES])
+            dur[RES] = self._duration(effort[RES], activity, base_time[RES], target)
             dur[ERR] = EPS * abs(dur[RES])  # Error bound based on absolute duration
 
             if 0. == effort[VAR] or not self.is_pert:
@@ -1641,12 +1659,12 @@ class NetworkModel:
             # without time-based constraints
             if effort[RES] >= 0.:
                 # Forward pass: use positive effort values
-                a = self._duration(activity.optimistic, activity, base_time[RES])
-                b = self._duration(activity.pessimistic, activity, base_time[RES])
+                a = self._duration(activity.optimistic, activity, base_time[RES], target)
+                b = self._duration(activity.pessimistic, activity, base_time[RES], target)
             else:
                 # Backward pass: use negative effort values
-                a = self._duration(-activity.optimistic, activity, base_time[RES])
-                b = self._duration(-activity.pessimistic, activity, base_time[RES])
+                a = self._duration(-activity.optimistic, activity, base_time[RES], target)
+                b = self._duration(-activity.pessimistic, activity, base_time[RES], target)
 
             # Use beta-distribution formula for variance calculation:
             var_beta = alpha * beta / (alpha + beta + 1) / ((alpha + beta) ** 2)
@@ -1662,7 +1680,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: 1
-            process_delta = lambda x, a, b: x
+            process_delta = lambda d, a, b, t: d
 
         elif 'early' == target:
             act_base = 'early_start'
@@ -1672,7 +1690,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = _choice_early
             delta = lambda a: a.expected
-            process_delta = _duration_vec
+            process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
 
         elif 'late' == target:
             act_base = 'late_end'
@@ -1682,7 +1700,7 @@ class NetworkModel:
             rev = 'out_activities'
             choice = _choice_late
             delta = _delta_late
-            process_delta = _duration_vec
+            process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
 
         elif 'optimistic' == target:
             act_base = 'opt_start'
@@ -1692,7 +1710,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: a.optimistic
-            process_delta = self._duration
+            process_delta = lambda d, a, b, t: self._duration(d, a, b, t)
 
         elif 'pessimistic' == target:
             act_base = 'pes_start'
@@ -1702,7 +1720,7 @@ class NetworkModel:
             rev = 'in_activities'
             choice = max
             delta = lambda a: a.pessimistic
-            process_delta = self._duration
+            process_delta = lambda d, a, b, t: self._duration(d, a, b, t)
         else:
             raise ValueError(f"Unknown 'target' value: {target}")
 
@@ -1732,8 +1750,7 @@ class NetworkModel:
                     setattr(a, act_base, base_val)
 
                 # Calculate new value using appropriate delta processing
-                # For stage: direct value, for time: resource-aware duration callback
-                new_val = base_val + process_delta(delta(a), a, base_val)
+                new_val = base_val + process_delta(delta(a), a, base_val, target)
 
                 if act_new:
                     setattr(a, act_new, new_val)
@@ -2159,7 +2176,7 @@ if __name__ == '__main__':
     # Advanced example: Resource-aware scheduling
     print("\n=== Advanced Example: Resource-Aware Scheduling ===")
 
-    def resource_aware_duration(effort, activity, base_time):
+    def resource_aware_duration(effort, activity, base_time, target):
         """
         Custom duration callback function for resource-aware scheduling.
 
@@ -2179,6 +2196,8 @@ if __name__ == '__main__':
         base_time : float or None
             Base time for availability calculations during network traversal,
             or None for network post-processing
+        target : str or None
+            Target scenario identifier (can be used for scenario-specific logic)
 
         Returns
         -------
