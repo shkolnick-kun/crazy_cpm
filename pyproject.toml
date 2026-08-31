@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crazy_cpm"
-version = "0.99.1"
+version = "0.999.0"
 description = "Crazy Critical Path Method"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {file = "LICENSE"}
