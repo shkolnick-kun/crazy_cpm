@@ -86,7 +86,6 @@ import numpy as np
 import pandas as pd
 import scipy
 import os
-import inspect
 
 import _ccpm
 
@@ -397,7 +396,7 @@ def _default_duration(effort, activity, base_time, target):
     return effort
 
 #==============================================================================
-def _default_style(res, prob_crit, prob_thr):
+def _default_style(res, prob_reserve, prob_thr):
     """
     Determine styling (color, penwidth, fontsize, weight) based on criticality.
 
@@ -405,8 +404,18 @@ def _default_style(res, prob_crit, prob_thr):
     ----------
     res : numpy.ndarray
         Time reserve array [value, variance, error_bound]
-    prob_crit : float
-        Probability that the element is on critical path
+    prob_reserve : float
+        Probability that the element has a positive time reserve,
+        ``P(T_early < T_late)``. Close to ``1`` for well-buffered
+        elements and roughly ``0.5`` for elements whose ``early`` and
+        ``late`` estimates coincide.
+    prob_thr : float
+        Threshold probability. Elements with
+        ``prob_reserve < prob_thr`` are drawn as sub-critical (orange);
+        elements with ``prob_reserve >= prob_thr`` are drawn as
+        non-critical (black). Elements that are formally critical
+        (``abs(res[RES]) <= res[ERR]``) are caught earlier and drawn
+        red regardless of this value.
 
     Returns
     -------
@@ -426,7 +435,7 @@ def _default_style(res, prob_crit, prob_thr):
             'fontsize': '16',
             'weight': '3'
         }
-    elif prob_crit < prob_thr:
+    elif prob_reserve < prob_thr:
         # Sub-critical element (may consume reserve)
         return {
             'color': '#ffa000',
@@ -556,13 +565,21 @@ class _Activity:
             raise ValueError(f"variance must be non-negative, got {exp_var}")
         if data is not None and not isinstance(data, dict):
             raise TypeError(f"data must be dict or None, got {type(data)}")
+        if not isinstance(optimistic, float):
+            raise TypeError(f"optimistic must be float, got {type(optimistic)}")
+        if not isinstance(pessimistic, float):
+            raise TypeError(f"pessimistic must be float, got {type(pessimistic)}")
 
         self.id = id
         self.wbs_id = wbs_id
         self.letter = letter
         self.model = model
-        self.src = src
-        self.dst = dst
+
+        self._src = src
+        self._src.out_activities.append(self)
+
+        self._dst = dst
+        self._dst.in_activities.append(self)
 
         self.expected = np.zeros((3,), dtype=float)
         self.expected[RES] = expected
@@ -585,6 +602,30 @@ class _Activity:
         self.pessimistic = pessimistic
         self.pes_start = 0.
         self.pes_end = 0.
+
+    @property
+    def src(self):
+        return self._src
+
+    @src.setter
+    def src(self, new_src):
+        if isinstance(self._src, _Event):
+            self._src.out_activities.remove(self)
+
+        self._src = new_src
+        new_src.out_activities.append(self)
+
+    @property
+    def dst(self):
+        return self._dst
+
+    @dst.setter
+    def dst(self, new_dst):
+        if isinstance(self._dst, _Event):
+            self._dst.in_activities.remove(self)
+
+        self._dst = new_dst
+        new_dst.in_activities.append(self)
 
     @property
     def duration(self):
@@ -711,51 +752,50 @@ class _Activity:
         PERT-specific fields (early_start_var, early_end_var, early_start_pqe, early_end_pqe)
         are only included when PERT analysis is enabled.
         """
-        duration = self.duration
-        ret = {
-            'id': self.id,
-            'wbs_id': self.wbs_id,
-            'letter': self.letter,
-            'src_id': self.src.id,
-            'dst_id': self.dst.id,
-            'expected': self.expected[RES],  # Resource effort estimate
-            'duration': duration[RES],       # Actual duration
 
-            # CPM timing parameters
-            'early_start': self.early_start[RES],
-            'late_start': self.late_start[RES],
-            'early_end': self.early_end[RES],
-            'late_end': self.late_end[RES],
-            'reserve': self.reserve[RES],
-        }
-        # Add user data to dictionary
-        ret.update(self.data.copy())
+        # Start with user data
+        ret = self.data.copy()
+
+        ret['id'      ] = self.id
+        ret['wbs_id'  ] = self.wbs_id
+        ret['letter'  ] = self.letter
+        ret['src_id'  ] = self.src.id
+        ret['dst_id'  ] = self.dst.id
+        ret['expected'] = self.expected[RES] # Resource effort estimate
+        ret['duration'] = self.duration[RES] # Actual duration
+
+        # CPM timing parameters
+        ret['early_start'] = self.early_start[RES]
+        ret['late_start' ] = self.late_start[RES]
+        ret['early_end'  ] = self.early_end[RES]
+        ret['late_end'   ] = self.late_end[RES]
+        ret['reserve'    ] = self.reserve[RES]
 
         if self.model.is_pert:
             # PERT analysis fields
-            ret['exp_var'] = self.expected[VAR]   # Variance of effort estimate
-            ret['variance'] = duration[VAR]       # Variance of duration
+            ret['exp_var'   ] = self.expected[VAR]   # Variance of effort estimate
+            ret['variance'  ] = self.duration[VAR]  # Variance of duration
             ret['optimistic'] = self.optimistic   # Optimistic effort
-            ret['opt_start'] = self.opt_start     # Optimistic start time
-            ret['opt_end'] = self.opt_end         # Optimistic end time
+            ret['opt_start' ] = self.opt_start     # Optimistic start time
+            ret['opt_end'   ] = self.opt_end         # Optimistic end time
 
             ret['pessimistic'] = self.pessimistic  # Pessimistic effort
-            ret['pes_start'] = self.pes_start      # Pessimistic start time
-            ret['pes_end'] = self.pes_end          # Pessimistic end time
+            ret['pes_start'  ] = self.pes_start    # Pessimistic start time
+            ret['pes_end'    ] = self.pes_end      # Pessimistic end time
 
             ret['early_start_var'] = self.early_start[VAR]
-            ret['early_end_var'] = self.early_end[VAR]
+            ret['early_end_var'  ] = self.early_end[VAR]
             ret['early_start_pqe'] = self.early_start_pqe
-            ret['early_end_pqe'] = self.early_end_pqe
+            ret['early_end_pqe'  ] = self.early_end_pqe
 
-            ret['late_end_prob'] = self.early_end_prob(self.late_end[RES])
+            ret['late_end_prob'  ] = self.early_end_prob(self.late_end[RES])
 
         if self.model.debug:
             # Debug information
             ret['early_start_err'] = self.early_start[ERR]
-            ret['late_start_err'] = self.late_start[ERR]
-            ret['early_end_err'] = self.early_end[ERR]
-            ret['late_end_err'] = self.late_end[ERR]
+            ret['late_start_err' ] = self.late_start[ERR]
+            ret['early_end_err'  ] = self.early_end[ERR]
+            ret['late_end_err'   ] = self.late_end[ERR]
 
         return ret
 
@@ -797,6 +837,19 @@ class _Event:
     ------
     TypeError
         If `id` is not an integer or `model` is not a NetworkModel instance.
+
+    Notes
+    -----
+    This class uses identity-based ``__eq__``/``__hash__`` (default from
+    ``object``). Do NOT define ``__eq__`` without also defining a
+    compatible ``__hash__`` — instances are used as dict keys in
+    ``NetworkModel._compute_target``. Do NOT add ``@dataclass`` without
+    ``eq=False``.
+
+    The ``in_activities`` and ``out_activities`` properties return live
+    list objects maintained by ``_Activity.src``/``_Activity.dst`` setters.
+    They are READ-ONLY by contract — do not mutate them directly, or the
+    network's bookkeeping will become inconsistent.
     """
 
     def __init__(self, id, model):
@@ -807,6 +860,8 @@ class _Event:
 
         self.id = id
         self.model = model
+        self._in_activities = []
+        self._out_activities = []
 
         # CPM time parameters (calculated later)
         self.early = np.zeros((3,), dtype=float)
@@ -819,13 +874,27 @@ class _Event:
 
     @property
     def in_activities(self):
-        """Get all activities entering this event."""
-        return [a for a in self.model.activities if a.dst == self]
+        """Activities entering this event.
+
+        Returns the live list object (not a copy) for O(1) access during
+        network traversal. READ-ONLY by contract: mutate topology through
+        ``activity.dst = new_event`` instead — the ``dst`` setter maintains
+        this list. Direct mutation (``append``/``remove``/``clear``) will
+        silently corrupt the network.
+        """
+        return self._in_activities
 
     @property
     def out_activities(self):
-        """Get all activities leaving this event."""
-        return [a for a in self.model.activities if a.src == self]
+        """Activities leaving this event.
+
+        Returns the live list object (not a copy) for O(1) access during
+        network traversal. READ-ONLY by contract: mutate topology through
+        ``activity.src = new_event`` instead — the ``src`` setter maintains
+        this list. Direct mutation (``append``/``remove``/``clear``) will
+        silently corrupt the network.
+        """
+        return self._out_activities
 
     @property
     def early_pqe(self):
@@ -882,25 +951,25 @@ class _Event:
         """
         # Basic CPM parameters
         ret = {
-            'id': self.id,
-            'stage': self.stage,
-            'early': self.early[RES],
-            'late': self.late[RES],
+            'id'     : self.id,
+            'stage'  : self.stage,
+            'early'  : self.early[RES],
+            'late'   : self.late[RES],
             'reserve': self.reserve[RES],
         }
 
         if self.model.is_pert:
             # PERT analysis fields
-            ret['optimistic'] = self.optimistic
+            ret['optimistic' ] = self.optimistic
             ret['pessimistic'] = self.pessimistic
-            ret['early_var'] = self.early[VAR]
-            ret['early_pqe'] = self.early_pqe
-            ret['late_prob'] = self.early_prob(self.late[RES])
+            ret['early_var'  ] = self.early[VAR]
+            ret['early_pqe'  ] = self.early_pqe
+            ret['late_prob'  ] = self.early_prob(self.late[RES])
 
         if self.model.debug:
             # Debug information
             ret['early_err'] = self.early[ERR]
-            ret['late_err'] = self.late[ERR]
+            ret['late_err' ] = self.late[ERR]
 
         return ret
 
@@ -1164,6 +1233,12 @@ class NetworkModel:
 
     For PERT analysis, variance is automatically propagated through the
     network using modified PERT distribution formulas.
+
+
+    Reserved WBS field names (``expected``, ``exp_var``, ``letter``,
+    ``optimistic``, ``most_likely``, ``pessimistic``) are consumed during
+    parsing and removed from ``activity.data``. Do not use these names
+    for custom fields.
     """
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
@@ -1187,13 +1262,7 @@ class NetworkModel:
 
         if not callable(duration):
             raise TypeError(f"duration must be callable, got {type(duration)}")
-        # Verify that duration function accepts at least 4 parameters
-        sig = inspect.signature(duration)
-        if len(sig.parameters) < 4:
-            raise TypeError(
-                f"duration function must accept at least 4 parameters "
-                f"(effort, activity, base_time, target), got {len(sig.parameters)}"
-            )
+
         if not isinstance(p, float) or not (0.0 < p < 1.0):
             raise ValueError(f"p must be float between 0 and 1, got {p}")
         if not isinstance(default_risk, float) or default_risk < 0.0 or default_risk > 1.0:
@@ -1204,8 +1273,8 @@ class NetworkModel:
             raise TypeError(f"debug must be bool, got {type(debug)}")
 
         self.debug = debug
-        self.is_pert = False
-        self.p = p
+        self._is_pert = False
+        self._p = p
         self._duration = duration  # Resource-aware duration callback
 
         # Parse links into standard format
@@ -1228,6 +1297,14 @@ class NetworkModel:
 
         # Compute Event and Activity time parameters
         self._compute_time_params()
+
+    @property
+    def is_pert(self):
+        return self._is_pert
+
+    @property
+    def p(self):
+        return self._p
 
     def _parse_links(self, lnk_src, lnk_dst, links):
         """
@@ -1254,6 +1331,12 @@ class NetworkModel:
         ValueError
             If link data is insufficient, lengths mismatch, or format is unsupported.
         """
+
+        if (lnk_src is not None or lnk_dst is not None) and links is not None:
+            raise ValueError(
+                "Provide either (lnk_src, lnk_dst) or links, not both"
+            )
+
         # Case 1: Old format (lnk_src and lnk_dst provided)
         if lnk_src is not None and lnk_dst is not None:
             # They must be iterables
@@ -1284,15 +1367,16 @@ class NetworkModel:
             return src_list, dst_list
 
         # Format 2: Two columns [[src, dst], [src, dst], ...]
-        elif (isinstance(links, (list, tuple, np.ndarray)) and
-              len(links) > 0 and
-              isinstance(links[0], (list, tuple, np.ndarray)) and
-              len(links[0]) == 2):
-            try:
-                src_list = [item[0] for item in links]
-                dst_list = [item[1] for item in links]
-            except Exception as e:
-                raise ValueError("Invalid two-column links format") from e
+        elif isinstance(links, (list, tuple, np.ndarray)) and len(links) > 0:
+            if not all(isinstance(item, (list, tuple, np.ndarray)) and len(item) == 2
+                       for item in links):
+                raise ValueError(
+                    f"Unrecognized links format: expected two rows "
+                    f"[[src, ...], [dst, ...]] or a list of [src, dst] pairs, "
+                    f"got {type(links).__name__} of length {len(links)}"
+                )
+            src_list = [item[0] for item in links]
+            dst_list = [item[1] for item in links]
             return src_list, dst_list
 
         # Format 3: Dictionary {'src': [...], 'dst': [...]}
@@ -1385,10 +1469,10 @@ class NetworkModel:
 
                 # Even one wbs item with nonzero variance is enough to compute PERT
                 if exp_var > 0.0:
-                    self.is_pert = True
+                    self._is_pert = True
 
                 # Create data dict without fields stored as separate attributes
-                data_without_duplicates = self._remove_duplicate_fields(wbs_data, expected, exp_var, letter)
+                data_without_duplicates = self._remove_duplicate_fields(wbs_data)
 
                 self._add_activity(int(act_id), int(net_src[i]), int(net_dst[i]),
                                    expected, exp_var, optimistic, pessimistic,
@@ -1427,8 +1511,6 @@ class NetworkModel:
         # Place maximum duration activities on long side of triangle groups
         for k in grpoi.keys():
             aoi = grpoi[k][1]
-            if len(aoi) < 1:
-                raise RuntimeError("Action of interest group must contain at least one action!")
             # Maximum duration candidate
             maxa = grpoi[k][0]
             for a in aoi:
@@ -1437,7 +1519,7 @@ class NetworkModel:
                     a.dst, maxa.dst = maxa.dst, a.dst
                     maxa = a
 
-    def _remove_duplicate_fields(self, wbs_data, expected, exp_var, letter):
+    def _remove_duplicate_fields(self, wbs_data):
         """
         Remove fields from WBS data that are stored as separate activity attributes.
 
@@ -1445,12 +1527,6 @@ class NetworkModel:
         ----------
         wbs_data : dict
             Complete WBS data for an activity
-        expected : float
-            Activity expected effort (already extracted)
-        exp_var : float
-            Activity effort variance (already extracted)
-        letter : str
-            Activity letter (already extracted)
 
         Returns
         -------
@@ -1655,15 +1731,13 @@ class NetworkModel:
             # will compute duration variance using modified PERT formula
 
             # Compute optimistic and pessimistic duration estimates
-            # For variance calculation, use base_time=None to get estimates
-            # without time-based constraints
             if effort[RES] >= 0.:
                 # Forward pass: use positive effort values
-                a = self._duration(activity.optimistic, activity, base_time[RES], target)
+                a = self._duration(activity.optimistic , activity, base_time[RES], target)
                 b = self._duration(activity.pessimistic, activity, base_time[RES], target)
             else:
                 # Backward pass: use negative effort values
-                a = self._duration(-activity.optimistic, activity, base_time[RES], target)
+                a = self._duration(-activity.optimistic , activity, base_time[RES], target)
                 b = self._duration(-activity.pessimistic, activity, base_time[RES], target)
 
             # Use beta-distribution formula for variance calculation:
@@ -1731,10 +1805,10 @@ class NetworkModel:
                 setattr(a, act_new, -1)
 
         # Count dependencies for topological sorting
-        n_dep = [len(getattr(e, rev)) for e in self.events]
+        n_dep = {e:len(getattr(e, rev)) for e in self.events}
 
         # Find starting events (no dependencies)
-        evt = [i for i, n in enumerate(n_dep) if 0 == n]
+        evt = [e for e, n in n_dep.items() if 0 == n]
         # Check for programming errors
         if 1 != len(evt):
             raise RuntimeError(f"The project must have exactly one starting event, but found {len(evt)}")
@@ -1742,7 +1816,9 @@ class NetworkModel:
         # Process events in topological order
         i = 0
         while True:
-            e = self.events[evt[i]]
+
+            e = evt[i]
+
             base_val = getattr(e, target)
 
             for a in getattr(e, fwd):
@@ -1756,14 +1832,13 @@ class NetworkModel:
                     setattr(a, act_new, new_val)
 
                 next_evt = getattr(a, act_next)
-                next_i = self.events.index(next_evt)
 
                 setattr(next_evt, target, choice(getattr(next_evt, target), new_val))
 
-                n_dep[next_i] -= 1
+                n_dep[next_evt] -= 1
 
-                if 0 >= n_dep[next_i]:
-                    evt.append(next_i)
+                if 0 >= n_dep[next_evt]:
+                    evt.append(next_evt)
 
             i += 1
             if i >= len(evt):
