@@ -12,7 +12,7 @@ Features
 --------
 - Multiple activity resource input formats (direct, PERT three-point, PERT two-point)
 - Resource-aware duration calculations via callback function
-- Automatic network diagram generation using Graphviz
+- Automatic network diagram generation using Graphviz (PNG, SVG, PDF)
 - Statistical analysis with variance propagation
 - Multiple link format support
 - Export to dictionaries and pandas DataFrames
@@ -96,6 +96,9 @@ EPS = np.finfo(float).eps
 RES = 0  # Result of time computation
 VAR = 1  # Result variance estimation (used for PERT)
 ERR = 2  # Computation error upper limit
+
+# Supported file formats for network visualization
+_VIZ_FORMATS = ('png', 'svg', 'pdf')
 
 #==============================================================================
 def fit_beta(M, D, a, b, err):
@@ -396,26 +399,21 @@ def _default_duration(effort, activity, base_time, target):
     return effort
 
 #==============================================================================
-def _default_style(res, prob_reserve, prob_thr):
+def _default_style(element):
     """
     Determine styling (color, penwidth, fontsize, weight) based on criticality.
 
     Parameters
     ----------
-    res : numpy.ndarray
-        Time reserve array [value, variance, error_bound]
-    prob_reserve : float
-        Probability that the element has a positive time reserve,
-        ``P(T_early < T_late)``. Close to ``1`` for well-buffered
-        elements and roughly ``0.5`` for elements whose ``early`` and
-        ``late`` estimates coincide.
-    prob_thr : float
-        Threshold probability. Elements with
-        ``prob_reserve < prob_thr`` are drawn as sub-critical (orange);
-        elements with ``prob_reserve >= prob_thr`` are drawn as
-        non-critical (black). Elements that are formally critical
-        (``abs(res[RES]) <= res[ERR]``) are caught earlier and drawn
-        red regardless of this value.
+    element : _Event or _Activity
+        Graph element whose style is being computed. The styling decision
+        is based on the element's time reserve and the probability that
+        the reserve is positive:
+
+        - For an ``_Event`` the probability is ``element.early_prob(element.late[RES])``
+        - For an ``_Activity`` the probability is ``element.early_end_prob(element.late_end[RES])``
+
+        The threshold probability is taken from ``element.model.p``.
 
     Returns
     -------
@@ -426,7 +424,32 @@ def _default_style(res, prob_reserve, prob_thr):
             - ``penwidth``: string with line width (e.g., '4', '3', '2')
             - ``fontsize``: string with font size (e.g., '16', '14')
             - ``weight``: string with edge weight for Graphviz (e.g., '3', '2', '1')
+
+    Raises
+    ------
+    TypeError
+        If ``element`` is neither an ``_Event`` nor an ``_Activity``.
+
+    Notes
+    -----
+    Elements that are formally critical (``abs(res[RES]) <= res[ERR]``) are
+    drawn red. Elements with ``prob_reserve < prob_thr`` are drawn as
+    sub-critical (orange). Remaining elements are drawn as non-critical
+    (black).
     """
+    if isinstance(element, _Event):
+        res = element.reserve
+        prob_reserve = element.early_prob(element.late[RES])
+    elif isinstance(element, _Activity):
+        res = element.reserve
+        prob_reserve = element.early_end_prob(element.late_end[RES])
+    else:
+        raise TypeError(
+            f"element must be _Event or _Activity, got {type(element)}"
+        )
+
+    prob_thr = element.model.p
+
     if abs(res[RES]) <= res[ERR]:
         # Critical path element
         return {
@@ -1219,6 +1242,12 @@ class NetworkModel:
     ... }
     >>> model_resource = NetworkModel(wbs_resource, links=links, duration=team_duration)
 
+    Visualization in various formats:
+
+    >>> model.viz('network.png')  # PNG (default if extension omitted)
+    >>> model.viz('network.svg')  # SVG
+    >>> model.viz('network.pdf')  # PDF
+
     Notes
     -----
     The duration callback function must preserve the sign of the effort parameter
@@ -1992,21 +2021,31 @@ class NetworkModel:
 
         return activities_df, events_df
 
-    def viz(self, output_path=None, group_by_stage=False, embed_dsc=False, get_style=_default_style):
+    def viz(self, output_path=None, group_by_stage=False, get_style=_default_style):
         """
         Create Graphviz visualization of the CPM/PERT network.
 
         Parameters
         ----------
         output_path : str, optional
-            Custom output path for saving the visualization file (without extension).
-            If None, the graph is not rendered to a file (only the Digraph object is returned).
+            Output path for saving the visualization file. The rendering
+            format is determined by the file extension:
+
+            - ``.png`` — Portable Network Graphics (default if no extension is given)
+            - ``.svg`` — Scalable Vector Graphics
+            - ``.pdf`` — Portable Document Format
+
+            If None, the graph is not rendered to a file (only the Digraph
+            object is returned).
         group_by_stage : bool, default=False
             If True, events are grouped into "layers" by their topological order (stage).
             If False, events are placed freely by Graphviz default layout.
-        embed_dsc : bool, default=False
-            If True, activity labels are embedded directly on edges (simpler layout).
-            If False, an invisible intermediate node is used for label placement.
+        get_style : callable, default=_default_style
+            Callback that computes styling attributes for a graph element.
+            Signature: ``get_style(element) -> dict``, where ``element`` is
+            either an ``_Event`` or an ``_Activity``. The returned dictionary
+            must contain keys ``color``, ``penwidth`` and ``fontsize``; the
+            key ``weight`` is used for activity edges.
 
         Returns
         -------
@@ -2016,7 +2055,9 @@ class NetworkModel:
         Raises
         ------
         TypeError
-            If get_style is not callable.
+            If ``get_style`` is not callable.
+        ValueError
+            If ``output_path`` has an unsupported extension.
 
         Notes
         -----
@@ -2029,6 +2070,10 @@ class NetworkModel:
             - Sub-critical paths: Orange (#ffa000), penwidth=3, fontsize=16, weight=2
             - Non-critical paths: Black (#000000), penwidth=2, fontsize=14, weight=1
             - Dashed arrows: Dummy activities
+
+        Activity labels are embedded directly on edges through an invisible
+        intermediate node; the label itself is drawn as a light-gray rounded
+        box attached to the bend point of the edge.
 
         When ``group_by_stage=True``, the topological order of events is preserved
         by clustering events with the same stage together, improving readability
@@ -2043,7 +2088,7 @@ class NetworkModel:
 
         def _label_event(e):
             """Format event node label (early/late times, reserve)."""
-            style = get_style(e.reserve, e.early_prob(e.late[RES]), self.p)
+            style = get_style(e)
             # Simple record label without HTML tags
             return '{{%d |{%.1f|%.1f}| %.2f}}' % (
                 e.id, e.early[RES], e.late[RES], e.reserve[RES]
@@ -2073,87 +2118,45 @@ class NetworkModel:
                          penwidth=style['penwidth'],
                          fontsize=style['fontsize'])
 
-        # 2. Add edges through invisible nodes with separate labels
+        # 2. Add edges with embedded labels
         for a in self.activities:
             # Get style for this activity based on its criticality
-            activity_style = get_style(a.reserve, a.early_end_prob(a.late_end[RES]), self.p)
+            activity_style = get_style(a)
 
-            # Build label text for the visible label node
+            # Build label text for the label node
             if a.wbs_id:   # real activity
                 lbl = f"{a.letter}\\nt={a.duration[RES]:.1f}\\nr={a.reserve[RES]:.2f}"
             else:          # dummy activity
                 lbl = f"{a.letter}\\nr={a.reserve[RES]:.2f}"
 
-            # Unique identifiers for auxiliary nodes
+            # Unique identifier for the label node
             label_node_id = f"label_{a.id}"
 
             # Determine edge style (solid for real, dashed for dummy)
             edge_style = 'dashed' if a.expected[RES] == 0.0 else 'solid'
 
-            # Create a subgraph to force same rank for invisible and label nodes
-            if embed_dsc:
-                edge_node_id = label_node_id
-                # Create visible label node (light gray, rounded box)
-                # Label uses fontsize=12 for all activities as specified
-                dot.node(label_node_id,
-                         label=lbl,
-                         shape='box',
-                         style='filled,rounded',
-                         color=activity_style['color'],
-                         penwidth=activity_style['penwidth'],
-                         fillcolor='#f0f0f0',
-                         fontsize='12',
-                         margin='0.05,0.05')
-            else:
-                # Unique identifiers for auxiliary
-                invis_node_id = f"invis_{a.id}"
-                edge_node_id = invis_node_id
+            # Create visible label node (light gray, rounded box)
+            # Label uses fontsize=12 for all activities as specified
+            dot.node(label_node_id,
+                     label=lbl,
+                     shape='box',
+                     style='filled,rounded',
+                     color=activity_style['color'],
+                     penwidth=activity_style['penwidth'],
+                     fillcolor='#f0f0f0',
+                     fontsize='12',
+                     margin='0.05,0.05')
 
-                with dot.subgraph() as s:
-                    s.attr(rank='same')
-                    s.attr(id=f'rank_{a.id}')  # Unique subgraph ID for this activity
-
-                    # Create invisible intermediate node (zero size, no label)
-                    s.node(invis_node_id,
-                           label='',
-                           shape='point',
-                           style='invis',
-                           color=activity_style['color'],
-                           penwidth=activity_style['penwidth'],
-                           width='0',
-                           height='0')
-
-                    # Create visible label node (light gray, rounded box)
-                    # Label uses fontsize=12 for all activities as specified
-                    s.node(label_node_id,
-                           label=lbl,
-                           shape='box',
-                           style='filled,rounded',
-                           color=activity_style['color'],
-                           penwidth=activity_style['penwidth'],
-                           fillcolor='#f0f0f0',
-                           fontsize='12',
-                           margin='0.05,0.05')
-
-                # Auxiliary edge: label node -> invisible node (dashed gray, no arrowhead)
-                # This attaches the label to the bend point without interfering with routing
-                # Weight for auxiliary edges is kept low (1) to not interfere with main layout
-                dot.edge(label_node_id, invis_node_id,
-                         style='dashed',
-                         color=activity_style['color'],
-                         weight='1',
-                         arrowhead='none')
-
-            # Main edge: source -> invisible node (no arrowhead)
-            dot.edge(str(a.src.id), edge_node_id,
+            # Main edge: source -> label node (no arrowhead)
+            dot.edge(str(a.src.id), label_node_id,
                      style=edge_style,
                      color=activity_style['color'],
                      penwidth=activity_style['penwidth'],
                      weight=activity_style['weight'],
                      arrowhead='none')
 
-            # Main edge: invisible node -> destination (with arrowhead)
-            dot.edge(edge_node_id, str(a.dst.id),
+            # Main edge: label node -> destination (with arrowhead)
+            dot.edge(label_node_id, str(a.dst.id),
                      style=edge_style,
                      color=activity_style['color'],
                      penwidth=activity_style['penwidth'],
@@ -2162,7 +2165,14 @@ class NetworkModel:
 
         # 3. Save to file if output path provided
         if output_path is not None:
-            dot.render(output_path, format='png', cleanup=True)
+            base, ext = os.path.splitext(output_path)
+            fmt = ext.lstrip('.').lower() if ext else 'png'
+            if fmt not in _VIZ_FORMATS:
+                raise ValueError(
+                    f"Unsupported visualization format: {fmt!r}. "
+                    f"Supported formats: {_VIZ_FORMATS}"
+                )
+            dot.render(base, format=fmt, cleanup=True)
 
         return dot
 
@@ -2437,10 +2447,12 @@ if __name__ == '__main__':
     # Create the directory if it doesn't exist
     os.makedirs(target_dir, exist_ok=True)
 
-    # Construct the full file path
+    # Base file path (without extension)
     file_path = os.path.join(target_dir, 'cpm_network')
 
-    # Create and save the visualization
-    dot = n_old.viz(output_path=file_path)
-    print(f"Visualization saved as '{file_path}.png'")
+    # Create and save the visualization in all supported formats
+    for ext in _VIZ_FORMATS:
+        viz_path = f'{file_path}.{ext}'
+        n_old.viz(output_path=viz_path)
+        print(f"Visualization saved as '{viz_path}'")
     print(f"Target directory: {target_dir}")
