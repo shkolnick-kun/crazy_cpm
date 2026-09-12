@@ -17,7 +17,6 @@
 
     Please contact with me by E-mail: shkolnick.kun@gmail.com
 **************************************************************************/
-#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -381,7 +380,6 @@ ccpmResultEn ccpm_build_full_deps(size_t     n_act,    size_t  n_max,
     size_t k;
     size_t l;
     size_t m;
-    size_t p;
     size_t q;
 
     CCPM_CHECK_RETURN(full_map, CCPM_EINVAL);
@@ -1192,16 +1190,16 @@ ccpmResultEn ccpm_optimize_network_stage_1(size_t n_max,
             continue;
         }
 
+        /*Skip events without dummy inputs*/
+        if (CCPM_LLEN(evt_deps + 2 * n_max * i) < 2)
+        {
+            continue;
+        }
+
         for (j = i + 1; j < num_events; j++)
         {
             /*Skip events with real inputs*/
             if (evt_real[j])
-            {
-                continue;
-            }
-
-            /*Skip events without dummy inputs*/
-            if (CCPM_LLEN(evt_deps + 2 * n_max * i) < 2)
             {
                 continue;
             }
@@ -1374,7 +1372,7 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids,     uint32_t * act_pos,
 
     CCPM_LOG_PRINTF("Adding needed dummies\n");
 
-    /* Sort act_pos by act_dst and then by act_src */
+    /* Sort act_pos by act_dst and then by act_src for network finalizaion*/
     /* First, sort by act_dst */
     for (i = 0; i < CCPM_LLEN(act_pos); i++)
     {
@@ -1390,6 +1388,8 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids,     uint32_t * act_pos,
     }
 
     CCPM_TRY_RETURN(ccpm_sort(tmp, act_pos + 1, sort_values, CCPM_LLEN(act_pos)));
+
+    /* Now we have got activities sorted by (act_src, act_dst) */
 
     /* Process activities to add needed dummies */
     for (i = 0; i < d; i++)
@@ -1712,8 +1712,8 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
         _full_act_ndep[i] = CCPM_LLEN(_full_act_dep + n_max * i);
     }
 
-    memcpy(_min_act_dep, _full_act_dep, n_max * n_max * sizeof(uint16_t));
-    memcpy(_min_dep_map, _full_dep_map, n_max * n_max * sizeof(bool)    );
+    memcpy(_min_act_dep, _full_act_dep, n_max * n_max * sizeof(uint32_t));
+    memcpy(_min_dep_map, _full_dep_map, n_max * n_max * sizeof(uint8_t) );
 
     CCPM_TRY_GOTO_END(ccpm_optimize_deps(n_act, n_max, _act_pos, _full_act_ndep, _min_act_dep, _min_dep_map, _tmp));
     _CCPM_PRINT_DEPS(n_act, n_max, _min_act_dep, _min_dep_map);
