@@ -15,6 +15,7 @@ Features
 - Automatic network diagram generation using Graphviz (PNG, SVG, PDF)
 - Statistical analysis with variance propagation
 - Multiple link format support
+- User-defined data fields on activities and events
 - Export to dictionaries and pandas DataFrames
 
 Classes
@@ -843,6 +844,12 @@ class _Event:
         Unique event identifier
     model : NetworkModel
         Parent network model
+    data : dict
+        Additional user data associated with the event. This dictionary
+        holds arbitrary user-defined fields; they are merged into the
+        output of :meth:`to_dict` (and therefore appear as separate
+        columns in the events DataFrame produced by
+        :meth:`NetworkModel.to_dataframe`).
     early : numpy.ndarray
         Early time [value, variance, error_bound]
     late : numpy.ndarray
@@ -873,6 +880,13 @@ class _Event:
     list objects maintained by ``_Activity.src``/``_Activity.dst`` setters.
     They are READ-ONLY by contract — do not mutate them directly, or the
     network's bookkeeping will become inconsistent.
+
+    User-defined keys in ``data`` must not collide with the reserved
+    field names inserted by :meth:`to_dict` (``id``, ``stage``,
+    ``early``, ``late``, ``reserve``, ``optimistic``, ``pessimistic``,
+    ``early_var``, ``early_pqe``, ``late_prob``, ``early_err``,
+    ``late_err``), otherwise the computed values overwrite the user
+    data.
     """
 
     def __init__(self, id, model):
@@ -894,6 +908,8 @@ class _Event:
 
         self.optimistic = 0.0
         self.pessimistic = 0.0
+
+        self.data = {} #User data
 
     @property
     def in_activities(self):
@@ -960,6 +976,7 @@ class _Event:
         dict
             Dictionary containing event data with structure:
 
+            - All user-defined fields from ``self.data``
             - ``id``: Event ID
             - ``stage``: Topological stage
             - ``early``: Early time
@@ -969,17 +986,25 @@ class _Event:
 
         Notes
         -----
-        PERT-specific fields (early_var, early_pqe) are only included
-        when PERT analysis is enabled.
+        PERT-specific fields (early_var, early_pqe, late_prob) are only
+        included when PERT analysis is enabled.
+
+        The computed CPM/PERT fields are written into ``self.data`` in
+        place and the same dictionary object is returned. Reserved field
+        names (``id``, ``stage``, ``early``, ``late``, ``reserve``,
+        ``optimistic``, ``pessimistic``, ``early_var``, ``early_pqe``,
+        ``late_prob``, ``early_err``, ``late_err``) must not be used as
+        user data keys, otherwise the user values will be overwritten.
         """
+        # Start with user data
+        ret = self.data
+
         # Basic CPM parameters
-        ret = {
-            'id'     : self.id,
-            'stage'  : self.stage,
-            'early'  : self.early[RES],
-            'late'   : self.late[RES],
-            'reserve': self.reserve[RES],
-        }
+        ret['id'     ] = self.id
+        ret['stage'  ] = self.stage
+        ret['early'  ] = self.early[RES]
+        ret['late'   ] = self.late[RES]
+        ret['reserve'] = self.reserve[RES]
 
         if self.model.is_pert:
             # PERT analysis fields
@@ -1268,6 +1293,13 @@ class NetworkModel:
     ``optimistic``, ``most_likely``, ``pessimistic``) are consumed during
     parsing and removed from ``activity.data``. Do not use these names
     for custom fields.
+
+    User-defined event data is stored in ``_Event.data``. Its keys must not
+    collide with the reserved field names inserted by ``_Event.to_dict``
+    (``id``, ``stage``, ``early``, ``late``, ``reserve``, ``optimistic``,
+    ``pessimistic``, ``early_var``, ``early_pqe``, ``late_prob``,
+    ``early_err``, ``late_err``), otherwise the computed values overwrite
+    the user data.
     """
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
@@ -1983,6 +2015,13 @@ class NetworkModel:
                         ...
                     ]
                 }
+
+        Notes
+        -----
+        Each activity dictionary is a copy of the activity's ``data``
+        extended with the computed CPM/PERT fields. Each event dictionary
+        is the event's ``data`` extended in place with the computed
+        CPM/PERT fields (see :meth:`_Event.to_dict`).
         """
         activities_data = [activity.to_dict() for activity in self.activities]
         events_data = [event.to_dict() for event in self.events]
@@ -2003,8 +2042,9 @@ class NetworkModel:
 
         Notes
         -----
-        The activities DataFrame expands all custom data fields from the
-        'data' attribute into separate columns for easy analysis.
+        Both DataFrames expand custom user data fields from the corresponding
+        ``data`` attributes (``_Activity.data`` and ``_Event.data``) into
+        separate columns for easy analysis.
         """
         # Convert to dictionaries first
         model_dict = self.to_dict()
