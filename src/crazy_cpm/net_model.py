@@ -775,6 +775,9 @@ class _Activity:
         -----
         PERT-specific fields (early_start_var, early_end_var, early_start_pqe, early_end_pqe)
         are only included when PERT analysis is enabled.
+
+        The returned dictionary is a copy of ``self.data`` extended with
+        the computed CPM/PERT fields.
         """
 
         # Start with user data
@@ -885,8 +888,8 @@ class _Event:
     field names inserted by :meth:`to_dict` (``id``, ``stage``,
     ``early``, ``late``, ``reserve``, ``optimistic``, ``pessimistic``,
     ``early_var``, ``early_pqe``, ``late_prob``, ``early_err``,
-    ``late_err``), otherwise the computed values overwrite the user
-    data.
+    ``late_err``), otherwise the computed values take precedence in the
+    output dictionary.
     """
 
     def __init__(self, id, model):
@@ -989,15 +992,16 @@ class _Event:
         PERT-specific fields (early_var, early_pqe, late_prob) are only
         included when PERT analysis is enabled.
 
-        The computed CPM/PERT fields are written into ``self.data`` in
-        place and the same dictionary object is returned. Reserved field
-        names (``id``, ``stage``, ``early``, ``late``, ``reserve``,
-        ``optimistic``, ``pessimistic``, ``early_var``, ``early_pqe``,
-        ``late_prob``, ``early_err``, ``late_err``) must not be used as
-        user data keys, otherwise the user values will be overwritten.
+        The returned dictionary is a copy of ``self.data`` extended with
+        the computed CPM/PERT fields.
+        Reserved field names (``id``, ``stage``, ``early``, ``late``,
+        ``reserve``, ``optimistic``, ``pessimistic``, ``early_var``,
+        ``early_pqe``, ``late_prob``, ``early_err``, ``late_err``) must
+        not be used as user data keys, otherwise the computed values
+        take precedence in the output dictionary.
         """
         # Start with user data
-        ret = self.data
+        ret = self.data.copy()
 
         # Basic CPM parameters
         ret['id'     ] = self.id
@@ -1298,8 +1302,8 @@ class NetworkModel:
     collide with the reserved field names inserted by ``_Event.to_dict``
     (``id``, ``stage``, ``early``, ``late``, ``reserve``, ``optimistic``,
     ``pessimistic``, ``early_var``, ``early_pqe``, ``late_prob``,
-    ``early_err``, ``late_err``), otherwise the computed values overwrite
-    the user data.
+    ``early_err``, ``late_err``), otherwise the computed values take
+    precedence in the output dictionary.
     """
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
@@ -2020,8 +2024,8 @@ class NetworkModel:
         -----
         Each activity dictionary is a copy of the activity's ``data``
         extended with the computed CPM/PERT fields. Each event dictionary
-        is the event's ``data`` extended in place with the computed
-        CPM/PERT fields (see :meth:`_Event.to_dict`).
+        is likewise a copy of the event's ``data`` extended with the
+        computed CPM/PERT fields (see :meth:`_Event.to_dict`).
         """
         activities_data = [activity.to_dict() for activity in self.activities]
         events_data = [event.to_dict() for event in self.events]
