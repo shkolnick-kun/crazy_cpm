@@ -27,12 +27,25 @@ Classes
 Key Concepts
 ------------
 Resource Effort vs Duration:
-    - ``expected``, ``optimistic``, ``pessimistic``: Estimates of resource effort (e.g., person-hours, machine-hours)
-    - ``duration``: Actual time considering resource availability and allocation
+    - ``expected``, ``optimistic``, ``pessimistic``: Estimates of resource effort
+      (e.g., person-hours, machine-hours). These are inputs to the model.
+    - ``duration``: Actual calendar time computed from effort via the
+      ``duration`` callback, taking into account resource availability,
+      allocation, and productivity.
 
 Resource Dependency:
     - Duration calculations can account for resource constraints, productivity, and availability
     - Custom duration callback allows modeling of complex resource scenarios
+
+Time Arrays:
+    Throughout this module, time and effort values are represented as
+    numpy arrays of shape ``(3,)`` with the following layout:
+
+    - ``[RES]`` — point estimate (mean value)
+    - ``[VAR]`` — variance (used only when PERT analysis is enabled)
+    - ``[ERR]`` — upper bound on computation error
+
+    The constants ``RES``, ``VAR``, ``ERR`` are defined at module level.
 
 Usage Example
 -------------
@@ -106,8 +119,9 @@ def fit_beta(M, D, a, b, err):
     """
     Fit modified beta distribution parameters to match mean and variance.
 
-    This function calculates the most likely value and shape parameter
-    for a beta distribution given target mean and variance.
+    This function calculates the shape parameters (alpha, beta) for a
+    beta distribution supported on ``[a, b]`` such that its mean equals
+    ``M`` and its variance equals ``D``.
 
     Parameters
     ----------
@@ -120,18 +134,29 @@ def fit_beta(M, D, a, b, err):
     b : float
         Pessimistic (maximum) value
     err : float
-        Computation error threshold (non-negative)
+        Computation error threshold (non-negative). If ``sqrt(D) < err``,
+        the distribution is treated as deterministic.
 
     Returns
     -------
     tuple
-        (alpha, beta) or (None, None) if distribution is deterministic
+        ``(alpha, beta)`` — shape parameters of the beta distribution,
+        or ``(None, None)`` if the distribution is considered deterministic
+        (i.e., ``b - a`` is too small, or the standard deviation is below
+        the computation error threshold).
 
     Raises
     ------
     ValueError
-        If invalid bounds are provided or mean is outside [a,b] range,
-        or if error is negative.
+        If ``a > b``, if ``M`` is outside ``[a, b]``, or if ``err < 0``.
+
+    Notes
+    -----
+    The function uses the standard method of moments for the beta
+    distribution. If the resulting ratio ``mu * (1 - mu) / var`` is
+    less than or equal to 1 (which would correspond to a degenerate
+    distribution), the ratio is clamped to ``1 + 2 * EPS`` to ensure
+    positive shape parameters.
     """
     if a > b:
         raise ValueError(f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})")
@@ -189,12 +214,15 @@ def calc_ppf(p, M, D, a, b, err=0.0):
     Returns
     -------
     float
-        Quantile estimate for the given probability
+        Quantile estimate for the given probability.
+
+        If the distribution is treated as deterministic (see
+        :func:`fit_beta`), returns ``M``.
 
     Raises
     ------
     ValueError
-        If `fit_beta` raises an error due to invalid bounds or parameters.
+        If :func:`fit_beta` raises an error due to invalid bounds or parameters.
     """
     if np.sqrt(D) <= EPS * M:
         return M
@@ -232,12 +260,15 @@ def calc_cdf(val, M, D, a, b, err=0.0):
     Returns
     -------
     float
-        Probability P(X <= val)
+        Probability ``P(X <= val)``.
+
+        For a deterministic distribution (see :func:`fit_beta`),
+        returns ``1.0`` if ``val > M`` and ``0.0`` otherwise.
 
     Raises
     ------
     ValueError
-        If `fit_beta` raises an error due to invalid bounds or parameters.
+        If :func:`fit_beta` raises an error due to invalid bounds or parameters.
     """
     if np.sqrt(D) <= EPS * M:
         return 1.0 if val > M else 0.0
@@ -262,7 +293,7 @@ def _p_quantile_estimate(p, tm, optimistic, pessimistic):
     p : float
         Probability value (0 < p < 1)
     tm : numpy.ndarray
-        Time array with [RES, VAR, ERR] components
+        Time array with ``[RES, VAR, ERR]`` components
     optimistic : float
         Optimistic time estimate
     pessimistic : float
@@ -276,7 +307,7 @@ def _p_quantile_estimate(p, tm, optimistic, pessimistic):
     Raises
     ------
     ValueError
-        If `calc_ppf` raises an error due to invalid parameters.
+        If :func:`calc_ppf` raises an error due to invalid parameters.
     """
     return calc_ppf(p, tm[RES], tm[VAR], optimistic, pessimistic, err=tm[ERR])
 
@@ -290,7 +321,7 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
     val : float
         Value to compare against
     tm : numpy.ndarray
-        Time array with [RES, VAR, ERR] components
+        Time array with ``[RES, VAR, ERR]`` components
     optimistic : float
         Optimistic time estimate
     pessimistic : float
@@ -299,12 +330,12 @@ def _prob_estimate(val, tm, optimistic, pessimistic):
     Returns
     -------
     float
-        Probability P(tm < val)
+        Probability ``P(tm < val)``
 
     Raises
     ------
     ValueError
-        If `calc_cdf` raises an error due to invalid parameters.
+        If :func:`calc_cdf` raises an error due to invalid parameters.
     """
     return calc_cdf(val, tm[RES], tm[VAR], optimistic, pessimistic, err=tm[ERR])
 
@@ -313,23 +344,38 @@ def _choice(old, new, delta):
     """
     Choose between two time estimates based on certainty criteria.
 
-    This function implements a decision mechanism for selecting between
-    competing time estimates in the presence of uncertainty.
+    This function implements a heuristic decision mechanism for selecting
+    between competing time estimates in the presence of uncertainty.
 
     Parameters
     ----------
     old : numpy.ndarray
-        Existing time estimate [value, variance, error_bound]
+        Existing time estimate ``[value, variance, error_bound]``
     new : numpy.ndarray
-        New time estimate [value, variance, error_bound]
+        New time estimate ``[value, variance, error_bound]``
     delta : float
-        Difference between the new and old estimates (new[RES] - old[RES]).
-        Used to decide which estimate is more certain.
+        Difference between the new and old estimates
+        (``new[RES] - old[RES]``). Used to decide which estimate is
+        more certain.
 
     Returns
     -------
     numpy.ndarray
-        Selected time estimate
+        Selected time estimate:
+
+        - If ``delta >= e`` where ``e = new[ERR] + old[ERR]`` — returns ``new``
+          (the difference is statistically significant).
+        - If ``delta <= -e`` — returns ``old``.
+        - Otherwise — returns a mixed estimate with mean ``0.5 * (new + old)``,
+          maximum variance, and half the combined error bound.
+
+    Notes
+    -----
+    This is an *engineering heuristic*, not a rigorous statistical
+    combination of distributions. The mixed estimate deliberately
+    overestimates variance (by taking the maximum) and halves the
+    error bound to reflect the loss of precision when two nearly
+    equal estimates are combined.
     """
     e = new[ERR] + old[ERR]
     if delta >= e:
@@ -350,38 +396,47 @@ def _default_duration(effort, activity, base_time, target):
     Default duration callback function.
 
     This function provides the default behavior where duration equals effort.
+    It is used when the user does not supply a custom ``duration`` callback
+    to :class:`NetworkModel`.
 
     Parameters
     ----------
     effort : float
         Resource effort estimate:
+
         - Positive number or zero for forward pass (early times calculation)
         - Negative number or zero for backward pass (late times calculation)
     activity : _Activity
         Activity object for context-aware calculations
     base_time : float or None
         Base time from which the activity starts:
-        - float for time computations during network traversal
-        - None for network post-processing (optimistic/pessimistic scenarios)
+
+        - ``float`` for time computations during network traversal
+          (``target`` is ``'early'`` or ``'late'``)
+        - ``None`` for network post-processing (``target`` is ``None``)
+        - ``float`` (scalar) for scenario computations
+          (``target`` is ``'optimistic'`` or ``'pessimistic'``)
     target : str or None
-        Target scenario identifier: 'early', 'late', 'optimistic', 'pessimistic',
-        or None (for post-processing and triangle optimization).
+        Target scenario identifier: ``'early'``, ``'late'``, ``'optimistic'``,
+        ``'pessimistic'``, or ``None`` (for post-processing and triangle
+        optimization).
 
     Returns
     -------
     float
-        Activity duration with the same sign as effort:
-        - Zero if effort is zero
-        - Positive number if effort is positive
-        - Negative number if effort is negative
+        Activity duration with the same sign as ``effort``:
+
+        - Zero if ``effort`` is zero
+        - Positive number if ``effort`` is positive
+        - Negative number if ``effort`` is negative
 
     Notes
     -----
-    The function must preserve the sign of the effort parameter to ensure
+    The function must preserve the sign of the ``effort`` parameter to ensure
     correct forward and backward pass calculations in the network.
 
-    When base_time is None, the function should return a duration estimate
-    without considering time-based resource availability constraints.
+    When ``base_time`` is ``None``, the function should return a duration
+    estimate without considering time-based resource availability constraints.
 
     Examples
     --------
@@ -421,10 +476,13 @@ def _default_style(element):
     dict
         Dictionary with styling attributes for Graphviz.
         Contains the following keys:
-            - ``color``: string with CSS color (e.g., '#ff0000', '#ffa000', '#000000')
-            - ``penwidth``: string with line width (e.g., '4', '3', '2')
-            - ``fontsize``: string with font size (e.g., '16', '14')
-            - ``weight``: string with edge weight for Graphviz (e.g., '3', '2', '1')
+
+        - ``color``: string with CSS color (e.g., ``'#ff0000'``,
+          ``'#ffa000'``, ``'#000000'``)
+        - ``penwidth``: string with line width (e.g., ``'4'``, ``'3'``, ``'2'``)
+        - ``fontsize``: string with font size (e.g., ``'16'``, ``'14'``)
+        - ``weight``: string with edge weight for Graphviz
+          (e.g., ``'3'``, ``'2'``, ``'1'``)
 
     Raises
     ------
@@ -487,7 +545,7 @@ class _Activity:
     Parameters
     ----------
     id : int
-        Unique activity identifier
+        Unique activity identifier (internal, assigned by :class:`NetworkModel`)
     wbs_id : int
         Work Breakdown Structure identifier (0 for dummy activities)
     letter : str
@@ -499,69 +557,80 @@ class _Activity:
     dst : _Event
         Destination event of the activity
     expected : float
-        Activity expected resource effort (mathematical expectation)
+        Activity expected resource effort (mathematical expectation).
+        Must be a ``float`` (not ``int``) — use ``float(x)`` if needed.
     exp_var : float
-        Activity effort variance
+        Activity effort variance. Must be non-negative.
     optimistic : float
         Optimistic effort estimate
     pessimistic : float
         Pessimistic effort estimate
     data : dict, optional
-        Additional activity data from WBS
+        Additional activity data from WBS (custom user fields)
+    is_dummy : bool, default=False
+        Whether this is a dummy activity (used in AoA network construction)
 
     Attributes
     ----------
     id : int
         Unique activity identifier
     wbs_id : int
-        WBS identifier
+        WBS identifier (0 for dummy activities)
     letter : str
         Activity letter/code
     model : NetworkModel
         Parent network model
     src : _Event
-        Source event
+        Source event (property, setter updates the event's activity lists)
     dst : _Event
-        Destination event
+        Destination event (property, setter updates the event's activity lists)
     expected : numpy.ndarray
-        Array containing [effort_value, variance, error_bound]
+        Array containing ``[effort_value, variance, error_bound]``
     data : dict
         Additional activity data
     early_start : numpy.ndarray
-        Early start time [value, variance, error_bound]
+        Early start time ``[value, variance, error_bound]``
     late_start : numpy.ndarray
-        Late start time [value, variance, error_bound]
+        Late start time ``[value, variance, error_bound]``
     early_end : numpy.ndarray
-        Early end time [value, variance, error_bound]
+        Early end time ``[value, variance, error_bound]``
     late_end : numpy.ndarray
-        Late end time [value, variance, error_bound]
+        Late end time ``[value, variance, error_bound]``
     reserve : numpy.ndarray
-        Time reserve [value, variance, error_bound]
+        Time reserve ``[value, variance, error_bound]``
     optimistic : float
         Optimistic effort estimate
     pessimistic : float
         Pessimistic effort estimate
     opt_start : float
-        Optimistic start time
+        Optimistic start time (scenario)
     opt_end : float
-        Optimistic end time
+        Optimistic end time (scenario)
     pes_start : float
-        Pessimistic start time
+        Pessimistic start time (scenario)
     pes_end : float
-        Pessimistic end time
+        Pessimistic end time (scenario)
+    is_dummy : bool
+        Whether this is a dummy activity
 
     Notes
     -----
-    - Resource effort arrays follow the format: [RES (value), VAR (variance), ERR (error bound)]
-    - Duration is calculated dynamically considering resource allocation and availability
-    - The ``duration`` property computes actual time from early and late time analyses
+    - Resource effort arrays follow the format
+      ``[RES (value), VAR (variance), ERR (error bound)]``.
+    - Duration is calculated dynamically from early and late analyses
+      via the :attr:`duration` property, which accounts for resource
+      allocation through the model's ``duration`` callback.
+    - Setters for ``src`` and ``dst`` maintain the corresponding event's
+      internal ``_in_activities`` / ``_out_activities`` lists. Do not
+      mutate those lists directly.
 
     Raises
     ------
     TypeError
         If any argument has an incorrect type.
     ValueError
-        If `expected` or `exp_var` is negative, or if `data` is not a dict when provided.
+        If ``expected`` or ``exp_var`` is negative, or if ``data`` is not
+        a dict when provided.
     """
 
     def __init__(self, id, wbs_id, letter, model, src, dst, expected=0.0,
@@ -631,6 +700,11 @@ class _Activity:
 
     @property
     def src(self):
+        """Source event of the activity.
+
+        Setting this property updates the corresponding event's
+        internal activity lists (removes from old, appends to new).
+        """
         return self._src
 
     @src.setter
@@ -643,6 +717,11 @@ class _Activity:
 
     @property
     def dst(self):
+        """Destination event of the activity.
+
+        Setting this property updates the corresponding event's
+        internal activity lists (removes from old, appends to new).
+        """
         return self._dst
 
     @dst.setter
@@ -655,6 +734,7 @@ class _Activity:
 
     @property
     def is_dummy(self):
+        """Whether this activity is a dummy (used in AoA construction)."""
         return self._is_dummy
 
     @property
@@ -662,21 +742,26 @@ class _Activity:
         """
         Calculate activity duration from early and late time analyses.
 
-        This property computes the actual duration by comparing
-        early and late time calculations and selecting the most certain
-        estimate.
+        This property computes the actual duration by comparing early and
+        late time calculations and selecting the most certain estimate
+        via :func:`_choice`.
 
         Returns
         -------
         numpy.ndarray
-            Duration array [value, variance, error_bound]
+            Duration array ``[value, variance, error_bound]``.
 
         Notes
         -----
         The duration is calculated as:
-        - Early approach: early_end - early_start
-        - Late approach: late_end - late_start
+
+        - Early approach: ``early_end - early_start``
+        - Late approach: ``late_end - late_start``
         - Final selection uses certainty-based decision making
+
+        The returned array's ``VAR`` component reflects the propagated
+        variance of the duration (relevant for PERT models). Its ``RES``
+        component is the point estimate.
         """
         # Early duration calculation
         # Note:
@@ -704,7 +789,7 @@ class _Activity:
         Returns
         -------
         float
-            Early start time quantile for model's probability level
+            Early start time quantile for the model's probability level ``p``.
         """
         return _p_quantile_estimate(self.model.p, self.early_start, self.opt_start, self.pes_start)
 
@@ -720,7 +805,7 @@ class _Activity:
         Returns
         -------
         float
-            P(early_start < val)
+            ``P(early_start < val)``
         """
         return _prob_estimate(val, self.early_start, self.opt_start, self.pes_start)
 
@@ -732,7 +817,7 @@ class _Activity:
         Returns
         -------
         float
-            Early end time quantile for model's probability level
+            Early end time quantile for the model's probability level ``p``.
         """
         return _p_quantile_estimate(self.model.p, self.early_end, self.opt_end, self.pes_end)
 
@@ -748,12 +833,12 @@ class _Activity:
         Returns
         -------
         float
-            P(early_end < val)
+            ``P(early_end < val)``
         """
         return _prob_estimate(val, self.early_end, self.opt_end, self.pes_end)
 
     def __repr__(self):
-        """String representation of the activity."""
+        """String representation of the activity (a dict-like view)."""
         return str(self.to_dict())
 
     def to_dict(self):
@@ -772,18 +857,28 @@ class _Activity:
             - ``dst_id``: Destination event ID
             - ``expected``: Activity expected resource effort
             - ``duration``: Actual duration
-            - ``early_start``, ``late_start``, ``early_end``, ``late_end``: Timing parameters
+            - ``early_start``, ``late_start``, ``early_end``, ``late_end``:
+              Timing parameters
             - ``reserve``: Time reserve
+            - ``is_dummy``: Whether this is a dummy activity
             - ``data``: Additional activity data
             - Additional PERT fields if applicable
 
         Notes
         -----
-        PERT-specific fields (early_start_var, early_end_var, early_start_pqe, early_end_pqe)
-        are only included when PERT analysis is enabled.
+        PERT-specific fields (``exp_var``, ``variance``, ``optimistic``,
+        ``opt_start``, ``opt_end``, ``pessimistic``, ``pes_start``,
+        ``pes_end``, ``early_start_var``, ``early_end_var``,
+        ``early_start_pqe``, ``early_end_pqe``, ``late_end_prob``) are only
+        included when PERT analysis is enabled (``model.is_pert``).
+
+        Debug-specific fields (``early_start_err``, ``late_start_err``,
+        ``early_end_err``, ``late_end_err``) are only included when
+        ``model.debug`` is ``True``.
 
         The returned dictionary is a copy of ``self.data`` extended with
-        the computed CPM/PERT fields.
+        the computed CPM/PERT fields. If a user field name collides with
+        a computed field name, the computed value takes precedence.
         """
 
         # Start with user data
@@ -851,7 +946,8 @@ class _Event:
     Attributes
     ----------
     id : int
-        Unique event identifier
+        Unique event identifier (renumerated by :class:`NetworkModel`
+        after construction, according to topological stage order)
     model : NetworkModel
         Parent network model
     data : dict
@@ -861,22 +957,23 @@ class _Event:
         columns in the events DataFrame produced by
         :meth:`NetworkModel.to_dataframe`).
     early : numpy.ndarray
-        Early time [value, variance, error_bound]
+        Early time ``[value, variance, error_bound]``
     late : numpy.ndarray
-        Late time [value, variance, error_bound]
+        Late time ``[value, variance, error_bound]``
     reserve : numpy.ndarray
-        Time reserve [value, variance, error_bound]
+        Time reserve ``[value, variance, error_bound]``
     stage : int
-        Event stage in topological order
+        Event stage in topological order (0 = start event)
     optimistic : float
-        Optimistic time estimate
+        Optimistic time estimate (scenario)
     pessimistic : float
-        Pessimistic time estimate
+        Pessimistic time estimate (scenario)
 
     Raises
     ------
     TypeError
-        If `id` is not an integer or `model` is not a NetworkModel instance.
+        If ``id`` is not an integer or ``model`` is not a NetworkModel
+        instance.
 
     Notes
     -----
@@ -886,10 +983,11 @@ class _Event:
     ``NetworkModel._compute_target``. Do NOT add ``@dataclass`` without
     ``eq=False``.
 
-    The ``in_activities`` and ``out_activities`` properties return live
-    list objects maintained by ``_Activity.src``/``_Activity.dst`` setters.
-    They are READ-ONLY by contract — do not mutate them directly, or the
-    network's bookkeeping will become inconsistent.
+    The :attr:`in_activities` and :attr:`out_activities` properties return
+    **immutable tuples** (snapshots) of the current activity lists. The
+    underlying lists are maintained by ``_Activity.src`` / ``_Activity.dst``
+    setters. To mutate the topology, reassign ``activity.src`` or
+    ``activity.dst`` — never mutate the internal lists directly.
 
     User-defined keys in ``data`` must not collide with the reserved
     field names inserted by :meth:`to_dict` (``id``, ``stage``,
@@ -925,11 +1023,11 @@ class _Event:
     def in_activities(self):
         """Activities entering this event.
 
-        Returns the live list object (not a copy) for O(1) access during
-        network traversal. READ-ONLY by contract: mutate topology through
-        ``activity.dst = new_event`` instead — the ``dst`` setter maintains
-        this list. Direct mutation (``append``/``remove``/``clear``) will
-        silently corrupt the network.
+        Returns an **immutable tuple** (snapshot) of the current incoming
+        activities. The underlying list is maintained by the
+        ``_Activity.dst`` setter. To mutate topology, reassign
+        ``activity.dst = new_event`` — do not attempt to modify the
+        returned tuple (it is immutable) or the internal list directly.
         """
         return tuple(self._in_activities)
 
@@ -937,11 +1035,11 @@ class _Event:
     def out_activities(self):
         """Activities leaving this event.
 
-        Returns the live list object (not a copy) for O(1) access during
-        network traversal. READ-ONLY by contract: mutate topology through
-        ``activity.src = new_event`` instead — the ``src`` setter maintains
-        this list. Direct mutation (``append``/``remove``/``clear``) will
-        silently corrupt the network.
+        Returns an **immutable tuple** (snapshot) of the current outgoing
+        activities. The underlying list is maintained by the
+        ``_Activity.src`` setter. To mutate topology, reassign
+        ``activity.src = new_event`` — do not attempt to modify the
+        returned tuple (it is immutable) or the internal list directly.
         """
         return tuple(self._out_activities)
 
@@ -953,7 +1051,7 @@ class _Event:
         Returns
         -------
         float
-            Early time quantile for model's probability level
+            Early time quantile for the model's probability level ``p``.
         """
         return _p_quantile_estimate(self.model.p, self.early, self.optimistic, self.pessimistic)
 
@@ -969,12 +1067,12 @@ class _Event:
         Returns
         -------
         float
-            P(early < val)
+            ``P(early < val)``
         """
         return _prob_estimate(val, self.early, self.optimistic, self.pessimistic)
 
     def __repr__(self):
-        """String representation of the event."""
+        """String representation of the event (a dict-like view)."""
         return str(self.to_dict())
 
     def to_dict(self):
@@ -996,16 +1094,20 @@ class _Event:
 
         Notes
         -----
-        PERT-specific fields (early_var, early_pqe, late_prob) are only
-        included when PERT analysis is enabled.
+        PERT-specific fields (``optimistic``, ``pessimistic``, ``early_var``,
+        ``early_pqe``, ``late_prob``) are only included when PERT analysis
+        is enabled (``model.is_pert``).
+
+        Debug-specific fields (``early_err``, ``late_err``) are only
+        included when ``model.debug`` is ``True``.
 
         The returned dictionary is a copy of ``self.data`` extended with
-        the computed CPM/PERT fields.
-        Reserved field names (``id``, ``stage``, ``early``, ``late``,
-        ``reserve``, ``optimistic``, ``pessimistic``, ``early_var``,
-        ``early_pqe``, ``late_prob``, ``early_err``, ``late_err``) must
-        not be used as user data keys, otherwise the computed values
-        take precedence in the output dictionary.
+        the computed CPM/PERT fields. Reserved field names (``id``,
+        ``stage``, ``early``, ``late``, ``reserve``, ``optimistic``,
+        ``pessimistic``, ``early_var``, ``early_pqe``, ``late_prob``,
+        ``early_err``, ``late_err``) must not be used as user data keys,
+        otherwise the computed values take precedence in the output
+        dictionary.
         """
         # Start with user data
         ret = self.data.copy()
@@ -1039,15 +1141,31 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
 
     Supports three formats in order of priority:
 
-    1. **Three-point PERT**: Uses optimistic, most_likely, and pessimistic effort estimates
-       with formula: mean = (optimistic + 4*most_likely + pessimistic)/6,
-       variance = ((pessimistic - optimistic)/6)²
+    1. **Three-point PERT**: Uses ``optimistic``, ``most_likely``, and
+       ``pessimistic`` effort estimates with formulas:
 
-    2. **Two-point PERT**: Uses optimistic and pessimistic effort estimates
-       with formula: mean = (3*optimistic + 2*pessimistic)/5,
-       variance = ((pessimistic - optimistic)/5)²
+       - ``mean = (optimistic + 4 * most_likely + pessimistic) / 6``
+       - ``variance = ((pessimistic - optimistic) / 6) ** 2``
 
-    3. **Direct parameters**: Uses directly provided expected and variance values
+    2. **Two-point PERT**: Uses ``optimistic`` and ``pessimistic`` effort
+       estimates with formulas:
+
+       - ``most_likely = (2 * optimistic + pessimistic) / 3``
+       - ``mean = (3 * optimistic + 2 * pessimistic) / 5``
+       - ``variance = ((pessimistic - optimistic) / 5) ** 2``
+
+    3. **Direct parameters**: Uses directly provided ``expected`` and
+       optional ``exp_var`` values. If ``exp_var`` is positive, the
+       implicit ``optimistic`` / ``pessimistic`` bounds are derived
+       using ``default_risk`` as follows:
+
+       - ``d = 3 * sqrt(exp_var)``
+       - ``optimistic = mean - min(d, default_risk * mean)``
+       - ``pessimistic = optimistic + 2 * d``
+       - ``most_likely = (6 * mean - optimistic - pessimistic) / 4``
+
+       If ``exp_var == 0``, the distribution is treated as deterministic:
+       ``optimistic = most_likely = pessimistic = expected``.
 
     Parameters
     ----------
@@ -1058,18 +1176,24 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
         - For two-point PERT: ``optimistic``, ``pessimistic``
         - For direct parameters: ``expected``, ``exp_var`` (optional)
     default_risk : float, default=0.3
-        Default risk factor for effort estimation when variance is provided
+        Default risk factor (in ``[0, 1]``) used to derive bounds when
+        only ``expected`` and ``exp_var`` are provided.
 
     Returns
     -------
     tuple
-        (mean_effort, variance, optimistic, most_likely, pessimistic)
+        ``(mean_effort, variance, optimistic, most_likely, pessimistic)``
+        — all floats representing **resource effort**, not duration.
 
     Raises
     ------
+    TypeError
+        If ``work_data`` is not a dict.
     ValueError
-        If insufficient data is provided or estimates are invalid
-        (e.g., optimistic > most_likely > pessimistic not satisfied).
+        If ``default_risk`` is out of range, or if insufficient data is
+        provided, or if estimates are invalid (e.g., the ordering
+        ``optimistic <= most_likely <= pessimistic`` is not satisfied,
+        or negative mean/variance are given).
 
     Examples
     --------
@@ -1172,20 +1296,24 @@ class NetworkModel:
     ----------
     wbs_dict : dict
         Work Breakdown Structure dictionary with activity data.
-        Each key is an activity ID and value is a dictionary containing:
+        Each key is an activity ID (``int``) and value is a dictionary
+        containing:
 
-        - ``letter``: Activity letter/code (required)
+        - ``letter``: Activity letter/code (required, ``str``)
         - One of these resource effort specifications:
-            - Direct: ``expected`` and optional ``exp_var``
-            - Three-point PERT: ``optimistic``, ``most_likely``, ``pessimistic``
-            - Two-point PERT: ``optimistic``, ``pessimistic``
+
+          - Direct: ``expected`` and optional ``exp_var``
+          - Three-point PERT: ``optimistic``, ``most_likely``, ``pessimistic``
+          - Two-point PERT: ``optimistic``, ``pessimistic``
         - ``name``: Activity description (optional)
         - Any other custom fields for resource modeling
 
     lnk_src : array-like, optional
-        Source activity IDs for dependencies (old format)
+        Source activity IDs for dependencies (legacy format).
+        Must be provided together with ``lnk_dst``.
     lnk_dst : array-like, optional
-        Destination activity IDs for dependencies (old format)
+        Destination activity IDs for dependencies (legacy format).
+        Must be provided together with ``lnk_src``.
     links : various, optional
         Dependency links in various formats:
 
@@ -1193,55 +1321,68 @@ class NetworkModel:
         - Two columns: ``[[src1, dst1], [src2, dst2], ...]``
         - Dictionary: ``{'src': [src1, src2, ...], 'dst': [dst1, dst2, ...]}``
 
+        Cannot be used together with ``lnk_src``/``lnk_dst``.
     duration : callable, default=_default_duration
         Callback function for resource-aware duration calculation.
-        Signature: duration(effort, activity, base_time, target) -> float
+        Signature: ``duration(effort, activity, base_time, target) -> float``
 
-        - effort: float value representing resource effort:
+        - ``effort``: float value representing resource effort:
+
           * Positive number or zero for forward pass (early times calculation)
           * Negative number or zero for backward pass (late times calculation)
-        - activity: _Activity object for context
-        - base_time: float for time-based availability checks during network traversal,
-          or None for network post-processing (optimistic/pessimistic scenarios)
-        - target: str or None indicating the computation scenario:
-          'early', 'late', 'optimistic', 'pessimistic', or None
-          (None for post-processing and triangle optimization).
-        Returns: float value representing actual duration with the same sign as effort:
-          * Zero if effort is zero
-          * Positive number if effort is positive
-          * Negative number if effort is negative
+        - ``activity``: :class:`_Activity` object for context
+        - ``base_time``: context-dependent:
+
+          * ``float`` during forward/backward pass (``target`` is
+            ``'early'`` or ``'late'``)
+          * ``None`` during network post-processing (``target`` is ``None``)
+          * ``float`` (scalar) during scenario computations (``target`` is
+            ``'optimistic'`` or ``'pessimistic'``)
+        - ``target``: str or None indicating the computation scenario:
+
+          ``'early'``, ``'late'``, ``'optimistic'``, ``'pessimistic'``,
+          or ``None`` (for post-processing and triangle optimization).
+
+        Returns: float value representing actual duration with the same
+        sign as ``effort``:
+
+        - Zero if ``effort`` is zero
+        - Positive number if ``effort`` is positive
+        - Negative number if ``effort`` is negative
 
     p : float, default=0.95
-        Probability level for PERT quantile estimates
+        Probability level for PERT quantile estimates (``0 < p < 1``)
     default_risk : float, default=0.3
-        Default risk factor for effort estimation
+        Default risk factor for effort estimation (``0 <= default_risk <= 1``)
     next_act_id : int, default=1
-        Starting ID for automatically generated activities (used internally)
+        Starting ID for automatically generated internal activity numbering.
+        Must be positive.
     debug : bool, default=False
-        Enable debug mode to include computation error bounds
+        Enable debug mode to include computation error bounds in output
 
     Raises
     ------
-    ValueError
-        If insufficient link data is provided or links format is invalid,
-        or if network construction fails (e.g., circular dependencies).
     TypeError
         If input types are incorrect.
+    ValueError
+        If insufficient link data is provided, links format is invalid,
+        or if network construction fails (e.g., circular dependencies).
     RuntimeError
         If internal network consistency checks fail.
 
     Attributes
     ----------
-    activities : list
-        List of _Activity objects in the network
-    events : list
-        List of _Event objects in the network
+    activities : list of _Activity
+        List of activity objects in the network (real + dummy).
+    events : list of _Event
+        List of event objects in the network, sorted by topological stage.
     is_pert : bool
-        True if PERT analysis is enabled (variance > 0 for any activity)
+        ``True`` if PERT analysis is enabled (any activity has non-zero
+        variance).
     debug : bool
-        Debug mode flag
+        Debug mode flag.
     p : float
-        Probability level for PERT
+        Probability level for PERT quantile estimates.
 
     Examples
     --------
@@ -1286,19 +1427,19 @@ class NetworkModel:
 
     Notes
     -----
-    The duration callback function must preserve the sign of the effort parameter
-    to ensure correct forward and backward pass calculations in the network:
-    - For forward pass (early times): effort >= 0, duration >= 0
-    - For backward pass (late times): effort <= 0, duration <= 0
-    - For zero effort: duration = 0
+    The duration callback function must preserve the sign of the effort
+    parameter to ensure correct forward and backward pass calculations:
 
-    When base_time is None in the duration callback, it indicates that
-    the function should return a duration estimate without considering
+    - For forward pass (early times): ``effort >= 0``, ``duration >= 0``
+    - For backward pass (late times): ``effort <= 0``, ``duration <= 0``
+    - For zero effort: ``duration == 0``
+
+    When ``base_time`` is ``None`` in the duration callback, it indicates
+    that the function should return a duration estimate without considering
     time-based resource availability constraints.
 
     For PERT analysis, variance is automatically propagated through the
     network using modified PERT distribution formulas.
-
 
     Reserved WBS field names (``expected``, ``exp_var``, ``letter``,
     ``optimistic``, ``most_likely``, ``pessimistic``) are consumed during
@@ -1372,44 +1513,49 @@ class NetworkModel:
 
     @property
     def is_pert(self):
+        """Whether PERT analysis is enabled (any activity has non-zero variance)."""
         return self._is_pert
 
     @property
     def p(self):
+        """Probability level for PERT quantile estimates."""
         return self._p
 
     @property
     def activities(self):
+        """List of activity objects in the network."""
         return self._activities
 
     @property
     def events(self):
+        """List of event objects, sorted by topological stage."""
         return self._events
 
     def _parse_links(self, lnk_src, lnk_dst, links):
         """
-        Parse links from various formats into standard lnk_src, lnk_dst arrays.
+        Parse links from various formats into standard ``(lnk_src, lnk_dst)`` lists.
 
         Parameters
         ----------
         lnk_src : array-like, optional
-            Source activity IDs (old format)
+            Source activity IDs (legacy format)
         lnk_dst : array-like, optional
-            Destination activity IDs (old format)
+            Destination activity IDs (legacy format)
         links : various, optional
-            Links in various new formats
+            Links in one of the supported new formats
 
         Returns
         -------
         tuple
-            (lnk_src, lnk_dst) as lists
+            ``(lnk_src, lnk_dst)`` as lists of activity IDs
 
         Raises
         ------
         TypeError
             If any input is not an iterable or cannot be converted to a list.
         ValueError
-            If link data is insufficient, lengths mismatch, or format is unsupported.
+            If link data is insufficient, lengths mismatch, format is
+            unsupported, or both legacy and new formats are provided.
         """
 
         if (lnk_src is not None or lnk_dst is not None) and links is not None:
@@ -1481,7 +1627,10 @@ class NetworkModel:
         Create network model from WBS data and links.
 
         Internal method that constructs the network graph, creates events
-        and activities, and sets up the model for analysis.
+        and activities, and sets up the model for analysis. It delegates
+        the AoA network generation to the C extension ``_ccpm.make_aoa``,
+        then performs a post-processing step to place maximum-effort
+        activities on the long side of triangle groups.
 
         Parameters
         ----------
@@ -1608,7 +1757,11 @@ class NetworkModel:
         Returns
         -------
         dict
-            WBS data without fields stored as separate attributes
+            Shallow copy of ``wbs_data`` with the following keys removed
+            (they are consumed during parsing and stored as separate
+            attributes on the :class:`_Activity` instance):
+            ``expected``, ``exp_var``, ``letter``, ``optimistic``,
+            ``most_likely``, ``pessimistic``.
         """
         # Create a copy to avoid modifying the original data
         data_copy = wbs_data.copy()
@@ -1639,11 +1792,18 @@ class NetworkModel:
         Notes
         -----
         The computation is performed in two phases:
-        1. Forward pass: Compute early times starting from project beginning
-        2. Backward pass: Compute late times starting from project completion
 
-        For PERT models, additional optimistic and pessimistic scenarios
-        are computed to provide statistical analysis.
+        1. Forward pass: Compute early times starting from project beginning.
+        2. Backward pass: Compute late times starting from project completion.
+
+        For PERT models (``is_pert == True``), additional optimistic and
+        pessimistic scenarios are computed to provide statistical analysis
+        (see :meth:`_compute_target` with ``target='optimistic'`` and
+        ``target='pessimistic'``).
+
+        After computation, all negative ``early``/``late`` values are
+        clamped to zero. Time reserves smaller than their error bound
+        (in absolute value) are rounded to zero.
         """
         self._compute_target('early')
 
@@ -1724,25 +1884,52 @@ class NetworkModel:
         Compute CPM parameters for events and activities.
 
         This method performs topological sorting and computes either
-        early times (forward pass) or late times (backward pass).
+        early times (forward pass), late times (backward pass), stage
+        numbers, or optimistic/pessimistic scenario times.
 
         Parameters
         ----------
         target : str
-            What to compute: 'stage', 'early', 'late', 'optimistic', or 'pessimistic'
+            What to compute. One of:
+
+            - ``'stage'`` — topological stage of each event
+            - ``'early'`` — early start/end times (forward pass)
+            - ``'late'`` — late start/end times (backward pass)
+            - ``'optimistic'`` — optimistic scenario times
+            - ``'pessimistic'`` — pessimistic scenario times
 
         Raises
         ------
         ValueError
-            If target parameter is invalid.
+            If ``target`` parameter is invalid.
         RuntimeError
-            If network has more than one starting event or contains cycles.
+            If network has more than one starting event (i.e., the
+            project does not have exactly one source event) or contains
+            cycles not detected earlier.
 
         Notes
         -----
         The computation uses different strategies for stage calculation
-        vs time parameter calculation. For PERT analysis, variance is
-        propagated using modified PERT distribution formulas.
+        vs time parameter calculation:
+
+        - For ``'stage'``, each activity contributes a delta of ``1`` to
+          the stage of its destination event.
+        - For ``'early'`` and ``'late'``, the delta is a time vector
+          ``[RES, VAR, ERR]`` processed by the model's ``duration``
+          callback (via :func:`_duration_vec`).
+        - For ``'optimistic'`` and ``'pessimistic'``, the delta is a
+          scalar and the callback receives ``base_time`` as a scalar
+          (not a numpy array).
+
+        The algorithm maintains a count of unresolved dependencies for
+        each event (``n_dep``). Events with zero dependencies are pushed
+        to the processing queue. When an activity is processed, the
+        destination event's dependency counter is decremented; when it
+        reaches zero, the event is added to the queue.
+
+        For PERT analysis, variance is propagated using the modified
+        PERT distribution formula (see the inner ``_duration_vec``
+        function).
         """
         def _choice_early(old, new):
             return _choice(old, new, new[RES] - old[RES])
@@ -1765,19 +1952,30 @@ class NetworkModel:
             Parameters
             ----------
             effort : numpy.ndarray
-                Resource effort array [value, variance, error_bound]
+                Resource effort array ``[value, variance, error_bound]``
             activity : _Activity
                 Activity object for context
             base_time : numpy.ndarray or None
-                Base time array [value, variance, error_bound] for time computations,
-                or None for network post-processing
+                Base time array ``[value, variance, error_bound]`` for time
+                computations, or ``None`` for network post-processing
             target : str or None
                 Target scenario identifier
 
             Returns
             -------
             numpy.ndarray
-                Duration array [value, variance, error_bound]
+                Duration array ``[value, variance, error_bound]``
+
+            Notes
+            -----
+            - If the model uses the default duration callback, the effort
+              array is returned as-is (no conversion needed).
+            - Otherwise, the callback is invoked on ``effort[RES]`` and the
+              result is stored in ``dur[RES]``. The error bound ``dur[ERR]``
+              is set to ``EPS * abs(dur[RES])``.
+            - For PERT models with non-zero effort variance, the duration
+              variance is computed using the shape parameters of the fitted
+              beta distribution (via :func:`fit_beta`).
             """
             # Optimize for default duration function
             if _default_duration == self._duration:
@@ -1942,9 +2140,9 @@ class NetworkModel:
         wbs_id : int
             Work Breakdown Structure identifier (0 for dummy activities)
         src_id : int
-            Source event ID
+            Source event ID (1-based index into ``self._events``)
         dst_id : int
-            Destination event ID
+            Destination event ID (1-based index into ``self._events``)
         expected : float
             Activity expected resource effort
         exp_var : float
@@ -1957,6 +2155,8 @@ class NetworkModel:
             Activity letter/code for visualization
         data : dict
             WBS data excluding fields stored as separate attributes
+        is_dummy : bool, default=False
+            Whether this is a dummy activity
 
         Raises
         ------
@@ -1995,7 +2195,7 @@ class NetworkModel:
         self.next_act += 1
 
     def __repr__(self):
-        """String representation of the network model."""
+        """String representation of the network model (events + activities)."""
         _repr = 'Events:{\n'
         for e in self._events:
             _repr += '        ' + str(e) + '\n'
@@ -2054,13 +2254,18 @@ class NetworkModel:
         Returns
         -------
         tuple
-            (activities_df, events_df) - pandas DataFrames for activities and events
+            ``(activities_df, events_df)`` — pandas DataFrames for
+            activities and events.
 
         Notes
         -----
-        Both DataFrames expand custom user data fields from the corresponding
-        ``data`` attributes (``_Activity.data`` and ``_Event.data``) into
-        separate columns for easy analysis.
+        Both DataFrames expand custom user data fields from the
+        corresponding ``data`` attributes (``_Activity.data`` and
+        ``_Event.data``) into separate columns for easy analysis.
+
+        Activities' missing values are replaced with empty strings
+        for object-typed columns (where possible, subject to the
+        installed pandas version).
         """
         # Convert to dictionaries first
         model_dict = self.to_dict()
@@ -2087,21 +2292,23 @@ class NetworkModel:
             Output path for saving the visualization file. The rendering
             format is determined by the file extension:
 
-            - ``.png`` — Portable Network Graphics (default if no extension is given)
+            - ``.png`` — Portable Network Graphics (default if no extension
+              is given)
             - ``.svg`` — Scalable Vector Graphics
             - ``.pdf`` — Portable Document Format
 
-            If None, the graph is not rendered to a file (only the Digraph
-            object is returned).
+            If ``None``, the graph is not rendered to a file (only the
+            ``Digraph`` object is returned).
         group_by_stage : bool, default=False
-            If True, events are grouped into "layers" by their topological order (stage).
-            If False, events are placed freely by Graphviz default layout.
+            If ``True``, events are grouped into "layers" by their
+            topological order (stage). If ``False``, events are placed
+            freely by the Graphviz default layout.
         get_style : callable, default=_default_style
             Callback that computes styling attributes for a graph element.
-            Signature: ``get_style(element) -> dict``, where ``element`` is
-            either an ``_Event`` or an ``_Activity``. The returned dictionary
-            must contain keys ``color``, ``penwidth`` and ``fontsize``; the
-            key ``weight`` is used for activity edges.
+            Signature: ``get_style(element) -> dict``, where ``element``
+            is either an ``_Event`` or an ``_Activity``. The returned
+            dictionary must contain keys ``color``, ``penwidth`` and
+            ``fontsize``; the key ``weight`` is used for activity edges.
 
         Returns
         -------
@@ -2118,22 +2325,27 @@ class NetworkModel:
         Notes
         -----
         The visualization shows:
-            - Event nodes with early/late times and reserves
-            - Activity edges with duration and reserve information
+
+        - Event nodes with early/late times and reserves
+        - Activity edges with duration and reserve information
 
         The visualization uses the following coding:
-            - Critical paths: Red (#ff0000), penwidth=4, fontsize=16, weight=3
-            - Sub-critical paths: Orange (#ffa000), penwidth=3, fontsize=16, weight=2
-            - Non-critical paths: Black (#000000), penwidth=2, fontsize=14, weight=1
-            - Dashed arrows: Dummy activities
+
+        - Critical paths: red (``#ff0000``), penwidth=4, fontsize=16, weight=3
+        - Sub-critical paths: orange (``#ffa000``), penwidth=3, fontsize=16,
+          weight=2
+        - Non-critical paths: black (``#000000``), penwidth=2, fontsize=14,
+          weight=1
+        - Dashed arrows: dummy activities
 
         Activity labels are embedded directly on edges through an invisible
-        intermediate node; the label itself is drawn as a light-gray rounded
-        box attached to the bend point of the edge.
+        intermediate node; the label itself is drawn as a light-gray
+        rounded box attached to the bend point of the edge. The label
+        font size is fixed at 12 for all activity labels.
 
-        When ``group_by_stage=True``, the topological order of events is preserved
-        by clustering events with the same stage together, improving readability
-        for large networks.
+        When ``group_by_stage=True``, the topological order of events is
+        preserved by clustering events with the same stage together,
+        improving readability for large networks.
         """
         if not callable(get_style):
             raise TypeError(f"Parameter get_style must be callable, got {type(get_style)}")
@@ -2330,20 +2542,23 @@ if __name__ == '__main__':
         ----------
         effort : float
             Resource effort estimate:
+
             - Positive number or zero for forward pass
             - Negative number or zero for backward pass
         activity : _Activity
             Activity object containing resource data
         base_time : float or None
-            Base time for availability calculations during network traversal,
-            or None for network post-processing
+            Base time for availability calculations during network
+            traversal, or ``None`` for network post-processing. For
+            optimistic/pessimistic scenarios, ``base_time`` is a scalar.
         target : str or None
-            Target scenario identifier (can be used for scenario-specific logic)
+            Target scenario identifier (can be used for scenario-specific
+            logic)
 
         Returns
         -------
         float
-            Actual duration with the same sign as effort
+            Actual duration with the same sign as ``effort``.
         """
         # Get resource allocation from activity data
         team_size = activity.data.get('team_size', 1)
