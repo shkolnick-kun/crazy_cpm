@@ -565,7 +565,7 @@ class _Activity:
     """
 
     def __init__(self, id, wbs_id, letter, model, src, dst, expected=0.0,
-                 exp_var=0.0, optimistic=0.0, pessimistic=0.0, data=None):
+                 exp_var=0.0, optimistic=0.0, pessimistic=0.0, data=None, is_dummy=False):
         # Validate types and values (explicit checks instead of asserts)
         if not isinstance(id, int):
             raise TypeError(f"id must be int, got {type(id)}")
@@ -600,10 +600,10 @@ class _Activity:
         self.model = model
 
         self._src = src
-        self._src.out_activities.append(self)
+        self._src._out_activities.append(self)
 
         self._dst = dst
-        self._dst.in_activities.append(self)
+        self._dst._in_activities.append(self)
 
         self.expected = np.zeros((3,), dtype=float)
         self.expected[RES] = expected
@@ -611,6 +611,8 @@ class _Activity:
         self.expected[ERR] = EPS * expected
 
         self.data = data if data is not None else {}
+
+        self._is_dummy = is_dummy
 
         # CPM/PERT parameters
         self.early_start = np.zeros_like(self.expected)
@@ -634,10 +636,10 @@ class _Activity:
     @src.setter
     def src(self, new_src):
         if isinstance(self._src, _Event):
-            self._src.out_activities.remove(self)
+            self._src._out_activities.remove(self)
 
         self._src = new_src
-        new_src.out_activities.append(self)
+        new_src._out_activities.append(self)
 
     @property
     def dst(self):
@@ -646,10 +648,14 @@ class _Activity:
     @dst.setter
     def dst(self, new_dst):
         if isinstance(self._dst, _Event):
-            self._dst.in_activities.remove(self)
+            self._dst._in_activities.remove(self)
 
         self._dst = new_dst
-        new_dst.in_activities.append(self)
+        new_dst._in_activities.append(self)
+
+    @property
+    def is_dummy(self):
+        return self._is_dummy
 
     @property
     def duration(self):
@@ -790,6 +796,7 @@ class _Activity:
         ret['dst_id'  ] = self.dst.id
         ret['expected'] = self.expected[RES] # Resource effort estimate
         ret['duration'] = self.duration[RES] # Actual duration
+        ret['is_dummy'] = self._is_dummy
 
         # CPM timing parameters
         ret['early_start'] = self.early_start[RES]
@@ -924,7 +931,7 @@ class _Event:
         this list. Direct mutation (``append``/``remove``/``clear``) will
         silently corrupt the network.
         """
-        return self._in_activities
+        return tuple(self._in_activities)
 
     @property
     def out_activities(self):
@@ -936,7 +943,7 @@ class _Event:
         this list. Direct mutation (``append``/``remove``/``clear``) will
         silently corrupt the network.
         """
-        return self._out_activities
+        return tuple(self._out_activities)
 
     @property
     def early_pqe(self):
@@ -1349,15 +1356,15 @@ class NetworkModel:
         self._create_model(wbs_dict, lnk_src, lnk_dst, default_risk, next_act_id)
 
         # After _create_model, events must be non-empty
-        if len(self.events) == 0:
+        if len(self._events) == 0:
             raise RuntimeError("Network construction resulted in no events. Check input data.")
 
         # Compute stages of project
         self._compute_target('stage')
 
         # Renumerate events according to the rules of network modeling
-        self.events.sort(key=lambda e: e.stage)
-        for i, e in enumerate(self.events, 1):
+        self._events.sort(key=lambda e: e.stage)
+        for i, e in enumerate(self._events, 1):
             e.id = i
 
         # Compute Event and Activity time parameters
@@ -1370,6 +1377,14 @@ class NetworkModel:
     @property
     def p(self):
         return self._p
+
+    @property
+    def activities(self):
+        return self._activities
+
+    @property
+    def events(self):
+        return self._events
 
     def _parse_links(self, lnk_src, lnk_dst, links):
         """
@@ -1495,14 +1510,11 @@ class NetworkModel:
         act_ids = list(wbs_dict.keys())
 
         # Generate network graph using C extension
-        status, act_ids, net_src, net_dst = _ccpm.make_aoa(act_ids, lnk_src, lnk_dst)
-        if status != _ccpm.OK:
-            # Should not happen because make_aoa raises on error, but keep for safety
-            raise RuntimeError(f"Network generation failed with status {status}")
+        act_ids, net_src, net_dst = _ccpm.make_aoa(act_ids, lnk_src, lnk_dst)
 
-        self.events = []
+        self._events = []
         self.next_act = next_act_id
-        self.activities = []
+        self._activities = []
 
         # Create events
         if len(net_dst) == 0:
@@ -1546,27 +1558,27 @@ class NetworkModel:
                 # Add a dummy activity (no effort, no letter, no data)
                 nd += 1  # One more dummy work
                 self._add_activity(0, int(net_src[i]), int(net_dst[i]),
-                                   0., 0., 0., 0., '#' + str(nd), {})
+                                   0., 0., 0., 0., '#' + str(nd), {}, is_dummy=True)
                 dsrc.append(int(net_src[i]))
 
         # Network postprocessing
         # Make sure that activities with largest efforts are on straight paths between events
         grpoi = {}
         # Find groups of triangles on dummies
-        for e in self.events:
+        for e in self._events:
             # Watch only dummy sources
             if e.id not in dsrc:
                 continue
 
-            bck = e.in_activities
-            fwd = e.out_activities
+            bck = e._in_activities
+            fwd = e._out_activities
             # Watch only events with one incoming and one outgoing action
             if 1 < len(bck) or 1 < len(fwd):
                 continue
 
             key = (bck[0].src.id, fwd[0].dst.id)
             if key not in grpoi.keys():
-                for a in bck[0].src.out_activities:
+                for a in bck[0].src._out_activities:
                     if a.dst.id == fwd[0].dst.id:
                         grpoi[key] = (a, [bck[0]])
                         break
@@ -1637,17 +1649,17 @@ class NetworkModel:
 
         # Set late times starting from project completion
         late = np.zeros((3,), dtype=float)
-        for e in self.events:
+        for e in self._events:
             if e.early[RES] > late[RES]:
                 late = e.early.copy()
 
-        for e in self.events:
-            e.late = late
+        for e in self._events:
+            e.late = late.copy()
 
         self._compute_target('late')
 
         # Compute reserves
-        for e in self.events:
+        for e in self._events:
             e.reserve[VAR] = e.late[VAR] + e.early[VAR]
             e.reserve[ERR] = e.late[ERR] + e.early[ERR]
             # Round off insignificant values
@@ -1665,7 +1677,7 @@ class NetworkModel:
             if e.late[RES] < 0.0:
                 e.late[RES] = 0.0
 
-        for a in self.activities:
+        for a in self._activities:
             # Compute start and end reserve values separately
             # These values may differ due to resource availability time dependence
             start_res = np.zeros((3,), dtype=float)
@@ -1815,8 +1827,8 @@ class NetworkModel:
             act_base = None
             act_new = None
             act_next = 'dst'
-            fwd = 'out_activities'
-            rev = 'in_activities'
+            fwd = '_out_activities'
+            rev = '_in_activities'
             choice = max
             delta = lambda a: 1
             process_delta = lambda d, a, b, t: d
@@ -1825,8 +1837,8 @@ class NetworkModel:
             act_base = 'early_start'
             act_new = 'early_end'
             act_next = 'dst'
-            fwd = 'out_activities'
-            rev = 'in_activities'
+            fwd = '_out_activities'
+            rev = '_in_activities'
             choice = _choice_early
             delta = lambda a: a.expected
             process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
@@ -1835,8 +1847,8 @@ class NetworkModel:
             act_base = 'late_end'
             act_new = 'late_start'
             act_next = 'src'
-            fwd = 'in_activities'
-            rev = 'out_activities'
+            fwd = '_in_activities'
+            rev = '_out_activities'
             choice = _choice_late
             delta = _delta_late
             process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
@@ -1845,8 +1857,8 @@ class NetworkModel:
             act_base = 'opt_start'
             act_new = 'opt_end'
             act_next = 'dst'
-            fwd = 'out_activities'
-            rev = 'in_activities'
+            fwd = '_out_activities'
+            rev = '_in_activities'
             choice = max
             delta = lambda a: a.optimistic
             process_delta = lambda d, a, b, t: self._duration(d, a, b, t)
@@ -1855,8 +1867,8 @@ class NetworkModel:
             act_base = 'pes_start'
             act_new = 'pes_end'
             act_next = 'dst'
-            fwd = 'out_activities'
-            rev = 'in_activities'
+            fwd = '_out_activities'
+            rev = '_in_activities'
             choice = max
             delta = lambda a: a.pessimistic
             process_delta = lambda d, a, b, t: self._duration(d, a, b, t)
@@ -1865,12 +1877,12 @@ class NetworkModel:
 
         # Initialize activity parameters and processing function
         if target != 'stage':
-            for a in self.activities:
+            for a in self._activities:
                 setattr(a, act_base, -1)
                 setattr(a, act_new, -1)
 
         # Count dependencies for topological sorting
-        n_dep = {e:len(getattr(e, rev)) for e in self.events}
+        n_dep = {e:len(getattr(e, rev)) for e in self._events}
 
         # Find starting events (no dependencies)
         evt = [e for e, n in n_dep.items() if 0 == n]
@@ -1918,10 +1930,10 @@ class NetworkModel:
         i : int
             Unique event identifier (positive integer).
         """
-        self.events.append(_Event(i, self))
+        self._events.append(_Event(i, self))
 
     def _add_activity(self, wbs_id, src_id, dst_id, expected, exp_var,
-                      optimistic, pessimistic, letter, data):
+                      optimistic, pessimistic, letter, data, is_dummy=False):
         """
         Add a new activity to the network.
 
@@ -1977,20 +1989,20 @@ class NetworkModel:
             raise TypeError(f"data must be dict, got {type(data)}")
 
         act = _Activity(self.next_act, wbs_id, letter, self,
-                        self.events[src_id - 1], self.events[dst_id - 1],
-                        expected, exp_var, optimistic, pessimistic, data)
-        self.activities.append(act)
+                        self._events[src_id - 1], self._events[dst_id - 1],
+                        expected, exp_var, optimistic, pessimistic, data, is_dummy=is_dummy)
+        self._activities.append(act)
         self.next_act += 1
 
     def __repr__(self):
         """String representation of the network model."""
         _repr = 'Events:{\n'
-        for e in self.events:
+        for e in self._events:
             _repr += '        ' + str(e) + '\n'
         _repr += '}\n'
 
         _repr += 'Activities:\n'
-        for a in self.activities:
+        for a in self._activities:
             _repr += '        ' + str(a) + '\n'
         _repr += '}\n'
 
@@ -2027,8 +2039,8 @@ class NetworkModel:
         is likewise a copy of the event's ``data`` extended with the
         computed CPM/PERT fields (see :meth:`_Event.to_dict`).
         """
-        activities_data = [activity.to_dict() for activity in self.activities]
-        events_data = [event.to_dict() for event in self.events]
+        activities_data = [activity.to_dict() for activity in self._activities]
+        events_data = [event.to_dict() for event in self._events]
 
         return {
             'activities': activities_data,
@@ -2141,7 +2153,7 @@ class NetworkModel:
         # 1. Add event nodes (optionally grouped by stage)
         if group_by_stage:
             stages = {}
-            for e in self.events:
+            for e in self._events:
                 stages.setdefault(e.stage, []).append(e)
 
             for stage in sorted(stages.keys()):
@@ -2155,7 +2167,7 @@ class NetworkModel:
                                penwidth=style['penwidth'],
                                fontsize=style['fontsize'])
         else:
-            for e in self.events:
+            for e in self._events:
                 label, style = _label_event(e)
                 dot.node(str(e.id), label,
                          color=style['color'],
@@ -2163,7 +2175,7 @@ class NetworkModel:
                          fontsize=style['fontsize'])
 
         # 2. Add edges with embedded labels
-        for a in self.activities:
+        for a in self._activities:
             # Get style for this activity based on its criticality
             activity_style = get_style(a)
 
@@ -2177,7 +2189,7 @@ class NetworkModel:
             label_node_id = f"label_{a.id}"
 
             # Determine edge style (solid for real, dashed for dummy)
-            edge_style = 'dashed' if a.expected[RES] == 0.0 else 'solid'
+            edge_style = 'dashed' if a._is_dummy else 'solid'
 
             # Create visible label node (light gray, rounded box)
             # Label uses fontsize=12 for all activities as specified
@@ -2294,7 +2306,7 @@ if __name__ == '__main__':
 
     # Demonstration of the new data formats in activities
     print("\n=== Demonstration of new time formats in activities ===")
-    for i, activity in enumerate(n_old.activities[:8]):  # Show first 8 activities
+    for i, activity in enumerate(n_old._activities[:8]):  # Show first 8 activities
         if activity.wbs_id != 0:  # Skip dummy activities
             print(f"Activity {i + 1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
             print(f"  Expected effort: {activity.expected[RES]:.3f}, Variance: {activity.expected[VAR]:.3f}")
@@ -2377,7 +2389,7 @@ if __name__ == '__main__':
     model_resource = NetworkModel(wbs_resource, links=links_resource, duration=resource_aware_duration)
 
     # Show resource-aware durations
-    for activity in model_resource.activities:
+    for activity in model_resource._activities:
         if activity.wbs_id != 0:
             print(f"Activity {activity.letter}: "
                   f"Effort={activity.expected[RES]:.1f}h, "
@@ -2430,9 +2442,9 @@ if __name__ == '__main__':
 
     # Check model equivalence
     print("\n=== Checking model equivalence ===")
-    print(f"Old == New1: {len(n_old.activities) == len(n_new1.activities)}")
-    print(f"Old == New2: {len(n_old.activities) == len(n_new2.activities)}")
-    print(f"Old == New3: {len(n_old.activities) == len(n_new3.activities)}")
+    print(f"Old == New1: {len(n_old._activities) == len(n_new1._activities)}")
+    print(f"Old == New2: {len(n_old._activities) == len(n_new2._activities)}")
+    print(f"Old == New3: {len(n_old._activities) == len(n_new3._activities)}")
 
     print("\n=== Demonstration of dictionary export ===")
     model_dict = n_old.to_dict()

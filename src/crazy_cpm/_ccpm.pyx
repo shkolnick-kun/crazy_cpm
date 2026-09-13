@@ -69,6 +69,8 @@ cdef extern from "ccpm.c":
         CCPM_ELIM
         CCPM_EUNK
 
+    cdef int CCPM_FAKE
+
     cdef ccpmResultEn ccpm_make_aoa(_uint16_t * act_ids,
                                     _uint16_t * lnk_src,
                                     _uint16_t * lnk_dst,
@@ -94,46 +96,73 @@ ELOOP  = CCPM_ELOOP
 ELIM   = CCPM_ELIM
 EUNK   = CCPM_EUNK
 
+N_LIM = CCPM_FAKE - 1
+
+STATUS_STR = {
+    OK    :'OK',
+    EINVAL:'invalid input value',
+    ENOMEM:'memory error',
+    ELOOP :'loop detected',
+    ELIM  :'internal limits hit',
+    EUNK  :'unknown error'
+}
+
 # Helper to validate iterable of integers
 def _validate_int_iterable(iterable, name):
-    """Check that iterable is a sequence of non-negative integers < 65536."""
+    """Check that iterable is a sequence of non-negative integers < N_LIM."""
     if not hasattr(iterable, '__len__') and not hasattr(iterable, '__iter__'):
         raise TypeError(f"'{name}' must be an iterable, got {type(iterable)}")
     for idx, val in enumerate(iterable):
+        if not isinstance(val, (int, np.integer)):
+            raise ValueError(f"Element {idx} of '{name}' is not integer ({val})")
         if val < 0:
             raise ValueError(f"Element {idx} of '{name}' is negative ({val})")
-        if val > 65535:
-            raise ValueError(f"Element {idx} of '{name}' exceeds uint16 limit ({val} > 65535)")
-    return True
+        if val > N_LIM:
+            raise ValueError(f"Element {idx} of '{name}' exceeds uint16 limit ({val} > {N_LIM})")
 
 ###############################################################################
 def make_aoa(act_ids, lnk_src, lnk_dst):
     """
-    Cython wrapper for ccpm_make_aoa - converts Python lists to C arrays and back
+    Cython wrapper for ccpm_make_aoa - converts Python lists to C arrays
+    and back.
+
+    Builds an Activity-on-Arrow (AoA) network from a list of activity IDs
+    and link dependencies. The C backend automatically inserts dummy
+    activities where needed to make the AoA representation correct, and
+    may reorder activities internally.
 
     Args:
-        act_ids: List of activity IDs (non‑negative integers < 65536)
-        lnk_src: List of link source activity IDs (non‑negative integers < 65536)
-        lnk_dst: List of link destination activity IDs (non‑negative integers < 65536)
+        act_ids: List of activity IDs (non-negative integers <= N_LIM).
+        lnk_src: List of link source activity IDs (non-negative integers <= N_LIM).
+        lnk_dst: List of link destination activity IDs (non-negative integers <= N_LIM).
 
     Returns:
-        tuple: (status_code, act_ids, act_src, act_dst)
+        tuple: (act_ids, act_src, act_dst)
         where:
-          status_code: integer status code (0 = success) — unused, errors raise exception
-          act_ids: resulting activity IDs (same as input but may be reordered)
-          act_src: resulting activity source event IDs
-          act_dst: resulting activity destination event IDs
+          act_ids: resulting activity IDs. The order may differ from the
+                   input order (the C backend is free to reorder for
+                   internal optimization). Real activities appear first,
+                   followed by generated dummy activities.
+          act_src: resulting activity source event IDs.
+          act_dst: resulting activity destination event IDs.
 
     Raises:
-        TypeError: If any input is not an iterable or contains non‑integer elements.
-        ValueError: If element values are out of range (negative or > 65535)
-                    or if lnk_src and lnk_dst have different lengths.
-        RuntimeError: If the C library returns an error (e.g., circular dependency).
+        TypeError: If any input is not an iterable or contains non-integer
+                   elements.
+        ValueError: If input values are out of range (negative or > N_LIM),
+                    if lnk_src and lnk_dst have different lengths, or if
+                    the C library reports EINVAL (bad IDs, duplicate IDs,
+                    duplicate links, unknown link endpoints) or ELOOP
+                    (circular dependency detected).
+        RuntimeError: If the C library reports a system-level failure:
+                      ENOMEM (out of memory), ELIM (internal limit hit),
+                      or EUNK (unknown error).
 
-    .. note::
-        The C function may also return error codes for memory allocation failure
-        or loop detection; these are translated into RuntimeError with a
-        descriptive message.
+    Notes:
+        The C backend may generate additional dummy activities to keep
+        the AoA network valid. These appear in the output after the real
+        activities, with IDs from the same range as the inputs — do not
+        assume a 1:1 mapping between input and output lists.
     """
     # Input validation
     _validate_int_iterable(act_ids, "act_ids")
@@ -146,6 +175,9 @@ def make_aoa(act_ids, lnk_src, lnk_dst):
         raise ValueError(f"lnk_src and lnk_dst must have same length, got {n_lnk} and {len(lnk_dst)}")
 
     cdef size_t n_max = n_act + (n_lnk if n_lnk > n_act else n_act)
+    if n_max > N_LIM:
+        raise ValueError(f"n_max is too large ({n_max} > {N_LIM}), please check number of activities ({n_act}) and number of links ({n_lnk})")
+
     cdef size_t n_lnk_plus = n_lnk if n_lnk > 0 else 1 # Zero links is valid case
 
     # Create buffer arrays
@@ -180,6 +212,12 @@ def make_aoa(act_ids, lnk_src, lnk_dst):
                                              &act_dst_view[0]
                                              )
 
+    if result in (ENOMEM, ELIM, EUNK):
+        raise RuntimeError(f"Network generation failed due to {STATUS_STR[result]}")
+
+    if result in (EINVAL, ELOOP):
+        raise ValueError(f"Network generation failed due to {STATUS_STR[result]}")
+
     # Get output data
     py_act_ids = []
     for i in range(act_ids_arr[0]):
@@ -191,29 +229,47 @@ def make_aoa(act_ids, lnk_src, lnk_dst):
         py_act_src.append(act_src_arr[i + 1])
         py_act_dst.append(act_dst_arr[i + 1])
 
-    return result, py_act_ids, py_act_src, py_act_dst
+    return py_act_ids, py_act_src, py_act_dst
 
 ###############################################################################
-def make_full_map(act_ids, lnk_src, lnk_dst):
+def make_full_map(act_ids, lnk_src, lnk_dst, raise_on_einval=True):
     """
     Build full dependency map for activities
 
     Args:
-        act_ids: List of activity IDs (non‑negative integers < 65536)
-        lnk_src: List of link source activity IDs (non‑negative integers < 65536)
-        lnk_dst: List of link destination activity IDs (non‑negative integers < 65536)
+        act_ids: List of activity IDs (non-negative integers <= N_LIM)
+        lnk_src: List of link source activity IDs (non-negative integers <= N_LIM)
+        lnk_dst: List of link destination activity IDs (non-negative integers <= N_LIM)
+        raise_on_einval: If True (default), the function raises ValueError
+                         when the C library returns EINVAL.
 
     Returns:
         tuple: (status_code, full_dep_map)
         where:
-          status_code: integer status code (0 = success) — unused, errors raise exception
-          full_dep_map: 2D numpy array with dtype=bool representing the full dependency matrix
+          status_code: integer status code (OK, ELOOP, or EINVAL when
+                       raise_on_einval=False).
+          full_dep_map: 2D numpy array with dtype=bool representing the
+                        full dependency matrix.
 
     Raises:
-        TypeError: If any input is not an iterable or contains non‑integer elements.
-        ValueError: If element values are out of range (negative or > 65535)
-                    or if lnk_src and lnk_dst have different lengths.
-        RuntimeError: If the C library returns an error (e.g., circular dependency).
+        TypeError: If any input is not an iterable or contains non-integer elements.
+        ValueError: If element values are out of range (negative or > N_LIM),
+                    or if lnk_src and lnk_dst have different lengths,
+                    or if the C library returns EINVAL with raise_on_einval=True.
+        RuntimeError: If the C library returns a system-level error
+                      (ENOMEM, ELIM, EUNK).
+
+    Notes:
+        On success ``status_code`` is ``OK``.
+
+        If ``ELOOP`` is returned, ``full_dep_map`` contains a partial
+        dependency map that can be used to locate the first problematic
+        activity.
+
+        By default (``raise_on_einval=True``), invalid input raises
+        ``ValueError``. Pass ``raise_on_einval=False`` to receive
+        ``EINVAL`` in ``status_code`` instead — in that case the returned
+        ``full_dep_map`` should not be used.
     """
     # Input validation
     _validate_int_iterable(act_ids, "act_ids")
@@ -260,10 +316,16 @@ def make_full_map(act_ids, lnk_src, lnk_dst):
                                                   &full_dep_map_view[0]
                                                   )
 
+    if result in (ENOMEM, ELIM, EUNK):
+        raise RuntimeError(f"Dependency map generation failed due to {STATUS_STR[result]}")
+
+    if EINVAL == result and raise_on_einval:
+        raise ValueError(f"Dependency map generation failed due to {STATUS_STR[result]}")
+
     # Convert result to numpy bool array using explicit loops (as requested)
     full_dep_map_np = np.zeros((n_act, n_act), dtype=np.bool_)
     for i in range(n_act):
         for j in range(n_act):
             full_dep_map_np[i, j] = full_dep_map_arr[i * n_max + j]
 
-    return result, full_dep_map_np
+    return int(result), full_dep_map_np
