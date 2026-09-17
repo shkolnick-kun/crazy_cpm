@@ -483,6 +483,11 @@ def _default_style(element):
         - ``fontsize``: string with font size (e.g., ``'16'``, ``'14'``)
         - ``weight``: string with edge weight for Graphviz
           (e.g., ``'3'``, ``'2'``, ``'1'``)
+        - ``tooltip``: string with hover tooltip text. For an ``_Event``
+          it lists the event id, early/late times, and reserve; for an
+          ``_Activity`` it contains the activity letter and, if present,
+          the ``name`` field from ``element.data``. Tooltips are rendered
+          only in SVG output.
 
     Raises
     ------
@@ -499,9 +504,17 @@ def _default_style(element):
     if isinstance(element, _Event):
         res = element.reserve
         prob_reserve = element.early_prob(element.late[RES])
+        tooltip  = f"Event {element.id}\n"
+        tooltip += f"early = {element.early[RES]:.2f}\n"
+        tooltip += f"late = {element.late[RES]:.2f}\n"
+        tooltip += f"reserve = {element.reserve[RES]:.2f}\n"
     elif isinstance(element, _Activity):
         res = element.reserve
         prob_reserve = element.early_end_prob(element.late_end[RES])
+        tooltip = element.letter
+        if 'name' in element.data:
+            tooltip += ' ' + element.data['name']
+
     else:
         raise TypeError(
             f"element must be _Event or _Activity, got {type(element)}"
@@ -515,7 +528,8 @@ def _default_style(element):
             'color': '#ff0000',
             'penwidth': '4',
             'fontsize': '16',
-            'weight': '3'
+            'weight': '3',
+            'tooltip': tooltip
         }
     elif prob_reserve < prob_thr:
         # Sub-critical element (may consume reserve)
@@ -523,7 +537,8 @@ def _default_style(element):
             'color': '#ffa000',
             'penwidth': '3',
             'fontsize': '16',
-            'weight': '2'
+            'weight': '2',
+            'tooltip': tooltip
         }
     else:
         # Non-critical element
@@ -531,7 +546,8 @@ def _default_style(element):
             'color': '#000000',
             'penwidth': '2',
             'fontsize': '14',
-            'weight': '1'
+            'weight': '1',
+            'tooltip': tooltip
         }
 
 #==============================================================================
@@ -556,14 +572,14 @@ class _Activity:
         Source event of the activity
     dst : _Event
         Destination event of the activity
-    expected : float
+    expected : int or float
         Activity expected resource effort (mathematical expectation).
-        Must be a ``float`` (not ``int``) — use ``float(x)`` if needed.
-    exp_var : float
+        Integer values are accepted and converted to ``float``.
+    exp_var : int or float
         Activity effort variance. Must be non-negative.
-    optimistic : float
+    optimistic : int or float
         Optimistic effort estimate
-    pessimistic : float
+    pessimistic : int or float
         Pessimistic effort estimate
     data : dict, optional
         Additional activity data from WBS (custom user fields)
@@ -648,20 +664,24 @@ class _Activity:
             raise TypeError(f"src must be _Event, got {type(src)}")
         if not isinstance(dst, _Event):
             raise TypeError(f"dst must be _Event, got {type(dst)}")
-        if not isinstance(expected, float):
-            raise TypeError(f"expected must be float, got {type(expected)}")
+        if not isinstance(expected, (int, float)):
+            raise TypeError(f"expected must be a real number, got {type(expected)}")
+        expected = float(expected)
         if expected < 0.0:
             raise ValueError(f"expected effort must be non-negative, got {expected}")
-        if not isinstance(exp_var, float):
-            raise TypeError(f"exp_var must be float, got {type(exp_var)}")
+        if not isinstance(exp_var, (int, float)):
+            raise TypeError(f"exp_var must be a real number, got {type(exp_var)}")
+        exp_var = float(exp_var)
         if exp_var < 0.0:
             raise ValueError(f"variance must be non-negative, got {exp_var}")
         if data is not None and not isinstance(data, dict):
             raise TypeError(f"data must be dict or None, got {type(data)}")
-        if not isinstance(optimistic, float):
-            raise TypeError(f"optimistic must be float, got {type(optimistic)}")
-        if not isinstance(pessimistic, float):
-            raise TypeError(f"pessimistic must be float, got {type(pessimistic)}")
+        if not isinstance(optimistic, (int, float)):
+            raise TypeError(f"optimistic must be a real number, got {type(optimistic)}")
+        optimistic = float(optimistic)
+        if not isinstance(pessimistic, (int, float)):
+            raise TypeError(f"pessimistic must be a real number, got {type(pessimistic)}")
+        pessimistic = float(pessimistic)
 
         self.id = id
         self.wbs_id = wbs_id
@@ -1188,7 +1208,8 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     Raises
     ------
     TypeError
-        If ``work_data`` is not a dict.
+        If ``work_data`` is not a dict, or if any numeric field cannot
+        be converted to ``float``.
     ValueError
         If ``default_risk`` is out of range, or if insufficient data is
         provided, or if estimates are invalid (e.g., the ordering
@@ -1220,14 +1241,16 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     """
     if not isinstance(work_data, dict):
         raise TypeError(f"work_data must be dict, got {type(work_data)}")
-    if not isinstance(default_risk, float) or default_risk < 0.0 or default_risk > 1.0:
-        raise ValueError(f"default_risk must be a float between 0 and 1, got {default_risk}")
+    if not isinstance(default_risk, (int, float)) or default_risk < 0.0 or default_risk > 1.0:
+        raise ValueError(f"default_risk must be a real number between 0 and 1, got {default_risk}")
+    default_risk = float(default_risk)
 
     # 1. Check for three-point PERT estimation (highest priority)
     if all(key in work_data for key in ['optimistic', 'most_likely', 'pessimistic']):
-        a = work_data['optimistic']
-        m = work_data['most_likely']
-        b = work_data['pessimistic']
+        # Normalize inputs to float
+        a = float(work_data['optimistic'])
+        m = float(work_data['most_likely'])
+        b = float(work_data['pessimistic'])
 
         # Validate inputs
         if not (a <= m <= b):
@@ -1239,8 +1262,9 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
 
     # 2. Check for two-point PERT estimation (medium priority)
     elif all(key in work_data for key in ['optimistic', 'pessimistic']):
-        a = work_data['optimistic']
-        b = work_data['pessimistic']
+        # Normalize inputs to float
+        a = float(work_data['optimistic'])
+        b = float(work_data['pessimistic'])
 
         # Validate inputs
         if not (a <= b):
@@ -1254,8 +1278,9 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
 
     # 3. Direct parameters (lowest priority - backward compatibility)
     elif 'expected' in work_data:
-        mean = work_data['expected']
-        variance = work_data.get('exp_var', 0.0)
+        # Normalize inputs to float
+        mean     = float(work_data['expected'])
+        variance = float(work_data.get('exp_var', 0.0))
 
         # Validate inputs
         if mean < 0:
@@ -1264,7 +1289,7 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
             raise ValueError(f"Variance must be non-negative. Got: {variance}")
 
         if variance > 0:
-            d = 6 * np.sqrt(variance) / 2
+            d = 3 * np.sqrt(variance)
             if d > default_risk * mean:
                 a = (1 - default_risk) * mean
             else:
@@ -1476,10 +1501,12 @@ class NetworkModel:
         if not callable(duration):
             raise TypeError(f"duration must be callable, got {type(duration)}")
 
-        if not isinstance(p, float) or not (0.0 < p < 1.0):
-            raise ValueError(f"p must be float between 0 and 1, got {p}")
-        if not isinstance(default_risk, float) or default_risk < 0.0 or default_risk > 1.0:
-            raise ValueError(f"default_risk must be float between 0 and 1, got {default_risk}")
+        if not isinstance(p, (int, float)) or not (0.0 < p < 1.0):
+            raise ValueError(f"p must be a real number between 0 and 1, got {p}")
+        p = float(p)
+        if not isinstance(default_risk, (int, float)) or default_risk < 0.0 or default_risk > 1.0:
+            raise ValueError(f"default_risk must be a real number between 0 and 1, got {default_risk}")
+        default_risk = float(default_risk)
         if not isinstance(next_act_id, int) or next_act_id < 1:
             raise ValueError(f"next_act_id must be positive int, got {next_act_id}")
         if not isinstance(debug, bool):
@@ -1675,7 +1702,7 @@ class NetworkModel:
         # Create activities (real and dummy)
         na = len(act_ids)  # Number of actions
         nd = 0  # Number of dummy actions
-        dsrc = []  # Dummy event sources
+        dsrc = set()  # Dummy event sources
         for i in range(len(net_src)):
             if i < na:
                 # Real activity - get data from WBS
@@ -1708,7 +1735,7 @@ class NetworkModel:
                 nd += 1  # One more dummy work
                 self._add_activity(0, int(net_src[i]), int(net_dst[i]),
                                    0., 0., 0., 0., '#' + str(nd), {}, is_dummy=True)
-                dsrc.append(int(net_src[i]))
+                dsrc.add(int(net_src[i]))
 
         # Network postprocessing
         # Make sure that activities with largest efforts are on straight paths between events
@@ -2143,13 +2170,13 @@ class NetworkModel:
             Source event ID (1-based index into ``self._events``)
         dst_id : int
             Destination event ID (1-based index into ``self._events``)
-        expected : float
+        expected : int or float
             Activity expected resource effort
-        exp_var : float
+        exp_var : int or float
             Activity effort variance
-        optimistic : float
+        optimistic : int or float
             Optimistic effort estimate
-        pessimistic : float
+        pessimistic : int or float
             Pessimistic effort estimate
         letter : str
             Activity letter/code for visualization
@@ -2171,18 +2198,22 @@ class NetworkModel:
             raise TypeError(f"src_id must be int, got {type(src_id)}")
         if not isinstance(dst_id, int):
             raise TypeError(f"dst_id must be int, got {type(dst_id)}")
-        if not isinstance(expected, float):
-            raise TypeError(f"expected must be float, got {type(expected)}")
+        if not isinstance(expected, (int, float)):
+            raise TypeError(f"expected must be a real number, got {type(expected)}")
+        expected = float(expected)
         if expected < 0.0:
             raise ValueError(f"expected must be non-negative, got {expected}")
-        if not isinstance(exp_var, float):
-            raise TypeError(f"exp_var must be float, got {type(exp_var)}")
+        if not isinstance(exp_var, (int, float)):
+            raise TypeError(f"exp_var must be a real number, got {type(exp_var)}")
+        exp_var = float(exp_var)
         if exp_var < 0.0:
             raise ValueError(f"exp_var must be non-negative, got {exp_var}")
-        if not isinstance(optimistic, float):
-            raise TypeError(f"optimistic must be float, got {type(optimistic)}")
-        if not isinstance(pessimistic, float):
-            raise TypeError(f"pessimistic must be float, got {type(pessimistic)}")
+        if not isinstance(optimistic, (int, float)):
+            raise TypeError(f"optimistic must be a real number, got {type(optimistic)}")
+        optimistic = float(optimistic)
+        if not isinstance(pessimistic, (int, float)):
+            raise TypeError(f"pessimistic must be a real number, got {type(pessimistic)}")
+        pessimistic = float(pessimistic)
         if not isinstance(letter, str):
             raise TypeError(f"letter must be str, got {type(letter)}")
         if not isinstance(data, dict):
@@ -2308,7 +2339,9 @@ class NetworkModel:
             Signature: ``get_style(element) -> dict``, where ``element``
             is either an ``_Event`` or an ``_Activity``. The returned
             dictionary must contain keys ``color``, ``penwidth`` and
-            ``fontsize``; the key ``weight`` is used for activity edges.
+            ``fontsize``; the key ``weight`` is used for activity edges;
+            the key ``tooltip`` is used for hover tooltips (rendered
+            only in SVG output).
 
         Returns
         -------
@@ -2346,6 +2379,8 @@ class NetworkModel:
         When ``group_by_stage=True``, the topological order of events is
         preserved by clustering events with the same stage together,
         improving readability for large networks.
+
+        Tooltips provided by ``get_style`` are rendered only in SVG output.
         """
         if not callable(get_style):
             raise TypeError(f"Parameter get_style must be callable, got {type(get_style)}")
@@ -2375,6 +2410,7 @@ class NetworkModel:
                     for e in stages[stage]:
                         label, style = _label_event(e)
                         s.node(str(e.id), label,
+                               tooltip=style['tooltip'],
                                color=style['color'],
                                penwidth=style['penwidth'],
                                fontsize=style['fontsize'])
@@ -2383,6 +2419,7 @@ class NetworkModel:
                 label, style = _label_event(e)
                 dot.node(str(e.id), label,
                          color=style['color'],
+                         tooltip=style['tooltip'],
                          penwidth=style['penwidth'],
                          fontsize=style['fontsize'])
 
@@ -2401,12 +2438,13 @@ class NetworkModel:
             label_node_id = f"label_{a.id}"
 
             # Determine edge style (solid for real, dashed for dummy)
-            edge_style = 'dashed' if a._is_dummy else 'solid'
+            edge_style = 'dashed' if a.is_dummy else 'solid'
 
             # Create visible label node (light gray, rounded box)
             # Label uses fontsize=12 for all activities as specified
             dot.node(label_node_id,
                      label=lbl,
+                     tooltip=activity_style['tooltip'],
                      shape='box',
                      style='filled,rounded',
                      color=activity_style['color'],
@@ -2417,6 +2455,7 @@ class NetworkModel:
 
             # Main edge: source -> label node (no arrowhead)
             dot.edge(str(a.src.id), label_node_id,
+                     tooltip=activity_style['tooltip'],
                      style=edge_style,
                      color=activity_style['color'],
                      penwidth=activity_style['penwidth'],
@@ -2425,6 +2464,7 @@ class NetworkModel:
 
             # Main edge: label node -> destination (with arrowhead)
             dot.edge(label_node_id, str(a.dst.id),
+                     tooltip=activity_style['tooltip'],
                      style=edge_style,
                      color=activity_style['color'],
                      penwidth=activity_style['penwidth'],
@@ -2495,8 +2535,8 @@ if __name__ == '__main__':
 
     # Old format
     print("\n1. Old format with new time inputs:")
-    src_old = np.array([1,2,3, 2,3,3, 4,1,6, 7, 5,6,7,  3, 6, 7,  6, 8, 9,  7, 8, 9,10])
-    dst_old = np.array([5,5,5, 6,6,7, 7,8,8, 8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
+    src_old = np.array([1,2,3, 2,3, 3,4, 1,6,7, 5,6,7,  3, 6, 7,  6, 8, 9,  7, 8, 9,10])
+    dst_old = np.array([5,5,5, 6,6, 7,7 ,8,8,8, 9,9,9, 10,10,10, 11,11,11, 12,12,12,12])
     n_old = NetworkModel(wbs, src_old, dst_old)
     print("Successfully created model with mixed time input formats")
 
