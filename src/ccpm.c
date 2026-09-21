@@ -935,7 +935,8 @@ ccpmResultEn ccpm_build_network(size_t n_max,
                                uint32_t * act_src,      uint32_t * act_dst,
                                uint32_t * started,      uint32_t * num_dep,
                                uint32_t * events,       uint32_t * chk,
-                               uint32_t * start)
+                               uint32_t * start,
+                               uint32_t * finish,       uint8_t * finished)
 {
     size_t i;
     size_t j;
@@ -954,6 +955,8 @@ ccpmResultEn ccpm_build_network(size_t n_max,
     CCPM_CHECK_RETURN(started, CCPM_EINVAL);
     CCPM_CHECK_RETURN(num_dep, CCPM_EINVAL);
     CCPM_CHECK_RETURN(events, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(finish, CCPM_EINVAL);
+    CCPM_CHECK_RETURN(finished, CCPM_EINVAL);
 
     CCPM_LOG_PRINTF("Building network with %d activities\n", (int)dum);
 
@@ -1008,8 +1011,14 @@ ccpmResultEn ccpm_build_network(size_t n_max,
             }
         }
 
-        /* Find started activities */
+        /* Find started and finished activities */
         CCPM_LCLR(start);
+
+        CCPM_LCLR(finish);
+        for (j = 0; j < dum; j++)
+        {
+            finished[j] = false;
+        }
 
         for (j = 0; j < dum; j++)
         {
@@ -1018,17 +1027,27 @@ ccpmResultEn ccpm_build_network(size_t n_max,
                 CCPM_LITEM(started, j) = true;
                 CCPM_LITEM(act_src, j) = evt;
                 CCPM_LAPP(start, j);
+
+                /* Make finished activities list */
+                uint32_t * j_deps = min_act_dep + n_max * j;
+
+                for (k = 0; k < CCPM_LLEN(j_deps); k++)
+                {
+                    if (false == finished[CCPM_LITEM(j_deps, k)])
+                    {
+                        finished[CCPM_LITEM(j_deps, k)] = true;
+                        CCPM_LAPP(finish, CCPM_LITEM(j_deps, k));
+                    }
+                }
             }
         }
 
         /* Process newly started activities */
         if (CCPM_LLEN(start) > 0)
         {
-            /* All newly started activities have the same dependencies, use the first one*/
-            size_t first_act = CCPM_LITEM(start, 0);
-            for (k = 0; k < CCPM_LLEN(min_act_dep + n_max * first_act); k++)
+            for (k = 0; k < CCPM_LLEN(finish); k++)
             {
-                size_t dep_act = CCPM_LITEM(min_act_dep + n_max * first_act, k);
+                size_t dep_act = CCPM_LITEM(finish, k);
 
                 if (CCPM_LITEM(act_dst, dep_act))
                 {
@@ -1745,7 +1764,8 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
                                         _full_act_dep, _full_dep_map,
                                         _act_src, _act_dst,
                                         _started, _num_dep,
-                                        _events, _chk, _tmp_deps));
+                                        _events, _chk, _tmp,
+                                        _tmp_deps, _tmp_dep_map));
     _CCPM_PRINT_NET(_act_src, _act_dst);
     _CCPM_PRINT_ACT_POS(_act_ids, _act_pos);
 
