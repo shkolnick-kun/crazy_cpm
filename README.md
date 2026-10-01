@@ -147,7 +147,7 @@ def resource_duration(effort, activity, base_time, target):
     ----------
     effort : float
         Resource effort. Positive for forward pass, negative for backward pass.
-    activity : _Activity
+    activity : Activity
         Activity for context-aware calculations.
     base_time : float or None
         Base time during network traversal, or None for post-processing.
@@ -301,8 +301,8 @@ model = NetworkModel(
 
 **Attributes:**
 
- * `model.activities` — list of `_Activity` objects
- * `model.events` — list of `_Event` objects
+ * `model.activities` — list of `Activity` objects
+ * `model.events` — list of `Event` objects
  * `model.is_pert` — `True` if any activity has non-zero variance
  * `model.p` — probability level used for quantile estimates
  * `model.debug` — debug flag
@@ -378,7 +378,7 @@ Custom styling is possible via the `get_style` callback:
 
 ```python
 def my_style(element):
-    # element is _Event or _Activity
+    # element is Event or Activity
     return {
         'color': '#0000ff',
         'penwidth': '2',

@@ -21,8 +21,8 @@ Features
 Classes
 -------
 - :class:`NetworkModel`: Main class for network analysis
-- :class:`_Activity`: Represents activities in the network (internal)
-- :class:`_Event`: Represents events/milestones in the network (internal)
+- :class:`Activity`: Represents activities in the network (internal)
+- :class:`Event`: Represents events/milestones in the network (internal)
 
 Key Concepts
 ------------
@@ -406,7 +406,7 @@ def _default_duration(effort, activity, base_time, target):
 
         - Positive number or zero for forward pass (early times calculation)
         - Negative number or zero for backward pass (late times calculation)
-    activity : _Activity
+    activity : Activity
         Activity object for context-aware calculations
     base_time : float or None
         Base time from which the activity starts:
@@ -461,13 +461,13 @@ def _default_style(element):
 
     Parameters
     ----------
-    element : _Event or _Activity
+    element : Event or Activity
         Graph element whose style is being computed. The styling decision
         is based on the element's time reserve and the probability that
         the reserve is positive:
 
-        - For an ``_Event`` the probability is ``element.early_prob(element.late[RES])``
-        - For an ``_Activity`` the probability is ``element.early_end_prob(element.late_end[RES])``
+        - For an ``Event`` the probability is ``element.early_prob(element.late[RES])``
+        - For an ``Activity`` the probability is ``element.early_end_prob(element.late_end[RES])``
 
         The threshold probability is taken from ``element.model.p``.
 
@@ -483,16 +483,16 @@ def _default_style(element):
         - ``fontsize``: string with font size (e.g., ``'16'``, ``'14'``)
         - ``weight``: string with edge weight for Graphviz
           (e.g., ``'3'``, ``'2'``, ``'1'``)
-        - ``tooltip``: string with hover tooltip text. For an ``_Event``
+        - ``tooltip``: string with hover tooltip text. For an ``Event``
           it lists the event id, early/late times, and reserve; for an
-          ``_Activity`` it contains the activity letter and, if present,
+          ``Activity`` it contains the activity letter and, if present,
           the ``name`` field from ``element.data``. Tooltips are rendered
           only in SVG output.
 
     Raises
     ------
     TypeError
-        If ``element`` is neither an ``_Event`` nor an ``_Activity``.
+        If ``element`` is neither an ``Event`` nor an ``Activity``.
 
     Notes
     -----
@@ -501,14 +501,14 @@ def _default_style(element):
     sub-critical (orange). Remaining elements are drawn as non-critical
     (black).
     """
-    if isinstance(element, _Event):
+    if isinstance(element, Event):
         res = element.reserve
         prob_reserve = element.early_prob(element.late[RES])
         tooltip  = f"Event {element.id}\n"
         tooltip += f"early = {element.early[RES]:.2f}\n"
         tooltip += f"late = {element.late[RES]:.2f}\n"
         tooltip += f"reserve = {element.reserve[RES]:.2f}\n"
-    elif isinstance(element, _Activity):
+    elif isinstance(element, Activity):
         res = element.reserve
         prob_reserve = element.early_end_prob(element.late_end[RES])
         tooltip = element.letter
@@ -517,7 +517,7 @@ def _default_style(element):
 
     else:
         raise TypeError(
-            f"element must be _Event or _Activity, got {type(element)}"
+            f"element must be Event or Activity, got {type(element)}"
         )
 
     prob_thr = element.model.p
@@ -551,7 +551,7 @@ def _default_style(element):
         }
 
 #==============================================================================
-class _Activity:
+class Activity:
     """
     Represents an activity (task) in the network model.
 
@@ -568,9 +568,9 @@ class _Activity:
         Activity letter/code for visualization
     model : NetworkModel
         Parent network model instance
-    src : _Event
+    src : Event
         Source event of the activity
-    dst : _Event
+    dst : Event
         Destination event of the activity
     expected : int or float
         Activity expected resource effort (mathematical expectation).
@@ -596,9 +596,9 @@ class _Activity:
         Activity letter/code
     model : NetworkModel
         Parent network model
-    src : _Event
+    src : Event
         Source event (property, setter updates the event's activity lists)
-    dst : _Event
+    dst : Event
         Destination event (property, setter updates the event's activity lists)
     expected : numpy.ndarray
         Array containing ``[effort_value, variance, error_bound]``
@@ -660,10 +660,10 @@ class _Activity:
             raise TypeError(f"letter must be str, got {type(letter)}")
         if not isinstance(model, NetworkModel):
             raise TypeError(f"model must be NetworkModel, got {type(model)}")
-        if not isinstance(src, _Event):
-            raise TypeError(f"src must be _Event, got {type(src)}")
-        if not isinstance(dst, _Event):
-            raise TypeError(f"dst must be _Event, got {type(dst)}")
+        if not isinstance(src, Event):
+            raise TypeError(f"src must be Event, got {type(src)}")
+        if not isinstance(dst, Event):
+            raise TypeError(f"dst must be Event, got {type(dst)}")
         if not isinstance(expected, (int, float)):
             raise TypeError(f"expected must be a real number, got {type(expected)}")
         expected = float(expected)
@@ -729,7 +729,7 @@ class _Activity:
 
     @src.setter
     def src(self, new_src):
-        if isinstance(self._src, _Event):
+        if isinstance(self._src, Event):
             self._src._out_activities.remove(self)
 
         self._src = new_src
@@ -746,7 +746,7 @@ class _Activity:
 
     @dst.setter
     def dst(self, new_dst):
-        if isinstance(self._dst, _Event):
+        if isinstance(self._dst, Event):
             self._dst._in_activities.remove(self)
 
         self._dst = new_dst
@@ -949,7 +949,7 @@ class _Activity:
         return ret
 
 #==============================================================================
-class _Event:
+class Event:
     """
     Represents an event (milestone) in the network model.
 
@@ -1005,7 +1005,7 @@ class _Event:
 
     The :attr:`in_activities` and :attr:`out_activities` properties return
     **immutable tuples** (snapshots) of the current activity lists. The
-    underlying lists are maintained by ``_Activity.src`` / ``_Activity.dst``
+    underlying lists are maintained by ``Activity.src`` / ``Activity.dst``
     setters. To mutate the topology, reassign ``activity.src`` or
     ``activity.dst`` — never mutate the internal lists directly.
 
@@ -1045,7 +1045,7 @@ class _Event:
 
         Returns an **immutable tuple** (snapshot) of the current incoming
         activities. The underlying list is maintained by the
-        ``_Activity.dst`` setter. To mutate topology, reassign
+        ``Activity.dst`` setter. To mutate topology, reassign
         ``activity.dst = new_event`` — do not attempt to modify the
         returned tuple (it is immutable) or the internal list directly.
         """
@@ -1057,7 +1057,7 @@ class _Event:
 
         Returns an **immutable tuple** (snapshot) of the current outgoing
         activities. The underlying list is maintained by the
-        ``_Activity.src`` setter. To mutate topology, reassign
+        ``Activity.src`` setter. To mutate topology, reassign
         ``activity.src = new_event`` — do not attempt to modify the
         returned tuple (it is immutable) or the internal list directly.
         """
@@ -1355,7 +1355,7 @@ class NetworkModel:
 
           * Positive number or zero for forward pass (early times calculation)
           * Negative number or zero for backward pass (late times calculation)
-        - ``activity``: :class:`_Activity` object for context
+        - ``activity``: :class:`Activity` object for context
         - ``base_time``: context-dependent:
 
           * ``float`` during forward/backward pass (``target`` is
@@ -1397,9 +1397,9 @@ class NetworkModel:
 
     Attributes
     ----------
-    activities : list of _Activity
+    activities : list of Activity
         List of activity objects in the network (real + dummy).
-    events : list of _Event
+    events : list of Event
         List of event objects in the network, sorted by topological stage.
     is_pert : bool
         ``True`` if PERT analysis is enabled (any activity has non-zero
@@ -1471,8 +1471,8 @@ class NetworkModel:
     parsing and removed from ``activity.data``. Do not use these names
     for custom fields.
 
-    User-defined event data is stored in ``_Event.data``. Its keys must not
-    collide with the reserved field names inserted by ``_Event.to_dict``
+    User-defined event data is stored in ``Event.data``. Its keys must not
+    collide with the reserved field names inserted by ``Event.to_dict``
     (``id``, ``stage``, ``early``, ``late``, ``reserve``, ``optimistic``,
     ``pessimistic``, ``early_var``, ``early_pqe``, ``late_prob``,
     ``early_err``, ``late_err``), otherwise the computed values take
@@ -1786,7 +1786,7 @@ class NetworkModel:
         dict
             Shallow copy of ``wbs_data`` with the following keys removed
             (they are consumed during parsing and stored as separate
-            attributes on the :class:`_Activity` instance):
+            attributes on the :class:`Activity` instance):
             ``expected``, ``exp_var``, ``letter``, ``optimistic``,
             ``most_likely``, ``pessimistic``.
         """
@@ -1980,7 +1980,7 @@ class NetworkModel:
             ----------
             effort : numpy.ndarray
                 Resource effort array ``[value, variance, error_bound]``
-            activity : _Activity
+            activity : Activity
                 Activity object for context
             base_time : numpy.ndarray or None
                 Base time array ``[value, variance, error_bound]`` for time
@@ -2155,7 +2155,7 @@ class NetworkModel:
         i : int
             Unique event identifier (positive integer).
         """
-        self._events.append(_Event(i, self))
+        self._events.append(Event(i, self))
 
     def _add_activity(self, wbs_id, src_id, dst_id, expected, exp_var,
                       optimistic, pessimistic, letter, data, is_dummy=False):
@@ -2219,7 +2219,7 @@ class NetworkModel:
         if not isinstance(data, dict):
             raise TypeError(f"data must be dict, got {type(data)}")
 
-        act = _Activity(self.next_act, wbs_id, letter, self,
+        act = Activity(self.next_act, wbs_id, letter, self,
                         self._events[src_id - 1], self._events[dst_id - 1],
                         expected, exp_var, optimistic, pessimistic, data, is_dummy=is_dummy)
         self._activities.append(act)
@@ -2268,7 +2268,7 @@ class NetworkModel:
         Each activity dictionary is a copy of the activity's ``data``
         extended with the computed CPM/PERT fields. Each event dictionary
         is likewise a copy of the event's ``data`` extended with the
-        computed CPM/PERT fields (see :meth:`_Event.to_dict`).
+        computed CPM/PERT fields (see :meth:`Event.to_dict`).
         """
         activities_data = [activity.to_dict() for activity in self._activities]
         events_data = [event.to_dict() for event in self._events]
@@ -2291,8 +2291,8 @@ class NetworkModel:
         Notes
         -----
         Both DataFrames expand custom user data fields from the
-        corresponding ``data`` attributes (``_Activity.data`` and
-        ``_Event.data``) into separate columns for easy analysis.
+        corresponding ``data`` attributes (``Activity.data`` and
+        ``Event.data``) into separate columns for easy analysis.
 
         Activities' missing values are replaced with empty strings
         for object-typed columns (where possible, subject to the
@@ -2337,7 +2337,7 @@ class NetworkModel:
         get_style : callable, default=_default_style
             Callback that computes styling attributes for a graph element.
             Signature: ``get_style(element) -> dict``, where ``element``
-            is either an ``_Event`` or an ``_Activity``. The returned
+            is either an ``Event`` or an ``Activity``. The returned
             dictionary must contain keys ``color``, ``penwidth`` and
             ``fontsize``; the key ``weight`` is used for activity edges;
             the key ``tooltip`` is used for hover tooltips (rendered
@@ -2585,7 +2585,7 @@ if __name__ == '__main__':
 
             - Positive number or zero for forward pass
             - Negative number or zero for backward pass
-        activity : _Activity
+        activity : Activity
             Activity object containing resource data
         base_time : float or None
             Base time for availability calculations during network

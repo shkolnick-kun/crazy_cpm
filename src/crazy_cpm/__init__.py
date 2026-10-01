@@ -32,5 +32,5 @@ management.
 
 from _ccpm import (make_aoa, make_full_map,
                    EINVAL, ELOOP, ENOMEM, ELIM, EUNK, OK)
-from .net_model import (NetworkModel, _Activity, _Event,
+from .net_model import (NetworkModel, Activity, Event,
                         RES, VAR, ERR, fit_beta, calc_ppf, calc_cdf)
