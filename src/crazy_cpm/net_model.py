@@ -71,6 +71,27 @@ Advanced usage with resource-aware duration:
 
 .. note::
     This module uses a C extension (_ccpm) for performance-critical computations.
+
+.. note::
+    Numerical consistency of early/late time parameters is enforced
+    *during* the forward and backward passes rather than as a separate
+    post-processing step. This keeps downstream calculations consistent
+    (see :meth:`NetworkModel._compute_target` for details).
+
+.. note::
+    During the ``'early'`` and ``'late'`` passes the model checks the
+    following CPM invariants:
+
+    - ``early_start >= 0``
+    - ``early_end >= early_start``
+    - ``late_start >= early_start``
+    - ``late_end >= late_start``
+    - ``late >= early`` for events
+
+    Violations within the accumulated error bound are silently clamped;
+    violations beyond it raise :exc:`RuntimeError`, which signals a
+    structural inconsistency (bad topology or a misbehaving ``duration``
+    callback) rather than a purely numerical issue.
 """
 
 #==============================================================================
@@ -639,6 +660,13 @@ class Activity:
     - Setters for ``src`` and ``dst`` maintain the corresponding event's
       internal ``_in_activities`` / ``_out_activities`` lists. Do not
       mutate those lists directly.
+    - During the network traversal, the CPM invariants
+      ``early_end >= early_start``, ``late_start >= early_start`` and
+      ``late_end >= late_start`` are enforced by
+      :meth:`NetworkModel._compute_target`. This means that after a
+      successful model construction these relations hold for the
+      activity's time attributes as well (up to the accumulated error
+      bound).
 
     Raises
     ------
@@ -1015,6 +1043,12 @@ class Event:
     ``early_var``, ``early_pqe``, ``late_prob``, ``early_err``,
     ``late_err``), otherwise the computed values take precedence in the
     output dictionary.
+
+    During the network traversal, the CPM invariant ``late >= early`` is
+    enforced by :meth:`NetworkModel._compute_target`. After successful
+    model construction, event late times therefore always satisfy
+    ``late[RES] >= early[RES] - (late[ERR] + early[ERR])`` and, in the
+    common case, ``late[RES] >= early[RES]``.
     """
 
     def __init__(self, id, model):
@@ -1393,7 +1427,21 @@ class NetworkModel:
         If insufficient link data is provided, links format is invalid,
         or if network construction fails (e.g., circular dependencies).
     RuntimeError
-        If internal network consistency checks fail.
+        If internal network consistency checks fail. In addition to the
+        construction-time checks (exactly one source event, no cycles,
+        valid AoA), the time-parameter passes raise :exc:`RuntimeError`
+        when the CPM invariants are violated beyond the accumulated error
+        bound:
+
+        - ``early_start >= 0``
+        - ``early_end >= early_start`` (activity)
+        - ``late_start >= early_start`` (activity)
+        - ``late_end >= late_start`` (activity)
+        - ``late >= early`` (event)
+
+        Such violations typically indicate a structural inconsistency
+        (bad topology or a misbehaving ``duration`` callback) rather than
+        a purely numerical issue.
 
     Attributes
     ----------
@@ -1465,6 +1513,25 @@ class NetworkModel:
 
     For PERT analysis, variance is automatically propagated through the
     network using modified PERT distribution formulas.
+
+    Numerical consistency of early/late time parameters is enforced
+    *during* the forward and backward passes (see
+    :meth:`_compute_target`), rather than through a separate post-hoc
+    sanitization pass. This ensures that downstream computations always
+    operate on consistent values:
+
+    - Values whose violation is within the accumulated error bound are
+      silently clamped to satisfy the invariants.
+    - Values whose violation exceeds the accumulated error bound cause a
+      :exc:`RuntimeError`. This indicates a structural problem — for
+      example, a ``duration`` callback that maps non-negative effort to a
+      negative duration, or a topology that is inconsistent with the
+      signed backward-pass deltas.
+
+    Because the ``_check_and_fix_act`` / ``_check_and_fix_evt`` helpers
+    only react to the ``'early'`` and ``'late'`` targets, the ``'stage'``,
+    ``'optimistic'`` and ``'pessimistic'`` passes are not subject to these
+    checks.
 
     Reserved WBS field names (``expected``, ``exp_var``, ``letter``,
     ``optimistic``, ``most_likely``, ``pessimistic``) are consumed during
@@ -1813,8 +1880,13 @@ class NetworkModel:
         Raises
         ------
         RuntimeError
-            If any event or activity has a negative time reserve,
-            indicating a programming error or corrupted network.
+            If any activity has a negative time reserve, indicating a
+            programming error or corrupted network. Also propagates
+            :exc:`RuntimeError` from :meth:`_compute_target`, which is
+            raised when a CPM invariant (non-negativity of early times,
+            ``early_end >= early_start``, ``late_start >= early_start``,
+            ``late_end >= late_start`` for activities, or ``late >= early``
+            for events) is violated beyond the accumulated error bound.
 
         Notes
         -----
@@ -1828,9 +1900,22 @@ class NetworkModel:
         (see :meth:`_compute_target` with ``target='optimistic'`` and
         ``target='pessimistic'``).
 
-        After computation, all negative ``early``/``late`` values are
-        clamped to zero. Time reserves smaller than their error bound
-        (in absolute value) are rounded to zero.
+        Numerical consistency of time parameters (non-negativity,
+        ``early_end >= early_start``, ``late_start >= early_start``,
+        ``late_end >= late_start``, ``late >= early``) is enforced
+        *during* the network traversal inside :meth:`_compute_target`
+        by the local helpers ``_check_and_fix_act`` and
+        ``_check_and_fix_evt``. This method therefore does not perform
+        a separate post-hoc clamping pass after the forward/backward
+        pass completes.
+
+        Violations within the accumulated error bound are silently
+        clamped; violations beyond it raise :exc:`RuntimeError` from
+        inside :meth:`_compute_target` and propagate through this
+        method.
+
+        Once all time parameters are computed, time reserves smaller
+        than their error bound (in absolute value) are rounded to zero.
         """
         self._compute_target('early')
 
@@ -1852,17 +1937,6 @@ class NetworkModel:
             # Round off insignificant values
             r = e.late[RES] - e.early[RES]
             e.reserve[RES] = r if abs(r) > e.reserve[ERR] else 0.0
-
-            # Check for programming errors
-            if r < -e.reserve[ERR]:
-                raise RuntimeError(f"Event {e.id} has negative time reserve ({r})")
-
-            # Time params lower limit
-            if e.early[RES] < 0.0:
-                e.early[RES] = 0.0
-
-            if e.late[RES] < 0.0:
-                e.late[RES] = 0.0
 
         for a in self._activities:
             # Compute start and end reserve values separately
@@ -1887,19 +1961,6 @@ class NetworkModel:
             # Check for programming errors
             if r < -a.reserve[ERR]:
                 raise RuntimeError(f"Activity {a.id} has negative time reserve ({r})")
-
-            # Time params lower limit
-            if a.early_start[RES] < 0.0:
-                a.early_start[RES] = 0.0
-
-            if a.late_start[RES] < 0.0:
-                a.late_start[RES] = 0.0
-
-            if a.early_end[RES] < 0.0:
-                a.early_end[RES] = 0.0
-
-            if a.late_end[RES] < 0.0:
-                a.late_end[RES] = 0.0
 
         if self.is_pert:
             # For PERT models we must compute optimistic and pessimistic scenarios
@@ -1930,9 +1991,24 @@ class NetworkModel:
         ValueError
             If ``target`` parameter is invalid.
         RuntimeError
-            If network has more than one starting event (i.e., the
-            project does not have exactly one source event) or contains
-            cycles not detected earlier.
+            If the network does not have exactly one starting event
+            (i.e., the project does not have exactly one source event),
+            or if it contains cycles not detected earlier.
+
+            In addition, during the ``'early'`` and ``'late'`` passes the
+            following CPM invariants are checked for every event and
+            activity; a violation that exceeds the accumulated error bound
+            raises :exc:`RuntimeError`:
+
+            - ``early_start >= 0`` (event and activity)
+            - ``early_end >= early_start`` (activity)
+            - ``late_start >= early_start`` (activity)
+            - ``late_end >= late_start`` (activity)
+            - ``late >= early`` (event)
+
+            Violations within the accumulated error bound are silently
+            clamped. The corresponding messages identify the offending
+            event/activity and the specific invariant.
 
         Notes
         -----
@@ -1953,6 +2029,32 @@ class NetworkModel:
         to the processing queue. When an activity is processed, the
         destination event's dependency counter is decremented; when it
         reaches zero, the event is added to the queue.
+
+        Numerical consistency of time parameters is enforced *in place*
+        during the ``'early'`` and ``'late'`` traversals by two local
+        helpers:
+
+        - ``_check_and_fix_act(a, target)`` — called after each activity
+          update. Ensures ``early_start >= 0`` and enforces
+          ``early_end >= early_start``, ``late_start >= early_start``,
+          ``late_end >= late_start``. Violations beyond the accumulated
+          error bound raise :exc:`RuntimeError`; smaller violations are
+          silently clamped.
+        - ``_check_and_fix_evt(e, target)`` — called after each event is
+          processed. Ensures ``early >= 0`` and, on the late pass,
+          enforces ``late >= early``. If ``late < early`` by more than
+          the accumulated error bound, :exc:`RuntimeError` is raised;
+          otherwise ``late`` is raised to ``early``.
+
+        Correcting values during the traversal keeps downstream
+        calculations consistent and prevents small numerical
+        inconsistencies from propagating through the rest of the
+        network. As a consequence, callers do not need to run a
+        separate post-processing pass to sanitize early/late values.
+
+        Because these helpers only react to ``'early'`` and ``'late'``
+        targets, the ``'stage'``, ``'optimistic'`` and ``'pessimistic'``
+        passes are unaffected by them.
 
         For PERT analysis, variance is propagated using the modified
         PERT distribution formula (see the inner ``_duration_vec``
@@ -2048,6 +2150,120 @@ class NetworkModel:
 
             return dur
 
+        def _check_and_fix_evt(e, target):
+            """
+            Sanitize event time parameters after processing.
+
+            Ensures non-negativity of early times and consistency between
+            ``early`` and ``late`` values.
+
+            Parameters
+            ----------
+            e : Event
+                Event to sanitize
+            target : str
+                Which parameter set was just computed (``'early'`` or
+                ``'late'``). Any other value is ignored.
+
+            Raises
+            ------
+            RuntimeError
+                On the late pass, if ``late`` falls below ``early`` by
+                more than the accumulated error bound
+                (``early[RES] - late[RES] > late[ERR] + early[ERR]``).
+                This indicates a structural inconsistency in the network
+                (e.g., a misbehaving ``duration`` callback).
+
+            Notes
+            -----
+            On the ``'early'`` pass, negative ``early[RES]`` is clamped
+            to zero. On the ``'late'`` pass, a violation of
+            ``late >= early`` that is within the error bound is
+            resolved by raising ``late`` to ``early``.
+            """
+            if 'early' == target:
+                if e.early[RES] < 0.0:
+                    e.early[RES] = 0.0
+
+            elif 'late' == target:
+                if e.early[RES] - e.late[RES] >  e.late[ERR] + e.early[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal late time ({e.late[RES]} < {e.early[RES]}) ")
+
+                if e.late[RES] < e.early[RES]:
+                    e.late[RES] = e.early[RES]
+
+            return
+
+        def _check_and_fix_act(a, target):
+            """
+            Sanitize activity time parameters after update.
+
+            Ensures non-negativity of early times, and enforces the
+            ordering constraints ``early_end >= early_start``,
+            ``late_start >= early_start`` and ``late_end >= late_start``.
+
+            Parameters
+            ----------
+            a : Activity
+                Activity to sanitize
+            target : str
+                Which parameter set was just computed (``'early'`` or
+                ``'late'``). Any other value is ignored.
+
+            Raises
+            ------
+            RuntimeError
+                If any of the following invariants is violated beyond the
+                accumulated error bound:
+
+                - ``early_end >= early_start`` (early pass)
+                - ``late_start >= early_start`` (late pass)
+                - ``late_end >= late_start`` (late pass)
+
+                Such a violation indicates a structural inconsistency in
+                the network (e.g., a ``duration`` callback that maps
+                non-negative effort to a negative duration, or a topology
+                that contradicts the signed backward-pass deltas).
+
+            Notes
+            -----
+            Violations within the accumulated error bound are silently
+            clamped:
+
+            - early pass: ``early_end = max(early_end, early_start)``
+            - late pass: ``late_start = max(late_start, early_start)``,
+              then ``late_end = max(late_end, late_start)``
+
+            Negative ``early_start`` is clamped to zero regardless of the
+            target.
+            """
+            # Time params lower limit
+
+            if 'early' == target:
+                if a.early_start[RES] < 0.0:
+                    a.early_start[RES] = 0.0
+
+                if a.early_start[RES] - a.early_end[RES] >  a.early_start[ERR] + a.early_end[ERR]:
+                    raise RuntimeError(f"Activity {a.id} has abnormal early end time ({a.early_end[RES]} < {a.early_start[RES]}) ")
+
+                if a.early_end[RES] < a.early_start[RES]:
+                    a.early_end[RES] = a.early_start[RES]
+
+            elif 'late' == target:
+                if a.early_start[RES] - a.late_start[RES] >  a.early_start[ERR] + a.late_start[ERR]:
+                    raise RuntimeError(f"Activity {a.id} has abnormal late start time ({a.late_start[RES]} < {a.early_start[RES]}) ")
+
+                if a.late_start[RES] < a.early_start[RES]:
+                    a.late_start[RES] = a.early_start[RES]
+
+                if a.late_start[RES] - a.late_end[RES] >  a.late_start[ERR] + a.late_end[ERR]:
+                    raise RuntimeError(f"Activity {a.id} has abnormal late end time ({a.late_end[RES]} < {a.late_start[RES]}) ")
+
+                if a.late_end[RES] < a.late_start[RES]:
+                    a.late_end[RES] = a.late_start[RES]
+
+            return
+
         if 'stage' == target:
             act_base = None
             act_new = None
@@ -2133,6 +2349,9 @@ class NetworkModel:
                 if act_new:
                     setattr(a, act_new, new_val)
 
+                if act_base or act_new:
+                    _check_and_fix_act(a, target)
+
                 next_evt = getattr(a, act_next)
 
                 setattr(next_evt, target, choice(getattr(next_evt, target), new_val))
@@ -2141,6 +2360,8 @@ class NetworkModel:
 
                 if 0 >= n_dep[next_evt]:
                     evt.append(next_evt)
+
+            _check_and_fix_evt(e, target)
 
             i += 1
             if i >= len(evt):
