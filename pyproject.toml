@@ -18,7 +18,7 @@ authors = [
 ]
 keywords = ["cpm", "scheduling", "critical-path"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
