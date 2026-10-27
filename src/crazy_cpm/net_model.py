@@ -727,6 +727,8 @@ class Activity:
         self.expected[VAR] = exp_var
         self.expected[ERR] = EPS * expected
 
+        self.duration = np.zeros_like(self.expected)
+
         self.data = data if data is not None else {}
 
         self._is_dummy = is_dummy
@@ -785,8 +787,8 @@ class Activity:
         """Whether this activity is a dummy (used in AoA construction)."""
         return self._is_dummy
 
-    @property
-    def duration(self):
+
+    def compute_final_duration(self):
         """
         Calculate activity duration from early and late time analyses.
 
@@ -811,6 +813,7 @@ class Activity:
         variance of the duration (relevant for PERT models). Its ``RES``
         component is the point estimate.
         """
+
         # Early duration calculation
         # Note:
         # early_end[[RES,VAR]] == early_start[[RES,VAR]] + early[[RES,VAR]]
@@ -827,7 +830,7 @@ class Activity:
         late[ERR] = self.late_end[ERR] + self.late_start[ERR]
 
         # Choose most certain estimate
-        return _choice(early, late, late[RES] - early[RES])
+        self.duration = _choice(early, late, late[RES] - early[RES])
 
     @property
     def early_start_pqe(self):
@@ -1063,6 +1066,8 @@ class Event:
         self._out_activities = []
 
         # CPM time parameters (calculated later)
+        self.early_pre = np.zeros((3,), dtype=float)
+        self.late_pre = np.zeros((3,), dtype=float)
         self.early = np.zeros((3,), dtype=float)
         self.late = np.zeros((3,), dtype=float)
         self.reserve = np.zeros((3,), dtype=float)
@@ -1185,6 +1190,14 @@ class Event:
             # Debug information
             ret['early_err'] = self.early[ERR]
             ret['late_err' ] = self.late[ERR]
+
+            ret['early_pre'     ] = self.early_pre[RES]
+            ret['early_pre_var' ] = self.early_pre[VAR]
+            ret['early_pre_err' ] = self.early_pre[ERR]
+
+            ret['late_pre'     ] = self.late[RES]
+            ret['late_pre_var' ] = self.late[VAR]
+            ret['late_pre_err' ] = self.late[ERR]
 
         return ret
 
@@ -1548,7 +1561,7 @@ class NetworkModel:
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
                  duration=_default_duration, p=0.95, default_risk=0.3,
-                 next_act_id=1, debug=False):
+                 next_act_id=1, debug=True):
         # Validate wbs_dict
         if not isinstance(wbs_dict, dict):
             raise TypeError(f"wbs_dict must be dict, got {type(wbs_dict)}")
@@ -1917,6 +1930,27 @@ class NetworkModel:
         Once all time parameters are computed, time reserves smaller
         than their error bound (in absolute value) are rounded to zero.
         """
+        if self.is_pert:
+            # For PERT models we must compute optimistic and pessimistic scenarios
+            self._compute_target('optimistic')
+            self._compute_target('pessimistic')
+
+        self._compute_target('early_pre')
+
+        # Set late times starting from project completion
+        late_pre = np.zeros((3,), dtype=float)
+        for e in self._events:
+            if e.early_pre[RES] > late_pre[RES]:
+                late_pre = e.early_pre.copy()
+
+        for e in self._events:
+            e.late_pre = late_pre.copy()
+
+        self._compute_target('late_pre')
+
+        for a in self._activities:
+            a.compute_final_duration()
+
         self._compute_target('early')
 
         # Set late times starting from project completion
@@ -1962,10 +1996,7 @@ class NetworkModel:
             if r < -a.reserve[ERR]:
                 raise RuntimeError(f"Activity {a.id} has negative time reserve ({r})")
 
-        if self.is_pert:
-            # For PERT models we must compute optimistic and pessimistic scenarios
-            self._compute_target('optimistic')
-            self._compute_target('pessimistic')
+
 
     def _compute_target(self, target=None):
         """
@@ -2069,6 +2100,11 @@ class NetworkModel:
         def _delta_late(a):
             ret = a.expected.copy()
             ret[RES] = -a.expected[RES]
+            return ret
+
+        def _duration_late(effort, activity, base_time, target):
+            ret = a.duration.copy()
+            ret[RES] = -a.duration[RES]
             return ret
 
         def _duration_vec(effort, activity, base_time, target):
@@ -2274,7 +2310,7 @@ class NetworkModel:
             delta = lambda a: 1
             process_delta = lambda d, a, b, t: d
 
-        elif 'early' == target:
+        elif 'early_pre' == target:
             act_base = 'early_start'
             act_new = 'early_end'
             act_next = 'dst'
@@ -2284,7 +2320,7 @@ class NetworkModel:
             delta = lambda a: a.expected
             process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
 
-        elif 'late' == target:
+        elif 'late_pre' == target:
             act_base = 'late_end'
             act_new = 'late_start'
             act_next = 'src'
@@ -2293,6 +2329,26 @@ class NetworkModel:
             choice = _choice_late
             delta = _delta_late
             process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
+
+        elif 'early' == target:
+            act_base = 'early_start'
+            act_new = 'early_end'
+            act_next = 'dst'
+            fwd = '_out_activities'
+            rev = '_in_activities'
+            choice = _choice_early
+            delta = lambda a: a.expected
+            process_delta = lambda d, a, b, t: a.duration
+
+        elif 'late' == target:
+            act_base = 'late_end'
+            act_new = 'late_start'
+            act_next = 'src'
+            fwd = '_in_activities'
+            rev = '_out_activities'
+            choice = _choice_late
+            delta = _delta_late
+            process_delta = _duration_late
 
         elif 'optimistic' == target:
             act_base = 'opt_start'
@@ -2534,7 +2590,7 @@ class NetworkModel:
 
         return activities_df, events_df
 
-    def viz(self, output_path=None, group_by_stage=False, get_style=_default_style):
+    def viz(self, output_path=None, group_by_stage=True, get_style=_default_style):
         """
         Create Graphviz visualization of the CPM/PERT network.
 
