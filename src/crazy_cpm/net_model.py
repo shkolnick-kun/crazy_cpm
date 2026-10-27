@@ -1195,9 +1195,9 @@ class Event:
             ret['early_pre_var' ] = self.early_pre[VAR]
             ret['early_pre_err' ] = self.early_pre[ERR]
 
-            ret['late_pre'     ] = self.late[RES]
-            ret['late_pre_var' ] = self.late[VAR]
-            ret['late_pre_err' ] = self.late[ERR]
+            ret['late_pre'     ] = self.late_pre[RES]
+            ret['late_pre_var' ] = self.late_pre[VAR]
+            ret['late_pre_err' ] = self.late_pre[ERR]
 
         return ret
 
@@ -2103,8 +2103,8 @@ class NetworkModel:
             return ret
 
         def _duration_late(effort, activity, base_time, target):
-            ret = a.duration.copy()
-            ret[RES] = -a.duration[RES]
+            ret = activity.duration.copy()
+            ret[RES] = -activity.duration[RES]
             return ret
 
         def _duration_vec(effort, activity, base_time, target):
