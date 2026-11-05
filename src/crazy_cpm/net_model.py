@@ -73,21 +73,14 @@ Advanced usage with resource-aware duration:
     This module uses a C extension (_ccpm) for performance-critical computations.
 
 .. note::
-    The model uses a **two-phase time analysis** to support resource-aware
-    duration callbacks whose result depends on the calendar context
-    (start or end time of the activity). Phase 1 computes preliminary
-    ``early_pre`` / ``late_pre`` passes; a single per-activity duration
-    is then frozen via :meth:`Activity.compute_final_duration`; phase 2
-    computes the final ``early`` / ``late`` passes using those frozen
-    durations. This guarantees that forward and backward passes use
-    identical durations and therefore that all time reserves are
-    non-negative. See :meth:`NetworkModel._compute_time_params` for the
-    algorithm and :meth:`NetworkModel._compute_target` for the per-target
-    semantics.
+    Numerical consistency of early/late time parameters is enforced
+    *during* the forward and backward passes rather than as a separate
+    post-processing step. This keeps downstream calculations consistent
+    (see :meth:`NetworkModel._compute_target` for details).
 
 .. note::
-    During the **final** ``'early'`` and ``'late'`` passes (phase 2) the
-    model checks the following CPM invariants:
+    During the ``'early'`` and ``'late'`` passes the model checks the
+    following CPM invariants:
 
     - ``early_start >= 0``
     - ``early_end >= early_start``
@@ -99,11 +92,6 @@ Advanced usage with resource-aware duration:
     violations beyond it raise :exc:`RuntimeError`, which signals a
     structural inconsistency (bad topology or a misbehaving ``duration``
     callback) rather than a purely numerical issue.
-
-    The preliminary ``'early_pre'`` / ``'late_pre'`` passes are **not**
-    subject to these checks: they may temporarily hold values that
-    violate ``late_pre >= early_pre``, which is exactly what the freeze
-    step between phases corrects.
 """
 
 #==============================================================================
@@ -437,33 +425,22 @@ def _default_duration(effort, activity, base_time, target):
     effort : float
         Resource effort estimate:
 
-        - Positive number or zero for forward passes
-        - Negative number or zero for backward passes
+        - Positive number or zero for forward pass (early times calculation)
+        - Negative number or zero for backward pass (late times calculation)
     activity : Activity
         Activity object for context-aware calculations
     base_time : float or None
-        Calendar context for the duration calculation:
+        Base time from which the activity starts:
 
-        - ``float`` with ``target='early_pre'``: the *start* time of
-          the activity (phase-1 forward pass).
-        - ``float`` with ``target='late_pre'``: the *end* time of the
-          activity (phase-1 backward pass).
-        - ``float`` (scalar) with ``target='optimistic'`` or
-          ``'pessimistic'``: the scenario start time.
-        - ``None`` with ``target=None``: no calendar context (network
-          post-processing, e.g. triangle optimisation in
-          :meth:`NetworkModel._create_model`).
-
-        .. note::
-            The callback is **not** invoked during the final (phase-2)
-            ``'early'`` / ``'late'`` passes — those use the duration
-            value frozen on the activity between phases (see
-            :meth:`Activity.compute_final_duration`). This is what
-            guarantees that forward and backward passes use identical
-            durations and, consequently, that reserves are non-negative.
+        - ``float`` for time computations during network traversal
+          (``target`` is ``'early'`` or ``'late'``)
+        - ``None`` for network post-processing (``target`` is ``None``)
+        - ``float`` (scalar) for scenario computations
+          (``target`` is ``'optimistic'`` or ``'pessimistic'``)
     target : str or None
-        Target scenario identifier. One of ``'early_pre'``, ``'late_pre'``,
-        ``'optimistic'``, ``'pessimistic'``, or ``None``.
+        Target scenario identifier: ``'early'``, ``'late'``, ``'optimistic'``,
+        ``'pessimistic'``, or ``None`` (for post-processing and triangle
+        optimization).
 
     Returns
     -------
@@ -649,18 +626,15 @@ class Activity:
     data : dict
         Additional activity data
     early_start : numpy.ndarray
-        Early start time ``[value, variance, error_bound]`` (phase-2 result)
+        Early start time ``[value, variance, error_bound]``
     late_start : numpy.ndarray
-        Late start time ``[value, variance, error_bound]`` (phase-2 result)
+        Late start time ``[value, variance, error_bound]``
     early_end : numpy.ndarray
-        Early end time ``[value, variance, error_bound]`` (phase-2 result)
+        Early end time ``[value, variance, error_bound]``
     late_end : numpy.ndarray
-        Late end time ``[value, variance, error_bound]`` (phase-2 result)
+        Late end time ``[value, variance, error_bound]``
     reserve : numpy.ndarray
-        Time reserve ``[value, variance, error_bound]`` (phase-2 result)
-    duration : numpy.ndarray
-        Frozen final duration ``[value, variance, error_bound]``, used
-        verbatim by both phase-2 passes.
+        Time reserve ``[value, variance, error_bound]``
     optimistic : float
         Optimistic effort estimate
     pessimistic : float
@@ -680,25 +654,19 @@ class Activity:
     -----
     - Resource effort arrays follow the format
       ``[RES (value), VAR (variance), ERR (error bound)]``.
-    - The final time attributes (``early_start``, ``late_start``,
-      ``early_end``, ``late_end``, ``reserve``) and ``duration`` are the
-      result of the phase-2 passes of
-      :meth:`NetworkModel._compute_time_params`. Because both phase-2
-      passes use the same frozen ``duration``, the invariant
-      ``late_end - late_start == early_end - early_start`` holds for
-      every activity, so time reserves are non-negative.
-    - The preliminary phase-1 estimates are not exposed on the activity;
-      they live on the events as ``early_pre`` / ``late_pre`` and are
-      used only inside :meth:`compute_final_duration`.
+    - Duration is calculated dynamically from early and late analyses
+      via the :attr:`duration` property, which accounts for resource
+      allocation through the model's ``duration`` callback.
     - Setters for ``src`` and ``dst`` maintain the corresponding event's
       internal ``_in_activities`` / ``_out_activities`` lists. Do not
       mutate those lists directly.
-    - During the phase-2 network traversal, the CPM invariants
+    - During the network traversal, the CPM invariants
       ``early_end >= early_start``, ``late_start >= early_start`` and
       ``late_end >= late_start`` are enforced by
-      :meth:`NetworkModel._compute_target`. After a successful model
-      construction these relations hold for the activity's time
-      attributes as well (up to the accumulated error bound).
+      :meth:`NetworkModel._compute_target`. This means that after a
+      successful model construction these relations hold for the
+      activity's time attributes as well (up to the accumulated error
+      bound).
 
     Raises
     ------
@@ -759,8 +727,6 @@ class Activity:
         self.expected[VAR] = exp_var
         self.expected[ERR] = EPS * expected
 
-        self.duration = np.zeros_like(self.expected)
-
         self.data = data if data is not None else {}
 
         self._is_dummy = is_dummy
@@ -819,41 +785,32 @@ class Activity:
         """Whether this activity is a dummy (used in AoA construction)."""
         return self._is_dummy
 
-
-    def compute_final_duration(self):
+    @property
+    def duration(self):
         """
-        Freeze the final activity duration for the phase-2 passes.
+        Calculate activity duration from early and late time analyses.
 
-        This method is called by :meth:`NetworkModel._compute_time_params`
-        **between** the preliminary (``'early_pre'`` / ``'late_pre'``)
-        and final (``'early'`` / ``'late'``) passes. It compares the
-        duration implied by the preliminary early schedule
-        (``early_end - early_start``) with the duration implied by the
-        preliminary late schedule (``late_end - late_start``) and
-        selects the more certain estimate via :func:`_choice`.
-
-        The selected value is stored in :attr:`duration` and is used
-        verbatim by both phase-2 passes, so that forward and backward
-        calculations use exactly the same duration and time reserves
-        are guaranteed non-negative.
+        This property computes the actual duration by comparing early and
+        late time calculations and selecting the most certain estimate
+        via :func:`_choice`.
 
         Returns
         -------
-        None
-            The result is written to :attr:`duration`.
+        numpy.ndarray
+            Duration array ``[value, variance, error_bound]``.
 
         Notes
         -----
-        This is not a public "recalculate" method — calling it outside
-        the two-phase sequence will overwrite :attr:`duration` with a
-        value derived from stale ``early_pre`` / ``late_pre`` /
-        ``early`` / ``late`` fields.
+        The duration is calculated as:
+
+        - Early approach: ``early_end - early_start``
+        - Late approach: ``late_end - late_start``
+        - Final selection uses certainty-based decision making
 
         The returned array's ``VAR`` component reflects the propagated
         variance of the duration (relevant for PERT models). Its ``RES``
         component is the point estimate.
         """
-
         # Early duration calculation
         # Note:
         # early_end[[RES,VAR]] == early_start[[RES,VAR]] + early[[RES,VAR]]
@@ -870,7 +827,7 @@ class Activity:
         late[ERR] = self.late_end[ERR] + self.late_start[ERR]
 
         # Choose most certain estimate
-        self.duration = _choice(early, late, late[RES] - early[RES])
+        return _choice(early, late, late[RES] - early[RES])
 
     @property
     def early_start_pqe(self):
@@ -947,10 +904,10 @@ class Activity:
             - ``src_id``: Source event ID
             - ``dst_id``: Destination event ID
             - ``expected``: Activity expected resource effort
-            - ``duration``: Actual (frozen) duration
+            - ``duration``: Actual duration
             - ``early_start``, ``late_start``, ``early_end``, ``late_end``:
-              Timing parameters (phase-2 result)
-            - ``reserve``: Time reserve (phase-2 result)
+              Timing parameters
+            - ``reserve``: Time reserve
             - ``is_dummy``: Whether this is a dummy activity
             - ``data``: Additional activity data
             - Additional PERT fields if applicable
@@ -965,9 +922,7 @@ class Activity:
 
         Debug-specific fields (``early_start_err``, ``late_start_err``,
         ``early_end_err``, ``late_end_err``) are only included when
-        ``model.debug`` is ``True``. Preliminary phase-1 estimates are
-        not exposed on the activity — see ``Event.to_dict`` for
-        ``early_pre`` / ``late_pre``.
+        ``model.debug`` is ``True``.
 
         The returned dictionary is a copy of ``self.data`` extended with
         the computed CPM/PERT fields. If a user field name collides with
@@ -1049,21 +1004,12 @@ class Event:
         output of :meth:`to_dict` (and therefore appear as separate
         columns in the events DataFrame produced by
         :meth:`NetworkModel.to_dataframe`).
-    early_pre : numpy.ndarray
-        Preliminary early time ``[value, variance, error_bound]`` from
-        phase 1 (see :meth:`NetworkModel._compute_time_params`).
-    late_pre : numpy.ndarray
-        Preliminary late time ``[value, variance, error_bound]`` from
-        phase 1. This is an internal service value: it may be negative
-        or larger than ``early_pre`` and is used only to freeze
-        per-activity durations. Do not compare it against ``early_pre``
-        — the final, API-facing fields are ``early`` and ``late``.
     early : numpy.ndarray
-        Early time ``[value, variance, error_bound]`` (phase-2 result)
+        Early time ``[value, variance, error_bound]``
     late : numpy.ndarray
-        Late time ``[value, variance, error_bound]`` (phase-2 result)
+        Late time ``[value, variance, error_bound]``
     reserve : numpy.ndarray
-        Time reserve ``[value, variance, error_bound]`` (phase-2 result)
+        Time reserve ``[value, variance, error_bound]``
     stage : int
         Event stage in topological order (0 = start event)
     optimistic : float
@@ -1091,28 +1037,18 @@ class Event:
     setters. To mutate the topology, reassign ``activity.src`` or
     ``activity.dst`` — never mutate the internal lists directly.
 
-    The model uses a two-phase time analysis (see
-    :meth:`NetworkModel._compute_time_params`). ``early_pre`` and
-    ``late_pre`` hold the phase-1 (preliminary) estimates and may not
-    satisfy ``late_pre >= early_pre``; they exist so that
-    :meth:`Activity.compute_final_duration` can freeze a single duration
-    per activity before phase 2. The public API exposes the phase-2
-    values ``early`` and ``late``, which do satisfy ``late >= early``
-    (enforced by :meth:`NetworkModel._compute_target`).
-
     User-defined keys in ``data`` must not collide with the reserved
     field names inserted by :meth:`to_dict` (``id``, ``stage``,
     ``early``, ``late``, ``reserve``, ``optimistic``, ``pessimistic``,
     ``early_var``, ``early_pqe``, ``late_prob``, ``early_err``,
-    ``late_err``, ``early_pre``, ``early_pre_var``, ``early_pre_err``,
-    ``late_pre``, ``late_pre_var``, ``late_pre_err``), otherwise the
-    computed values take precedence in the output dictionary.
+    ``late_err``), otherwise the computed values take precedence in the
+    output dictionary.
 
-    During the phase-2 network traversal, the CPM invariant
-    ``late >= early`` is enforced by :meth:`NetworkModel._compute_target`.
-    After successful model construction, event late times therefore
-    always satisfy ``late[RES] >= early[RES] - (late[ERR] + early[ERR])``
-    and, in the common case, ``late[RES] >= early[RES]``.
+    During the network traversal, the CPM invariant ``late >= early`` is
+    enforced by :meth:`NetworkModel._compute_target`. After successful
+    model construction, event late times therefore always satisfy
+    ``late[RES] >= early[RES] - (late[ERR] + early[ERR])`` and, in the
+    common case, ``late[RES] >= early[RES]``.
     """
 
     def __init__(self, id, model):
@@ -1127,8 +1063,6 @@ class Event:
         self._out_activities = []
 
         # CPM time parameters (calculated later)
-        self.early_pre = np.zeros((3,), dtype=float)
-        self.late_pre = np.zeros((3,), dtype=float)
         self.early = np.zeros((3,), dtype=float)
         self.late = np.zeros((3,), dtype=float)
         self.reserve = np.zeros((3,), dtype=float)
@@ -1207,9 +1141,9 @@ class Event:
             - All user-defined fields from ``self.data``
             - ``id``: Event ID
             - ``stage``: Topological stage
-            - ``early``: Early time (phase-2 result)
-            - ``late``: Late time (phase-2 result)
-            - ``reserve``: Time reserve (phase-2 result)
+            - ``early``: Early time
+            - ``late``: Late time
+            - ``reserve``: Time reserve
             - Additional PERT fields if applicable
 
         Notes
@@ -1218,24 +1152,16 @@ class Event:
         ``early_pqe``, ``late_prob``) are only included when PERT analysis
         is enabled (``model.is_pert``).
 
-        Debug-specific fields:
-
-        - ``early_err``, ``late_err`` — phase-2 error bounds.
-        - ``early_pre``, ``early_pre_var``, ``early_pre_err`` — phase-1
-          preliminary early time and its statistics.
-        - ``late_pre``, ``late_pre_var``, ``late_pre_err`` — phase-1
-          preliminary late time and its statistics. Note that
-          ``late_pre`` is an internal service value and may be negative
-          or larger than ``early_pre``; the public API value is ``late``.
+        Debug-specific fields (``early_err``, ``late_err``) are only
+        included when ``model.debug`` is ``True``.
 
         The returned dictionary is a copy of ``self.data`` extended with
         the computed CPM/PERT fields. Reserved field names (``id``,
         ``stage``, ``early``, ``late``, ``reserve``, ``optimistic``,
         ``pessimistic``, ``early_var``, ``early_pqe``, ``late_prob``,
-        ``early_err``, ``late_err``, ``early_pre``, ``early_pre_var``,
-        ``early_pre_err``, ``late_pre``, ``late_pre_var``,
-        ``late_pre_err``) must not be used as user data keys, otherwise
-        the computed values take precedence in the output dictionary.
+        ``early_err``, ``late_err``) must not be used as user data keys,
+        otherwise the computed values take precedence in the output
+        dictionary.
         """
         # Start with user data
         ret = self.data.copy()
@@ -1259,14 +1185,6 @@ class Event:
             # Debug information
             ret['early_err'] = self.early[ERR]
             ret['late_err' ] = self.late[ERR]
-
-            ret['early_pre'     ] = self.early_pre[RES]
-            ret['early_pre_var' ] = self.early_pre[VAR]
-            ret['early_pre_err' ] = self.early_pre[ERR]
-
-            ret['late_pre'     ] = self.late_pre[RES]
-            ret['late_pre_var' ] = self.late_pre[VAR]
-            ret['late_pre_err' ] = self.late_pre[ERR]
 
         return ret
 
@@ -1469,20 +1387,20 @@ class NetworkModel:
 
         - ``effort``: float value representing resource effort:
 
-          * Positive number or zero for forward passes
-          * Negative number or zero for backward passes
+          * Positive number or zero for forward pass (early times calculation)
+          * Negative number or zero for backward pass (late times calculation)
         - ``activity``: :class:`Activity` object for context
         - ``base_time``: context-dependent:
 
-          * ``float`` with ``target='early_pre'`` — activity *start*
-            time;
-          * ``float`` with ``target='late_pre'`` — activity *end* time;
-          * ``float`` (scalar) with ``target='optimistic'`` or
-            ``'pessimistic'`` — scenario start time;
-          * ``None`` with ``target=None`` — no calendar context
-            (post-processing).
-        - ``target``: str or None — one of ``'early_pre'``, ``'late_pre'``,
-          ``'optimistic'``, ``'pessimistic'``, or ``None``.
+          * ``float`` during forward/backward pass (``target`` is
+            ``'early'`` or ``'late'``)
+          * ``None`` during network post-processing (``target`` is ``None``)
+          * ``float`` (scalar) during scenario computations (``target`` is
+            ``'optimistic'`` or ``'pessimistic'``)
+        - ``target``: str or None indicating the computation scenario:
+
+          ``'early'``, ``'late'``, ``'optimistic'``, ``'pessimistic'``,
+          or ``None`` (for post-processing and triangle optimization).
 
         Returns: float value representing actual duration with the same
         sign as ``effort``:
@@ -1490,17 +1408,6 @@ class NetworkModel:
         - Zero if ``effort`` is zero
         - Positive number if ``effort`` is positive
         - Negative number if ``effort`` is negative
-
-        .. note::
-            The callback is invoked only during phase-1 passes
-            (``'early_pre'`` / ``'late_pre'``), scenario passes
-            (``'optimistic'`` / ``'pessimistic'``), and post-processing
-            (``None``). It is **not** invoked during the final phase-2
-            ``'early'`` / ``'late'`` passes — those use the frozen
-            per-activity duration computed by
-            :meth:`Activity.compute_final_duration`. This design
-            guarantees that forward and backward passes always use
-            identical durations for the same activity.
 
     p : float, default=0.95
         Probability level for PERT quantile estimates (``0 < p < 1``)
@@ -1510,8 +1417,7 @@ class NetworkModel:
         Starting ID for automatically generated internal activity numbering.
         Must be positive.
     debug : bool, default=False
-        Enable debug mode to include computation error bounds and
-        preliminary phase-1 estimates in output
+        Enable debug mode to include computation error bounds in output
 
     Raises
     ------
@@ -1523,9 +1429,9 @@ class NetworkModel:
     RuntimeError
         If internal network consistency checks fail. In addition to the
         construction-time checks (exactly one source event, no cycles,
-        valid AoA), the **final** ``'early'`` / ``'late'`` passes
-        (phase 2) raise :exc:`RuntimeError` when the following CPM
-        invariants are violated beyond the accumulated error bound:
+        valid AoA), the time-parameter passes raise :exc:`RuntimeError`
+        when the CPM invariants are violated beyond the accumulated error
+        bound:
 
         - ``early_start >= 0``
         - ``early_end >= early_start`` (activity)
@@ -1534,10 +1440,8 @@ class NetworkModel:
         - ``late >= early`` (event)
 
         Such violations typically indicate a structural inconsistency
-        (bad topology or a misbehaving ``duration`` callback) rather
-        than a purely numerical issue. The preliminary
-        ``'early_pre'`` / ``'late_pre'`` passes are not subject to these
-        checks.
+        (bad topology or a misbehaving ``duration`` callback) rather than
+        a purely numerical issue.
 
     Attributes
     ----------
@@ -1599,8 +1503,8 @@ class NetworkModel:
     The duration callback function must preserve the sign of the effort
     parameter to ensure correct forward and backward pass calculations:
 
-    - For forward passes: ``effort >= 0``, ``duration >= 0``
-    - For backward passes: ``effort <= 0``, ``duration <= 0``
+    - For forward pass (early times): ``effort >= 0``, ``duration >= 0``
+    - For backward pass (late times): ``effort <= 0``, ``duration <= 0``
     - For zero effort: ``duration == 0``
 
     When ``base_time`` is ``None`` in the duration callback, it indicates
@@ -1610,39 +1514,24 @@ class NetworkModel:
     For PERT analysis, variance is automatically propagated through the
     network using modified PERT distribution formulas.
 
-    The model uses a two-phase time analysis (see
-    :meth:`_compute_time_params` for the algorithm):
+    Numerical consistency of early/late time parameters is enforced
+    *during* the forward and backward passes (see
+    :meth:`_compute_target`), rather than through a separate post-hoc
+    sanitization pass. This ensures that downstream computations always
+    operate on consistent values:
 
-    **Phase 1** — preliminary ``early_pre`` / ``late_pre`` passes. The
-    ``duration`` callback is invoked at each activity with the calendar
-    context natural for that direction (start time for ``early_pre``,
-    end time for ``late_pre``). This produces two potentially different
-    duration estimates per activity.
-
-    **Freeze** — a single final duration is selected per activity via
-    :meth:`Activity.compute_final_duration` (certainty-based choice) and
-    stored in ``activity.duration``.
-
-    **Phase 2** — final ``early`` / ``late`` passes. These use the
-    frozen ``activity.duration`` and do **not** call the callback again.
-    As a result, for every activity
-    ``late_end - late_start == early_end - early_start``, so time
-    reserves are guaranteed non-negative even for resource-aware
-    callbacks whose result depends on calendar context.
-
-    Numerical consistency of time parameters (non-negativity,
-    ``early_end >= early_start``, ``late_start >= early_start``,
-    ``late_end >= late_start``, ``late >= early``) is enforced *during*
-    the phase-2 traversal inside :meth:`_compute_target` by the local
-    helpers ``_check_and_fix_act`` and ``_check_and_fix_evt``. The
-    phase-1 passes are intentionally not sanitized — ``late_pre`` may
-    temporarily be less than ``early_pre``, which is exactly what the
-    freeze step reconciles.
+    - Values whose violation is within the accumulated error bound are
+      silently clamped to satisfy the invariants.
+    - Values whose violation exceeds the accumulated error bound cause a
+      :exc:`RuntimeError`. This indicates a structural problem — for
+      example, a ``duration`` callback that maps non-negative effort to a
+      negative duration, or a topology that is inconsistent with the
+      signed backward-pass deltas.
 
     Because the ``_check_and_fix_act`` / ``_check_and_fix_evt`` helpers
     only react to the ``'early'`` and ``'late'`` targets, the ``'stage'``,
-    ``'early_pre'``, ``'late_pre'``, ``'optimistic'`` and ``'pessimistic'``
-    passes are not subject to these checks.
+    ``'optimistic'`` and ``'pessimistic'`` passes are not subject to these
+    checks.
 
     Reserved WBS field names (``expected``, ``exp_var``, ``letter``,
     ``optimistic``, ``most_likely``, ``pessimistic``) are consumed during
@@ -1653,10 +1542,8 @@ class NetworkModel:
     collide with the reserved field names inserted by ``Event.to_dict``
     (``id``, ``stage``, ``early``, ``late``, ``reserve``, ``optimistic``,
     ``pessimistic``, ``early_var``, ``early_pqe``, ``late_prob``,
-    ``early_err``, ``late_err``, ``early_pre``, ``early_pre_var``,
-    ``early_pre_err``, ``late_pre``, ``late_pre_var``, ``late_pre_err``),
-    otherwise the computed values take precedence in the output
-    dictionary.
+    ``early_err``, ``late_err``), otherwise the computed values take
+    precedence in the output dictionary.
     """
 
     def __init__(self, wbs_dict, lnk_src=None, lnk_dst=None, links=None,
@@ -1986,95 +1873,50 @@ class NetworkModel:
         """
         Compute all time parameters for events and activities.
 
-        This method performs the two-phase time analysis: preliminary
-        forward and backward passes, a freeze step that fixes one
-        duration per activity, and final forward and backward passes.
-        Time reserves are computed after phase 2 from the final times.
+        This method performs both forward pass (early times) and
+        backward pass (late times) through the network, then calculates
+        time reserves for both events and activities.
 
         Raises
         ------
         RuntimeError
-            If any activity has a negative time reserve after phase 2,
-            indicating a programming error or corrupted network. Also
-            propagates :exc:`RuntimeError` from :meth:`_compute_target`,
-            which is raised during the phase-2 ``'early'`` / ``'late'``
-            passes when a CPM invariant is violated beyond the
-            accumulated error bound.
+            If any activity has a negative time reserve, indicating a
+            programming error or corrupted network. Also propagates
+            :exc:`RuntimeError` from :meth:`_compute_target`, which is
+            raised when a CPM invariant (non-negativity of early times,
+            ``early_end >= early_start``, ``late_start >= early_start``,
+            ``late_end >= late_start`` for activities, or ``late >= early``
+            for events) is violated beyond the accumulated error bound.
 
         Notes
         -----
-        The computation proceeds in four passes with a freeze step in
-        between:
+        The computation is performed in two phases:
 
-        1. **``'early_pre'`` (forward).** The ``duration`` callback is
-           invoked with ``base_time`` = the activity's start time
-           (source event's ``early_pre``). Produces preliminary early
-           times.
-        2. **``'late_pre'`` (backward).** The ``duration`` callback is
-           invoked with ``base_time`` = the activity's end time
-           (destination event's ``late_pre``). Produces preliminary
-           late times.
+        1. Forward pass: Compute early times starting from project beginning.
+        2. Backward pass: Compute late times starting from project completion.
 
-        **Freeze.** For every activity,
-        :meth:`Activity.compute_final_duration` selects a single final
-        duration from the two preliminary estimates (via
-        :func:`_choice`, which prefers the more certain of the two).
-        The result is stored in ``activity.duration``.
+        For PERT models (``is_pert == True``), additional optimistic and
+        pessimistic scenarios are computed to provide statistical analysis
+        (see :meth:`_compute_target` with ``target='optimistic'`` and
+        ``target='pessimistic'``).
 
-        3. **``'early'`` (forward).** Uses the frozen
-           ``activity.duration``; the callback is **not** re-invoked.
-        4. **``'late'`` (backward).** Also uses the frozen
-           ``activity.duration``.
+        Numerical consistency of time parameters (non-negativity,
+        ``early_end >= early_start``, ``late_start >= early_start``,
+        ``late_end >= late_start``, ``late >= early``) is enforced
+        *during* the network traversal inside :meth:`_compute_target`
+        by the local helpers ``_check_and_fix_act`` and
+        ``_check_and_fix_evt``. This method therefore does not perform
+        a separate post-hoc clamping pass after the forward/backward
+        pass completes.
 
-        This design guarantees that forward and backward passes use
-        exactly the same duration for each activity, and therefore that
-        ``late_end - late_start == early_end - early_start`` for every
-        activity — i.e. time reserves are non-negative, even for
-        resource-aware callbacks whose result depends on calendar
-        context (start vs. end time, weekends, etc.).
-
-        For PERT models (``is_pert == True``) the ``'optimistic'`` and
-        ``'pessimistic'`` scenario passes are computed **before** phase 1
-        and use the callback directly (they are not affected by the
-        freeze step, since they represent separate scenarios rather than
-        the nominal schedule).
-
-        Numerical consistency (non-negativity, ``early_end >=
-        early_start``, ``late_start >= early_start``, ``late_end >=
-        late_start``, ``late >= early``) is enforced *during* the
-        phase-2 traversal inside :meth:`_compute_target` by
-        ``_check_and_fix_act`` / ``_check_and_fix_evt``. The phase-1
-        passes are not sanitized: ``late_pre`` may temporarily fall
-        below ``early_pre`` (for activities whose early schedule
-        crosses a calendar boundary that the backward callback
-        legitimately treats as a longer working period). The freeze
-        step reconciles the two estimates so that phase 2 starts from
-        a consistent per-activity duration.
+        Violations within the accumulated error bound are silently
+        clamped; violations beyond it raise :exc:`RuntimeError` from
+        inside :meth:`_compute_target` and propagate through this
+        method.
 
         Once all time parameters are computed, time reserves smaller
         than their error bound (in absolute value) are rounded to zero.
         """
-        if self.is_pert:
-            # For PERT models we must compute optimistic and pessimistic scenarios
-            self._compute_target('optimistic')
-            self._compute_target('pessimistic')
-
-        self._compute_target('early_pre')
-
-        # Set late times starting from project completion
-        late_pre = np.zeros((3,), dtype=float)
-        for e in self._events:
-            if e.early_pre[RES] > late_pre[RES]:
-                late_pre = e.early_pre.copy()
-
-        for e in self._events:
-            e.late_pre = late_pre.copy()
-
-        self._compute_target('late_pre')
-
-        for a in self._activities:
-            a.compute_final_duration()
-
         self._compute_target('early')
 
         # Set late times starting from project completion
@@ -2120,14 +1962,17 @@ class NetworkModel:
             if r < -a.reserve[ERR]:
                 raise RuntimeError(f"Activity {a.id} has negative time reserve ({r})")
 
-
+        if self.is_pert:
+            # For PERT models we must compute optimistic and pessimistic scenarios
+            self._compute_target('optimistic')
+            self._compute_target('pessimistic')
 
     def _compute_target(self, target=None):
         """
         Compute CPM parameters for events and activities.
 
         This method performs topological sorting and computes either
-        preliminary early/late times, final early/late times, stage
+        early times (forward pass), late times (backward pass), stage
         numbers, or optimistic/pessimistic scenario times.
 
         Parameters
@@ -2136,20 +1981,10 @@ class NetworkModel:
             What to compute. One of:
 
             - ``'stage'`` — topological stage of each event
-            - ``'early_pre'`` — preliminary early times (forward pass,
-              phase 1; the ``duration`` callback is invoked with
-              ``base_time`` = activity start time)
-            - ``'late_pre'`` — preliminary late times (backward pass,
-              phase 1; the ``duration`` callback is invoked with
-              ``base_time`` = activity end time)
-            - ``'early'`` — final early times (forward pass, phase 2;
-              uses the frozen ``activity.duration``, no callback)
-            - ``'late'`` — final late times (backward pass, phase 2;
-              uses the frozen ``activity.duration``, no callback)
-            - ``'optimistic'`` — optimistic scenario times (callback
-              invoked with scalar ``base_time``)
-            - ``'pessimistic'`` — pessimistic scenario times (callback
-              invoked with scalar ``base_time``)
+            - ``'early'`` — early start/end times (forward pass)
+            - ``'late'`` — late start/end times (backward pass)
+            - ``'optimistic'`` — optimistic scenario times
+            - ``'pessimistic'`` — pessimistic scenario times
 
         Raises
         ------
@@ -2160,10 +1995,10 @@ class NetworkModel:
             (i.e., the project does not have exactly one source event),
             or if it contains cycles not detected earlier.
 
-            In addition, during the **final** ``'early'`` and ``'late'``
-            passes (phase 2) the following CPM invariants are checked
-            for every event and activity; a violation that exceeds the
-            accumulated error bound raises :exc:`RuntimeError`:
+            In addition, during the ``'early'`` and ``'late'`` passes the
+            following CPM invariants are checked for every event and
+            activity; a violation that exceeds the accumulated error bound
+            raises :exc:`RuntimeError`:
 
             - ``early_start >= 0`` (event and activity)
             - ``early_end >= early_start`` (activity)
@@ -2177,21 +2012,17 @@ class NetworkModel:
 
         Notes
         -----
-        The computation uses different strategies per target:
+        The computation uses different strategies for stage calculation
+        vs time parameter calculation:
 
-        - ``'stage'`` — each activity contributes a delta of ``1`` to
+        - For ``'stage'``, each activity contributes a delta of ``1`` to
           the stage of its destination event.
-        - ``'early_pre'`` / ``'late_pre'`` — delta is a time vector
-          ``[RES, VAR, ERR]`` processed by ``_duration_vec``, which
-          calls the ``duration`` callback with the appropriate
-          ``base_time``.
-        - ``'early'`` / ``'late'`` — delta is the frozen
-          ``activity.duration`` (negated for ``'late'``). The callback
-          is **not** invoked: forward and backward passes use exactly
-          the same duration, which is what guarantees non-negative
-          reserves.
-        - ``'optimistic'`` / ``'pessimistic'`` — delta is a scalar and
-          the callback receives ``base_time`` as a scalar.
+        - For ``'early'`` and ``'late'``, the delta is a time vector
+          ``[RES, VAR, ERR]`` processed by the model's ``duration``
+          callback (via :func:`_duration_vec`).
+        - For ``'optimistic'`` and ``'pessimistic'``, the delta is a
+          scalar and the callback receives ``base_time`` as a scalar
+          (not a numpy array).
 
         The algorithm maintains a count of unresolved dependencies for
         each event (``n_dep``). Events with zero dependencies are pushed
@@ -2199,13 +2030,9 @@ class NetworkModel:
         destination event's dependency counter is decremented; when it
         reaches zero, the event is added to the queue.
 
-        Numerical consistency is enforced *in place* during the
-        ``'early'`` and ``'late'`` traversals (phase 2 only) by
-        ``_check_and_fix_act`` / ``_check_and_fix_evt``. The phase-1
-        passes (``'early_pre'`` / ``'late_pre'``) are intentionally not
-        sanitized: they may temporarily hold values that violate
-        ``late_pre >= early_pre``, which the freeze step reconciles
-        before phase 2.
+        Numerical consistency of time parameters is enforced *in place*
+        during the ``'early'`` and ``'late'`` traversals by two local
+        helpers:
 
         - ``_check_and_fix_act(a, target)`` — called after each activity
           update. Ensures ``early_start >= 0`` and enforces
@@ -2225,14 +2052,13 @@ class NetworkModel:
         network. As a consequence, callers do not need to run a
         separate post-processing pass to sanitize early/late values.
 
-        Because these helpers only react to ``'early'`` and ``'late'``,
-        the ``'stage'``, ``'early_pre'``, ``'late_pre'``, ``'optimistic'``
-        and ``'pessimistic'`` passes are unaffected by them.
+        Because these helpers only react to ``'early'`` and ``'late'``
+        targets, the ``'stage'``, ``'optimistic'`` and ``'pessimistic'``
+        passes are unaffected by them.
 
-        For PERT analysis, variance is propagated during the phase-1
-        passes (and scenario passes) by ``_duration_vec`` using the
-        modified PERT distribution formula. The phase-2 passes reuse the
-        frozen duration vector, including its ``VAR`` component.
+        For PERT analysis, variance is propagated using the modified
+        PERT distribution formula (see the inner ``_duration_vec``
+        function).
         """
         def _choice_early(old, new):
             return _choice(old, new, new[RES] - old[RES])
@@ -2243,11 +2069,6 @@ class NetworkModel:
         def _delta_late(a):
             ret = a.expected.copy()
             ret[RES] = -a.expected[RES]
-            return ret
-
-        def _duration_late(effort, activity, base_time, target):
-            ret = activity.duration.copy()
-            ret[RES] = -activity.duration[RES]
             return ret
 
         def _duration_vec(effort, activity, base_time, target):
@@ -2453,26 +2274,6 @@ class NetworkModel:
             delta = lambda a: 1
             process_delta = lambda d, a, b, t: d
 
-        elif 'early_pre' == target:
-            act_base = 'early_start'
-            act_new = 'early_end'
-            act_next = 'dst'
-            fwd = '_out_activities'
-            rev = '_in_activities'
-            choice = _choice_early
-            delta = lambda a: a.expected
-            process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
-
-        elif 'late_pre' == target:
-            act_base = 'late_end'
-            act_new = 'late_start'
-            act_next = 'src'
-            fwd = '_in_activities'
-            rev = '_out_activities'
-            choice = _choice_late
-            delta = _delta_late
-            process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
-
         elif 'early' == target:
             act_base = 'early_start'
             act_new = 'early_end'
@@ -2481,7 +2282,7 @@ class NetworkModel:
             rev = '_in_activities'
             choice = _choice_early
             delta = lambda a: a.expected
-            process_delta = lambda d, a, b, t: a.duration
+            process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
 
         elif 'late' == target:
             act_base = 'late_end'
@@ -2491,7 +2292,7 @@ class NetworkModel:
             rev = '_out_activities'
             choice = _choice_late
             delta = _delta_late
-            process_delta = _duration_late
+            process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
 
         elif 'optimistic' == target:
             act_base = 'opt_start'
@@ -2688,10 +2489,7 @@ class NetworkModel:
         Each activity dictionary is a copy of the activity's ``data``
         extended with the computed CPM/PERT fields. Each event dictionary
         is likewise a copy of the event's ``data`` extended with the
-        computed CPM/PERT fields (see :meth:`Event.to_dict`). The public
-        CPM fields (``early``, ``late``, ``reserve``) correspond to the
-        phase-2 results; phase-1 preliminary values appear on events only
-        under ``debug=True``.
+        computed CPM/PERT fields (see :meth:`Event.to_dict`).
         """
         activities_data = [activity.to_dict() for activity in self._activities]
         events_data = [event.to_dict() for event in self._events]
@@ -2736,7 +2534,7 @@ class NetworkModel:
 
         return activities_df, events_df
 
-    def viz(self, output_path=None, group_by_stage=True, get_style=_default_style):
+    def viz(self, output_path=None, group_by_stage=False, get_style=_default_style):
         """
         Create Graphviz visualization of the CPM/PERT network.
 
@@ -2782,7 +2580,7 @@ class NetworkModel:
         -----
         The visualization shows:
 
-        - Event nodes with early/late times and reserves (phase-2 values)
+        - Event nodes with early/late times and reserves
         - Activity edges with duration and reserve information
 
         The visualization uses the following coding:
