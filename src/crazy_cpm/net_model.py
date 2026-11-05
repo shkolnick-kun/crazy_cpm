@@ -400,7 +400,8 @@ def _choice(old, new, delta):
     """
     e = new[ERR] + old[ERR]
     if delta >= e:
-        return new  # Certain result
+        # Certain result
+        return new.copy()
     elif delta >= -e:
         # Uncertain result, use mixing
         ret = np.zeros((3,), dtype=float)
@@ -409,7 +410,8 @@ def _choice(old, new, delta):
         ret[ERR] = 0.5 * e
         return ret
     else:
-        return old  # Certain result
+        # Certain result
+        return old.copy()
 
 #==============================================================================
 def _default_duration(effort, activity, base_time, target):
@@ -1528,7 +1530,7 @@ class NetworkModel:
       negative duration, or a topology that is inconsistent with the
       signed backward-pass deltas.
 
-    Because the ``_check_and_fix_act`` / ``_check_and_fix_evt`` helpers
+    Because the ``_sanitize_act`` / ``_sanitize_evt`` helpers
     only react to the ``'early'`` and ``'late'`` targets, the ``'stage'``,
     ``'optimistic'`` and ``'pessimistic'`` passes are not subject to these
     checks.
@@ -1904,8 +1906,8 @@ class NetworkModel:
         ``early_end >= early_start``, ``late_start >= early_start``,
         ``late_end >= late_start``, ``late >= early``) is enforced
         *during* the network traversal inside :meth:`_compute_target`
-        by the local helpers ``_check_and_fix_act`` and
-        ``_check_and_fix_evt``. This method therefore does not perform
+        by the local helpers ``_sanitize_act`` and
+        ``_sanitize_evt``. This method therefore does not perform
         a separate post-hoc clamping pass after the forward/backward
         pass completes.
 
@@ -2034,13 +2036,13 @@ class NetworkModel:
         during the ``'early'`` and ``'late'`` traversals by two local
         helpers:
 
-        - ``_check_and_fix_act(a, target)`` — called after each activity
+        - ``_sanitize_act(a, target)`` — called after each activity
           update. Ensures ``early_start >= 0`` and enforces
           ``early_end >= early_start``, ``late_start >= early_start``,
           ``late_end >= late_start``. Violations beyond the accumulated
           error bound raise :exc:`RuntimeError`; smaller violations are
           silently clamped.
-        - ``_check_and_fix_evt(e, target)`` — called after each event is
+        - ``_sanitize_evt(e, target)`` — called after each event is
           processed. Ensures ``early >= 0`` and, on the late pass,
           enforces ``late >= early``. If ``late < early`` by more than
           the accumulated error bound, :exc:`RuntimeError` is raised;
@@ -2150,7 +2152,7 @@ class NetworkModel:
 
             return dur
 
-        def _check_and_fix_evt(e, target):
+        def _sanitize_evt(e, target):
             """
             Sanitize event time parameters after processing.
 
@@ -2194,7 +2196,7 @@ class NetworkModel:
 
             return
 
-        def _check_and_fix_act(a, target):
+        def _sanitize_act(a, target):
             """
             Sanitize activity time parameters after update.
 
@@ -2240,6 +2242,10 @@ class NetworkModel:
             # Time params lower limit
 
             if 'early' == target:
+                # Decouple activities from events
+                a.early_start = a.early_start.copy()
+                a.early_end   = a.early_end.copy()
+
                 if a.early_start[RES] < 0.0:
                     a.early_start[RES] = 0.0
 
@@ -2250,6 +2256,10 @@ class NetworkModel:
                     a.early_end[RES] = a.early_start[RES]
 
             elif 'late' == target:
+                # Decouple activities from events
+                a.late_start = a.late_start.copy()
+                a.late_end   = a.late_end.copy()
+
                 if a.early_start[RES] - a.late_start[RES] >  a.early_start[ERR] + a.late_start[ERR]:
                     raise RuntimeError(f"Activity {a.id} has abnormal late start time ({a.late_start[RES]} < {a.early_start[RES]}) ")
 
@@ -2350,7 +2360,7 @@ class NetworkModel:
                     setattr(a, act_new, new_val)
 
                 if act_base or act_new:
-                    _check_and_fix_act(a, target)
+                    _sanitize_act(a, target)
 
                 next_evt = getattr(a, act_next)
 
@@ -2361,7 +2371,7 @@ class NetworkModel:
                 if 0 >= n_dep[next_evt]:
                     evt.append(next_evt)
 
-            _check_and_fix_evt(e, target)
+            _sanitize_evt(e, target)
 
             i += 1
             if i >= len(evt):
