@@ -882,36 +882,54 @@ class Activity:
         consistency* of the snapshot at a cost linear in the network
         size.
 
-        The method also performs a **consistency adjustment** to balance
-        the time reserves at the activity start and at the activity
-        end. If the start and end reserves differ by more than the
-        accumulated error bound, the discrepancy is absorbed into the
-        frozen duration. The scenario durations ``opt_dur`` / ``pes_dur``
-        are adjusted to preserve the ordering
-        ``opt_dur <= duration <= pes_dur`` (up to the accumulated error)
-        — this is required for the PERT quantile estimates to remain
-        meaningful.
+        Because the **same** frozen ``duration`` is used by both final
+        passes (the forward pass uses it as-is, the backward pass negates
+        its ``RES`` component), the start and end reserves are equal *by
+        construction*::
+
+            start_res = late_start - early_start
+            end_res   = late_end   - early_end
+            start_res - end_res == 0
+
+        This algebraic identity replaces the earlier reserve-balancing
+        adjustment: no iterative or post-hoc correction of ``duration`` is
+        required to keep ``late_* >= early_*`` consistent. The only
+        remaining adjustment is a **scenario-range clamp**:
+
+        - ``opt_dur`` / ``pes_dur`` are first ordered so that ``a <= b``
+          (resource-calendar effects may invert their natural order — see
+          the Notes below);
+        - ``duration[RES]`` is clamped into ``[(5a + b) / 6,
+          (a + 5b) / 6]``;
+        - ``b`` is grown (if needed) so that the beta distribution on
+          ``[a, b]`` admits ``duration[RES]`` as its mean and
+          ``duration[VAR]`` as its variance.
+
+        Together these steps keep the PERT quantile estimates meaningful
+        even when the calendar perturbs the scenario ordering, without
+        affecting the CPM invariants.
 
         Notes
         -----
-        This adjustment is a *first approximation* to the "hidden
-        critical path" problem: when an activity's start or end
+        The scenario-range clamp is a *first approximation* to the
+        "hidden critical path" problem: when an activity's start or end
         coincides with the boundary of a resource availability window,
         the ``duration`` callback may jump discontinuously, and the
-        naive early/late reserves become misleading (the reserve is
-        consumed by a single step of the calendar). The adjustment
-        restores internal consistency of the snapshot but does not
+        forward and backward passes may yield substantially different
+        raw durations. Selecting the most certain estimate via
+        :func:`_choice` and clamping it into the scenario range
+        restores internal consistency of the snapshot, but does not
         search the calendar structure — a full treatment would require
         an iterative fixed-point scheme or Monte-Carlo simulation,
         which is intentionally out of scope for this fast-estimator
         module.
 
-        The ``VAR`` component is left untouched by the reserve-balancing
-        adjustment: the correction is deterministic and should not
-        inflate the variance of the duration estimate. Note however that
-        when the callback is discontinuous, the beta approximation in
-        :func:`fit_beta` still underestimates the variance — see the
-        warning in :func:`fit_beta`.
+        The ``VAR`` component is left untouched by the scenario-range
+        clamp: the clamp only shifts ``RES`` (and, when needed, grows
+        ``b``), never ``VAR``, so the variance of the frozen duration is
+        not inflated artificially. Note however that when the callback is
+        discontinuous, the beta approximation in :func:`fit_beta` still
+        underestimates the variance — see the warning in :func:`fit_beta`.
         """
         self.opt_dur = self.opt_end - self.opt_start
         self.pes_dur = self.pes_end - self.pes_start
@@ -1775,21 +1793,29 @@ class NetworkModel:
     **Scope of the approximation.** This is a *fast estimator*, not a
     scheduler. The "hidden critical path" effect — where an activity's
     start or end coincides with a resource calendar boundary and the
-    reserve in front of it is misleading — is captured only in the first
-    approximation, through the reserve-balancing adjustment inside
-    :meth:`Activity.compute_final_durations`. A rigorous treatment would
-    require constraint programming or Monte-Carlo simulation over
-    resource calendars, which are intentionally out of scope. In
+    reserve in front of it is misleading — is captured only in the
+    first approximation, through the single-duration freeze and the
+    scenario-range clamp inside
+    :meth:`Activity.compute_final_durations`. A rigorous treatment
+    would require constraint programming or Monte-Carlo simulation
+    over resource calendars, which are intentionally out of scope. In
     particular:
 
     - The beta approximation in :func:`fit_beta` underestimates the
       variance of durations that are discontinuous in ``base_time``
       (see the warning in :func:`fit_beta`).
-    - The reserve-balancing adjustment preserves the ordering
-      ``opt_dur <= duration <= pes_dur`` up to the accumulated error
-      bound, but does not guarantee it in the presence of extreme
-      callbacks; this is documented in
-      :meth:`Activity.compute_final_durations`.
+    - Because the same frozen ``duration`` is used by both final
+      passes, the start and end reserves of every activity are equal
+      by construction. Any residual calendar-induced inconsistency
+      therefore manifests as a *shift* of the frozen duration away
+      from the raw forward-pass value, not as a start/end reserve
+      mismatch. The scenario-range clamp keeps ``duration`` inside
+      ``[a, b]`` (after reordering ``opt_dur`` / ``pes_dur`` so that
+      ``a <= b``) so the PERT beta fit remains well-posed, but it
+      does not guarantee that ``duration`` equals the raw
+      ``early_end - early_start`` computation in the presence of
+      extreme callbacks; the value reported by
+      :meth:`Activity.to_dict` is the frozen one.
 
     **Duration callback contract.** The duration callback function must
     preserve the sign of the effort parameter to ensure correct forward
@@ -2205,12 +2231,14 @@ class NetworkModel:
         **Bridge.** :meth:`Activity.compute_final_durations` reads the
         preliminary times and freezes a single duration value per
         activity (``Activity.duration``), together with the scenario
-        durations ``opt_dur`` and ``pes_dur`` for PERT models. It also
-        balances the start and end reserves so that the frozen duration
-        is internally consistent (see
-        :meth:`Activity.compute_final_durations` for details and for the
-        "hidden critical path" caveat). The activity time attributes are
-        then reset to zero in preparation for the final pass.
+        durations ``opt_dur`` and ``pes_dur`` for PERT models. Because
+        the same frozen value is used by both final passes, the start
+        and end reserves are equal by construction; the only remaining
+        adjustment is the scenario-range clamp inside
+        :meth:`Activity.compute_final_durations` (see that method for
+        details and for the "hidden critical path" caveat). The
+        activity time attributes are then reset to zero in preparation
+        for the final pass.
 
         **Phase 2 (final).** For PERT models, optimistic and pessimistic
         scenarios are computed from the frozen ``opt_dur`` / ``pes_dur``
@@ -2226,7 +2254,7 @@ class NetworkModel:
         class-level Notes: freezing the durations between passes keeps
         the snapshot consistent when a resource-aware ``duration``
         callback depends on ``base_time``, and linearizes the
-        scheduleâ†”duration feedback with a single step.
+        schedule <-> duration feedback with a single step.
 
         Numerical consistency of time parameters is enforced *during*
         the network traversal inside :meth:`_compute_target` by the
