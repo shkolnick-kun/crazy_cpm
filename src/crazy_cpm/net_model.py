@@ -50,11 +50,11 @@ Two-Phase Time Computation:
        models, optimistic/pessimistic scenarios) are computed from the
        raw effort estimates.
     2. **Final phase:** :meth:`Activity.compute_final_durations` freezes
-       a duration pair (``dur_early`` for the forward pass and
-       ``dur_late`` for the backward pass) from the preliminary times,
-       and the network is re-traversed using the frozen values.
+       a single duration value (``duration``) from the preliminary
+       times, and the network is re-traversed using the frozen value
+       (the backward pass applies a negated sign to ``RES``).
 
-    This linearizes the feedback "schedule → duration → schedule" in a
+    This linearizes the feedback "schedule -> duration -> schedule" in a
     single step and keeps the CPM invariants (``late >= early``)
     satisfied even for time-dependent resource models. It is a *fast
     estimator*: the "hidden critical path" effect at resource calendar
@@ -121,7 +121,7 @@ Advanced usage with resource-aware duration:
 .. note::
     The two-phase scheme is a *first approximation* for resource calendars
     with time-varying availability. It captures the feedback
-    "schedule → duration → schedule" with a single linearization step and
+    "schedule -> duration -> schedule" with a single linearization step and
     keeps the overall cost linear in the size of the network. Full
     handling of discontinuities (activity start or end coinciding with
     the boundary of a resource availability window, i.e. the "hidden
@@ -192,8 +192,10 @@ def fit_beta(M, D, a, b, err):
     b : float
         Pessimistic (maximum) value
     err : float
-        Computation error threshold (non-negative). If ``sqrt(D) < err``,
-        the distribution is treated as deterministic.
+        Computation error threshold (non-negative). If
+        ``sqrt(D) < max(err, 2 * EPS * ul)``, where
+        ``ul = max(abs(a), abs(b))``, the distribution is treated as
+        deterministic.
 
     Returns
     -------
@@ -686,16 +688,14 @@ class Activity:
         Late end time ``[value, variance, error_bound]``
     reserve : numpy.ndarray
         Time reserve ``[value, variance, error_bound]``
-    dur_early : numpy.ndarray
-        Frozen forward-pass duration ``[value, variance, error_bound]``,
+    duration : numpy.ndarray
+        Frozen activity duration ``[value, variance, error_bound]``,
         computed by :meth:`compute_final_durations` from the preliminary
-        (``_pre``) phase results. Used as the delta in the ``'early'``
-        pass of :meth:`NetworkModel._compute_target`.
-    dur_late : numpy.ndarray
-        Frozen backward-pass duration ``[value, variance, error_bound]``,
-        computed by :meth:`compute_final_durations`. Negative (the
-        backward pass traverses time in reverse). Used as the delta in
-        the ``'late'`` pass of :meth:`NetworkModel._compute_target`.
+        (``_pre``) phase results. The final forward pass (``'early'``)
+        uses it as-is; the final backward pass (``'late'``) uses the
+        same array with a negated ``RES`` component. This is also the
+        value reported by :meth:`to_dict` as the actual activity
+        duration.
     optimistic : float
         Optimistic effort estimate
     pessimistic : float
@@ -721,12 +721,11 @@ class Activity:
     -----
     - Resource effort arrays follow the format
       ``[RES (value), VAR (variance), ERR (error bound)]``.
-    - The :attr:`duration` property is a **post-hoc** view computed
-      from the final ``early_*`` / ``late_*`` values. The actual CPM
-      traversal uses the frozen :attr:`dur_early` / :attr:`dur_late`
-      values, not the property. See :meth:`compute_final_durations`
-      for the freezing step and :meth:`NetworkModel._compute_time_params`
-      for the two-phase computation that produces those values.
+    - The :attr:`duration` attribute holds the frozen duration
+      computed by :meth:`compute_final_durations`. It is used as the
+      delta in both final passes of :meth:`NetworkModel._compute_target`
+      (``'early'`` uses it as-is, ``'late'`` negates ``RES``). It is
+      also the value reported as the actual activity duration.
     - Setters for ``src`` and ``dst`` maintain the corresponding event's
       internal ``_in_activities`` / ``_out_activities`` lists. Do not
       mutate those lists directly.
@@ -806,16 +805,9 @@ class Activity:
         self.late_start  = np.zeros_like(self.expected)
         self.early_end   = np.zeros_like(self.expected)
         self.late_end    = np.zeros_like(self.expected)
-        self.reserve     = np.zeros_like(self.expected)
 
-        # Frozen durations computed once by compute_final_durations()
-        # during the bridge between the preliminary and final phases.
-        # The final traversal (_compute_target with target 'early'/'late')
-        # reads these arrays directly instead of re-invoking the user's
-        # duration callback. This keeps the snapshot consistent when
-        # duration depends on base_time (resource calendars).
-        self.dur_early = np.zeros_like(self.expected)
-        self.dur_late  = np.zeros_like(self.expected)
+        self.duration    = np.zeros_like(self.expected)
+        self.reserve     = np.zeros_like(self.expected)
 
         self.optimistic = optimistic
         self.opt_start  = 0.
@@ -866,58 +858,6 @@ class Activity:
         """Whether this activity is a dummy (used in AoA construction)."""
         return self._is_dummy
 
-    @property
-    def duration(self):
-        """
-        Calculate activity duration from early and late time analyses.
-
-        This property computes the actual duration by comparing early and
-        late time calculations and selecting the most certain estimate
-        via :func:`_choice`.
-
-        Returns
-        -------
-        numpy.ndarray
-            Duration array ``[value, variance, error_bound]``.
-
-        Notes
-        -----
-        This is a **post-hoc view** of the duration, derived from the
-        final ``early_*`` / ``late_*`` values after the two-phase
-        computation has completed. The actual CPM traversal uses the
-        frozen :attr:`dur_early` and :attr:`dur_late` arrays (see
-        :meth:`compute_final_durations`), not this property. The
-        property is provided for reporting and is used by
-        :meth:`to_dict` and :meth:`NetworkModel.viz`.
-
-        The duration is calculated as:
-
-        - Early approach: ``early_end - early_start``
-        - Late approach: ``late_end - late_start``
-        - Final selection uses certainty-based decision making
-
-        The returned array's ``VAR`` component reflects the propagated
-        variance of the duration (relevant for PERT models). Its ``RES``
-        component is the point estimate.
-        """
-        # Early duration calculation
-        # Note:
-        # early_end[[RES,VAR]] == early_start[[RES,VAR]] + early[[RES,VAR]]
-        early = self.early_end - self.early_start
-        early[ERR] = self.early_end[ERR] + self.early_start[ERR]
-
-        # Late duration calculation
-        # Note:
-        # late_start[RES] == late_end[RES] - late[RES]
-        # late_start[VAR] == late_end[VAR] + late[VAR]
-        late = np.zeros_like(early)
-        late[RES] = self.late_end[RES] - self.late_start[RES]
-        late[VAR] = self.late_start[VAR] - self.late_end[VAR]
-        late[ERR] = self.late_end[ERR] + self.late_start[ERR]
-
-        # Choose most certain estimate
-        return _choice(early, late, late[RES] - early[RES])
-
     def compute_final_durations(self):
         """
         Freeze forward- and backward-pass durations from the preliminary
@@ -928,11 +868,9 @@ class Activity:
         preliminary times (``early_start``/``early_end``,
         ``late_start``/``late_end``, ``opt_start``/``opt_end``,
         ``pes_start``/``pes_end`` as populated by the ``_pre`` passes),
-        derives a single fixed duration for each traversal direction,
-        and stores it in :attr:`dur_early` / :attr:`dur_late` (and, for
-        PERT models, in :attr:`opt_dur` / :attr:`pes_dur`). The second
-        phase then uses these frozen values instead of re-invoking the
-        user's ``duration`` callback.
+        derives a single fixed duration, and stores it in
+        :attr:`duration`. The second phase then uses this frozen value
+        instead of re-invoking the user's ``duration`` callback.
 
         Freezing is required whenever the ``duration`` callback depends
         on ``base_time`` — i.e. when resource availability varies over
@@ -947,15 +885,12 @@ class Activity:
         The method also performs a **consistency adjustment** to balance
         the time reserves at the activity start and at the activity
         end. If the start and end reserves differ by more than the
-        accumulated error bound, the discrepancy is absorbed either
-        into :attr:`dur_early` (when the end reserve exceeds the start
-        reserve) or into :attr:`dur_late` (the opposite case). When
-        :attr:`dur_early` is adjusted, :attr:`opt_dur` and
-        :attr:`pes_dur` are shifted by the same amount so that the
-        scenario durations remain consistent with the deterministic
-        one — this preserves the ordering ``opt_dur <= dur_early <=
-        pes_dur`` (up to the accumulated error), which is required for
-        the PERT quantile estimates to remain meaningful.
+        accumulated error bound, the discrepancy is absorbed into the
+        frozen duration. The scenario durations ``opt_dur`` / ``pes_dur``
+        are adjusted to preserve the ordering
+        ``opt_dur <= duration <= pes_dur`` (up to the accumulated error)
+        — this is required for the PERT quantile estimates to remain
+        meaningful.
 
         Notes
         -----
@@ -983,48 +918,93 @@ class Activity:
 
         # Early duration calculation
         # Note:
-        # early_end[[RES,VAR]] == early_start[[RES,VAR]] + dur_early[[RES,VAR]]
-        self.dur_early[RES] = self.early_end[RES] - self.early_start[RES]
-        self.dur_early[VAR] = self.early_end[VAR] - self.early_start[VAR]
-        self.dur_early[ERR] = self.early_end[ERR] + self.early_start[ERR]
+        # early_end[[RES,VAR]] == early_start[[RES,VAR]] + early[[RES,VAR]]
+        early = self.early_end - self.early_start
+        early[ERR] = self.early_end[ERR] + self.early_start[ERR]
 
         # Late duration calculation
-        # Note 1:
-        # late_start[[RES,VAR]] == late_end[[RES,VAR]] + dur_late[[RES,VAR]]
-        # Note 2:
-        # Late duration must be negative
-        self.dur_late[RES] = self.late_start[RES] - self.late_end[RES]
-        self.dur_late[VAR] = self.late_start[VAR] - self.late_end[VAR]
-        self.dur_late[ERR] = self.late_start[ERR] + self.late_end[ERR]
+        # Note:
+        # late_start[RES] == late_end[RES] - late[RES]
+        # late_start[VAR] == late_end[VAR] + late[VAR]
+        late = np.zeros_like(early)
+        late[RES] = self.late_end[RES] - self.late_start[RES]
+        late[VAR] = self.late_start[VAR] - self.late_end[VAR]
+        late[ERR] = self.late_end[ERR] + self.late_start[ERR]
 
-        # Adjust durations to minimize the difference between start and end reserves
-        # Compute preliminary time reserves
-        start_res = self.late_start[RES] - self.early_start[RES]
-        start_err = self.late_start[ERR] + self.early_start[ERR]
+        # Choose most certain estimate
+        duration = _choice(early, late, late[RES] - early[RES])
 
-        end_res = self.late_end[RES] - self.early_end[RES]
-        end_err = self.late_end[ERR] + self.early_end[ERR]
+        # Order the optimistic and pessimistic scenario durations so that
+        # ``a <= b``. Calendar effects can invert the natural order
+        # (an optimistic start may fall inside a resource-unavailability
+        # window while a pessimistic start does not, yielding
+        # ``opt_dur > pes_dur``), so pick ``a`` and ``b`` explicitly
+        # instead of assuming ``opt_dur <= pes_dur``.
+        dur_attr = {}
+        if self.opt_dur > self.pes_dur:
+            a = self.pes_dur
+            b = self.opt_dur
+            dur_attr['a'] = 'pes_dur'
+            dur_attr['b'] = 'opt_dur'
+        else:
+            a = self.opt_dur
+            b = self.pes_dur
+            dur_attr['a'] = 'opt_dur'
+            dur_attr['b'] = 'pes_dur'
 
-        delta = end_res - start_res
-        err = start_err + end_err
+        # Make sure that
+        # (5a + b) / 6 < M < (a + 5b) / 6
+        # and that
+        # D = (M - a) * (b - M) / 7
+        # or
+        # b >= M + 7 * D / (M - a)
 
-        if abs(delta) <= err:
-            return
+        lower_k = 1 + 2. * EPS
 
-        if delta > 0.0:
-            # Early adjustment
-            self.dur_early[RES] += delta
-            self.dur_early[ERR] += err
-            # Maintain the model integrity: early duration must be in range
-            # between optimistic and pessimistic
-            self.opt_dur        += delta
-            self.pes_dur        += delta
-            return
+        # Helper
+        def _clamp_b(x):
+            diff = duration[RES] - a
+            # The mean duration coincides with the lower scenario bound
+            # (dummy activities, deterministic activities, degenerate
+            # scenario computations): the finite lower bound for ``b``
+            # cannot be derived. Additionally guard against nearly-zero
+            # ``diff`` (numeric noise around the boundary), which would
+            # otherwise produce a huge ``lower_b`` and inflate ``b``
+            # without reason.
+            if diff <= EPS * max(abs(a), abs(duration[RES]), 1.0):
+                return x
+            # No variance — the beta approximation is meaningless, so
+            # clamping ``b`` cannot improve anything.
+            if duration[VAR] <= 0.0:
+                return x
 
-        # Late adjustment
-        self.dur_late[RES] += delta
-        self.dur_late[ERR] += err
-        return
+            lower_b = (duration[RES] + 7. * duration[VAR] / diff) * lower_k
+
+            if x < lower_b:
+                return lower_b
+
+            return x
+
+        lower_m = (5. * a + b) / 6. * lower_k
+
+        if duration[RES] <= lower_m:
+            duration[RES] = lower_m
+            b = _clamp_b(b)
+
+        if duration[RES] >= (a + 5. * b) / 6.:
+            b = (6. * duration[RES] - a) / 5. * lower_k
+            b = _clamp_b(b)
+
+        # Clamp error: keep ``ERR`` at least ``RES * EPS`` so that
+        # downstream error-bound checks do not treat a finite duration
+        # as exact.
+        if duration[ERR] < duration[RES] * EPS:
+            duration[ERR] = duration[RES] * EPS
+
+        # Now set activity durations
+        self.duration = duration
+        setattr(self, dur_attr['a'], a)
+        setattr(self, dur_attr['b'], b)
 
     @property
     def early_start_pqe(self):
@@ -1101,12 +1081,12 @@ class Activity:
             - ``src_id``: Source event ID
             - ``dst_id``: Destination event ID
             - ``expected``: Activity expected resource effort
-            - ``duration``: Actual duration (post-hoc view)
+            - ``duration``: Frozen activity duration (positive view)
             - ``early_start``, ``late_start``, ``early_end``, ``late_end``:
               Timing parameters
             - ``reserve``: Time reserve
             - ``is_dummy``: Whether this is a dummy activity
-            - ``data``: Additional activity data
+            - All user-defined fields from ``self.data``
             - Additional PERT fields if applicable
 
         Notes
@@ -1117,18 +1097,23 @@ class Activity:
         ``early_start_pqe``, ``early_end_pqe``, ``late_end_prob``) are only
         included when PERT analysis is enabled (``model.is_pert``).
 
-        Debug-specific fields:
+        Debug-specific fields (only when ``model.debug`` is true):
 
         - ``early_start_err``, ``late_start_err``, ``early_end_err``,
-          ``late_end_err`` — final error bounds.
-        - ``dur_early``, ``dur_early_var``, ``dur_early_err`` — frozen
-          forward-pass duration (see :meth:`compute_final_durations`).
-        - ``dur_late``, ``dur_late_var``, ``dur_late_err`` — frozen
-          backward-pass duration (negative).
+          ``late_end_err`` — final error bounds of the timing parameters.
 
         The returned dictionary is a copy of ``self.data`` extended with
         the computed CPM/PERT fields. If a user field name collides with
         a computed field name, the computed value takes precedence.
+
+        .. note::
+            The ``duration`` field is the frozen value stored in
+            :attr:`duration` (see :meth:`compute_final_durations`).
+            During the final backward pass the ``RES`` component is
+            negated *locally* inside
+            :func:`NetworkModel._compute_target._duration_final`; the
+            attribute itself always holds the positive (forward-pass)
+            value.
         """
 
         # Start with user data
@@ -1140,7 +1125,7 @@ class Activity:
         ret['src_id'  ] = self.src.id
         ret['dst_id'  ] = self.dst.id
         ret['expected'] = self.expected[RES] # Resource effort estimate
-        ret['duration'] = self.duration[RES] # Actual duration (post-hoc view)
+        ret['duration'] = self.duration[RES] # Frozen activity duration
         ret['is_dummy'] = self._is_dummy
 
         # CPM timing parameters
@@ -1175,14 +1160,6 @@ class Activity:
             ret['late_start_err' ] = self.late_start[ERR]
             ret['early_end_err'  ] = self.early_end[ERR]
             ret['late_end_err'   ] = self.late_end[ERR]
-
-            ret['dur_early'    ] = self.dur_early[RES]
-            ret['dur_early_var'] = self.dur_early[VAR]
-            ret['dur_early_err'] = self.dur_early[ERR]
-
-            ret['dur_late'    ] = self.dur_late[RES]
-            ret['dur_late_var'] = self.dur_late[VAR]
-            ret['dur_late_err'] = self.dur_late[ERR]
 
         return ret
 
@@ -1220,9 +1197,8 @@ class Event:
         to freeze durations)
     late_pre : numpy.ndarray
         Preliminary late time ``[value, variance, error_bound]``
-        (phase-1 result). This is an internal service value and may be
-        negative or larger than ``early_pre``; the public API value is
-        :attr:`late`.
+        (phase-1 result). This is an internal service value; the public
+        API value is :attr:`late`.
     early : numpy.ndarray
         Final early time ``[value, variance, error_bound]`` (phase-2 result)
     late : numpy.ndarray
@@ -1398,8 +1374,8 @@ class Event:
           preliminary early time and its statistics.
         - ``late_pre``, ``late_pre_var``, ``late_pre_err`` — phase-1
           preliminary late time and its statistics. Note that
-          ``late_pre`` is an internal service value and may be negative
-          or larger than ``early_pre``; the public API value is ``late``.
+          ``late_pre`` is an internal service value; the public API value
+          is ``late``.
 
         The returned dictionary is a copy of ``self.data`` extended with
         the computed CPM/PERT fields. Reserved field names (``id``,
@@ -1523,7 +1499,7 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     >>> data = {'optimistic': 3, 'pessimistic': 8}
     >>> mean, var, a, m, b = _calculate_action_time_params(data)
     >>> print(f"Mean effort: {mean:.2f}, Variance: {var:.2f}")
-    Mean effort: 5.80, Variance: 1.00
+    Mean effort: 5.00, Variance: 1.00
 
     Direct parameters:
 
@@ -1676,8 +1652,9 @@ class NetworkModel:
             The callback is invoked during the **preliminary** (``_pre``)
             passes and during network post-processing, but **not** during
             the **final** passes: the final passes use the frozen
-            :attr:`Activity.dur_early` / :attr:`Activity.dur_late` values
-            produced by :meth:`Activity.compute_final_durations`. See the
+            :attr:`Activity.duration` value produced by
+            :meth:`Activity.compute_final_durations` (the backward pass
+            applies a negated sign to its ``RES`` component). See the
             class-level Notes for the rationale.
 
     p : float, default=0.95
@@ -1779,19 +1756,20 @@ class NetworkModel:
        for PERT models, optimistic/pessimistic scenarios) using the raw
        resource effort estimates. The user's ``duration`` callback is
        invoked here.
-    2. :meth:`Activity.compute_final_durations` freezes a duration pair
-       — ``dur_early`` for the forward pass and ``dur_late`` for the
-       backward pass — derived from those preliminary values.
+    2. :meth:`Activity.compute_final_durations` freezes a single
+       duration value (``Activity.duration``) derived from those
+       preliminary values.
     3. The final passes re-traverse the network using the frozen
-       durations. The user's ``duration`` callback is **not** invoked
-       again in the final passes.
+       duration (the backward pass negates its ``RES`` component). The
+       user's ``duration`` callback is **not** invoked again in the
+       final passes.
 
     Freezing is required whenever the ``duration`` callback depends on
     ``base_time`` (resource availability that varies over time): without
     it, the same activity could receive different durations in the
     forward and backward passes, breaking the CPM invariants. The
     two-phase scheme therefore linearizes the feedback
-    "schedule → duration → schedule" with a single step and keeps the
+    "schedule -> duration -> schedule" with a single step and keeps the
     overall cost linear in the network size.
 
     **Scope of the approximation.** This is a *fast estimator*, not a
@@ -1808,7 +1786,7 @@ class NetworkModel:
       variance of durations that are discontinuous in ``base_time``
       (see the warning in :func:`fit_beta`).
     - The reserve-balancing adjustment preserves the ordering
-      ``opt_dur <= dur_early <= pes_dur`` up to the accumulated error
+      ``opt_dur <= duration <= pes_dur`` up to the accumulated error
       bound, but does not guarantee it in the presence of extreme
       callbacks; this is documented in
       :meth:`Activity.compute_final_durations`.
@@ -2225,30 +2203,30 @@ class NetworkModel:
         the maximum preliminary early time across all events.
 
         **Bridge.** :meth:`Activity.compute_final_durations` reads the
-        preliminary times and freezes a duration pair per activity —
-        ``dur_early`` for the forward pass and ``dur_late`` (negative)
-        for the backward pass — together with the scenario durations
-        ``opt_dur`` and ``pes_dur`` for PERT models. It also balances
-        the start and end reserves so that the frozen durations are
-        internally consistent (see :meth:`Activity.compute_final_durations`
-        for details and for the "hidden critical path" caveat). The
-        activity time attributes are then reset to zero in preparation
-        for the final pass.
+        preliminary times and freezes a single duration value per
+        activity (``Activity.duration``), together with the scenario
+        durations ``opt_dur`` and ``pes_dur`` for PERT models. It also
+        balances the start and end reserves so that the frozen duration
+        is internally consistent (see
+        :meth:`Activity.compute_final_durations` for details and for the
+        "hidden critical path" caveat). The activity time attributes are
+        then reset to zero in preparation for the final pass.
 
         **Phase 2 (final).** For PERT models, optimistic and pessimistic
         scenarios are computed from the frozen ``opt_dur`` / ``pes_dur``
         values (targets ``'optimistic'``, ``'pessimistic'``). The
         forward pass (``early``) and the backward pass (``late``) then
-        re-traverse the network using ``dur_early`` / ``dur_late``. The
-        backward pass starts from the maximum final early time across
-        all events. Time reserves are computed after phase 2 from the
-        final event and activity times.
+        re-traverse the network using the frozen ``duration`` (the
+        backward pass negates its ``RES`` component). The backward pass
+        starts from the maximum final early time across all events. Time
+        reserves are computed after phase 2 from the final event and
+        activity times.
 
         The rationale for the two-phase structure is the same as in the
         class-level Notes: freezing the durations between passes keeps
         the snapshot consistent when a resource-aware ``duration``
         callback depends on ``base_time``, and linearizes the
-        schedule↔duration feedback with a single step.
+        scheduleâ†”duration feedback with a single step.
 
         Numerical consistency of time parameters is enforced *during*
         the network traversal inside :meth:`_compute_target` by the
@@ -2428,10 +2406,10 @@ class NetworkModel:
         - ``'optimistic'`` / ``'pessimistic'``: delta is ``0``; the
           frozen durations ``a.opt_dur`` / ``a.pes_dur`` are used
           directly (the callback is **not** invoked again).
-        - ``'early'`` / ``'late'``: delta is ``0``; the frozen
-          durations ``a.dur_early`` / ``a.dur_late`` are used directly
-          via :func:`_duration_final` (the callback is **not** invoked
-          again).
+        - ``'early'`` / ``'late'``: delta is ``0``; the frozen duration
+          ``a.duration`` is used directly via :func:`_duration_final`
+          (the callback is **not** invoked again; the ``'late'`` pass
+          negates the ``RES`` component).
 
         The algorithm maintains a count of unresolved dependencies for
         each event (``n_dep``). Events with zero dependencies are pushed
@@ -2491,21 +2469,32 @@ class NetworkModel:
             :meth:`Activity.compute_final_durations` during the bridge
             between the two phases:
 
-            - ``'early'`` → :attr:`Activity.dur_early`
-            - ``'late'`` → :attr:`Activity.dur_late`
+            - ``'early'`` -> :attr:`Activity.duration` (positive)
+            - ``'late'``  -> :attr:`Activity.duration` with a negated
+              ``RES`` component (the backward pass traverses time in
+              reverse)
 
             This is what makes the final snapshot consistent when the
             callback depends on ``base_time`` (resource calendars).
 
-            The ``effort``, ``base_time`` and ``activity`` arguments are
-            accepted for interface compatibility with
-            :func:`_duration_vec` but are otherwise unused.
+            The ``effort`` and ``base_time`` arguments are accepted for
+            interface compatibility with :func:`_duration_vec` but are
+            otherwise unused; ``activity`` provides the frozen
+            ``duration``.
+
+            .. note::
+                The return value is always a **copy**: the backward pass
+                must not mutate ``activity.duration`` in place — otherwise
+                the reported duration (see :meth:`Activity.to_dict` and
+                :meth:`NetworkModel.viz`) would become negative.
             """
             if 'early' == target:
-                return activity.dur_early
+                return activity.duration.copy()
 
             if 'late' == target:
-                return activity.dur_late
+                ret = activity.duration.copy()
+                ret[RES] = -ret[RES]
+                return ret
 
             raise RuntimeError(f"Wrong target {target}!!!")
 
@@ -2813,7 +2802,7 @@ class NetworkModel:
             process_delta = lambda d, a, b, t: a.pes_dur
 
         elif 'early' == target:
-            # Final forward pass on the frozen dur_early. The duration
+            # Final forward pass on the frozen duration. The duration
             # callback is NOT invoked here (see _duration_final).
             act_base = 'early_start'
             act_new = 'early_end'
@@ -2825,8 +2814,9 @@ class NetworkModel:
             process_delta = _duration_final
 
         elif 'late' == target:
-            # Final backward pass on the frozen dur_late. The duration
-            # callback is NOT invoked here (see _duration_final).
+            # Final backward pass on the frozen duration with the
+            # negated RES component. The duration callback is NOT
+            # invoked here (see _duration_final).
             act_base = 'late_end'
             act_new = 'late_start'
             act_next = 'src'
@@ -3120,11 +3110,12 @@ class NetworkModel:
         rounded box attached to the bend point of the edge. The label
         font size is fixed at 12 for all activity labels.
 
-        The activity duration shown in the label is the **post-hoc view**
-        (the :attr:`Activity.duration` property), not the frozen
-        :attr:`Activity.dur_early` / :attr:`Activity.dur_late` used during
-        traversal. After a successful two-phase computation the two
-        coincide up to the accumulated error.
+        The activity duration shown in the label is the
+        :attr:`Activity.duration` attribute — the same frozen value that
+        is used during the final forward pass and reported by
+        :meth:`Activity.to_dict`; the backward pass only negates its
+        ``RES`` component locally inside
+        :func:`NetworkModel._compute_target._duration_final`.
 
         When ``group_by_stage=True``, the topological order of events is
         preserved by clustering events with the same stage together,
