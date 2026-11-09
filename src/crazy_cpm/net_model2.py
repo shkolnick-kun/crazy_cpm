@@ -31,28 +31,69 @@ import os
 
 import _ccpm
 
-# Machine epsilon
-EPS = np.finfo(float).eps
-
-# Constants for array indexing in time computations
-RES = 0  # Result of time computation
-VAR = 1  # Result variance estimation (used for PERT)
-ERR = 2  # Computation error upper limit
-
 # Supported file formats for network visualization
 _VIZ_FORMATS = ('png', 'svg', 'pdf')
 
+# Machine epsilon
+EPS = np.finfo(float).eps
+
+#Next version components
+EXP = 0 # Expected
+VAR = 1 # Variance
+LWR = 2 # Lower limit
+UPR = 3 # Upper limit
+ERR = 4 # Error bound
+
 #==============================================================================
-def fit_beta(M, D, a, b, err):
+def _unpack_components(components):
+    """
+    Проверяет и распаковывает массив компонентов.
+
+    components[EXP] - Expected / Mean
+    components[VAR] - Variance
+    components[LWR] - Lower limit / optimistic
+    components[UPR] - Upper limit / pessimistic
+    components[ERR] - Error bound
+    """
+    components = np.asarray(components, dtype=float)
+
+    if components.ndim != 1 or components.size < 5:
+        raise ValueError(
+            "Expected a 1D array with at least 5 components: "
+            "EXP, VAR, LWR, UPR, ERR"
+        )
+
+    return components[EXP], components[VAR], components[LWR], components[UPR], components[ERR]
+
+#==============================================================================
+def fit_beta(components):
+    """
+    components: numpy-массив длины >= 5
+        components[EXP] - Expected / Mean
+        components[VAR] - Variance
+        components[LWR] - Lower limit / optimistic
+        components[UPR] - Upper limit / pessimistic
+        components[ERR] - Error bound
+    """
+    M, D, a, b, err = _unpack_components(components)
+
     if a > b:
-        raise ValueError(f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})")
+        raise ValueError(
+            f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})"
+        )
+
     if not (a <= M <= b):
-        raise ValueError(f"Mean ({M}) must be between optimistic ({a}) and pessimistic ({b})")
+        raise ValueError(
+            f"Mean ({M}) must be between optimistic ({a}) "
+            f"and pessimistic ({b})"
+        )
+
     if err < 0.0:
         raise ValueError(f"Invalid error ({err}) must be >= 0.0")
 
     ul = max(abs(a), abs(b))
-    if b - a <= 2 * EPS * ul:  # b - a must be big enough
+
+    if b - a <= 2 * EPS * ul:
         # This is the chain of deterministic processes, use M without g computation
         return None, None
 
@@ -69,6 +110,7 @@ def fit_beta(M, D, a, b, err):
     var = D / (b - a) ** 2
 
     ratio = mu * (1 - mu) / var
+
     if ratio <= 1:
         ratio = 1 + 2 * EPS
 
@@ -78,12 +120,14 @@ def fit_beta(M, D, a, b, err):
     return alpha, beta
 
 #==============================================================================
-def calc_ppf(p, M, D, a, b, err=0.0):
+def calc_ppf(p, components):
+    M, D, a, b, err = _unpack_components(components)
+
     if np.sqrt(D) <= EPS * M:
         return M
 
-    alpha, beta = fit_beta(M, D, a, b, err)
-    if not alpha:
+    alpha, beta = fit_beta(components)
+    if alpha is None:
         return M
 
     estimate = scipy.stats.beta.ppf(p, alpha, beta)
@@ -92,40 +136,38 @@ def calc_ppf(p, M, D, a, b, err=0.0):
 
     return a + (b - a) * estimate
 
+
 #==============================================================================
-def calc_cdf(val, M, D, a, b, err=0.0):
+def calc_cdf(val, components):
+    M, D, a, b, err = _unpack_components(components)
+
     if np.sqrt(D) <= EPS * M:
         return 1.0 if val > M else 0.0
 
-    alpha, beta = fit_beta(M, D, a, b, err)
-    if not alpha:
+    alpha, beta = fit_beta(components)
+    if alpha is None:
         return 1.0 if val > M else 0.0
 
     prob = scipy.stats.beta.cdf((val - a) / (b - a), alpha, beta)
     if np.isnan(prob):
-        return 0
+        return 0.0
 
     return prob
 
-#==============================================================================
-def _p_quantile_estimate(p, tm, optimistic, pessimistic):
-    return calc_ppf(p, tm[RES], tm[VAR], optimistic, pessimistic, err=tm[ERR])
-
-#==============================================================================
-def _prob_estimate(val, tm, optimistic, pessimistic):
-    return calc_cdf(val, tm[RES], tm[VAR], optimistic, pessimistic, err=tm[ERR])
 
 #==============================================================================
 def _choice(old, new, delta):
-    e = new[ERR] + old[ERR]
-    if delta >= e:
+    err = new[ERR] + old[ERR]
+    if delta >= err:
         return new  # Certain result
-    elif delta >= -e:
+    elif delta >= -err:
         # Uncertain result, use mixing
-        ret = np.zeros((3,), dtype=float)
-        ret[RES] = 0.5 * (new[RES] + old[RES])
+        ret = np.zeros((5,), dtype=float)
+        ret[EXP] = 0.5 * (new[EXP] + old[EXP])
         ret[VAR] = max(old[VAR], new[VAR])
-        ret[ERR] = 0.5 * e
+        ret[LWR] = min(old[LWR], new[LWR])
+        ret[UPR] = max(old[UPR], new[UPR])
+        ret[ERR] = 0.5 * err
         return ret
     else:
         return old  # Certain result
@@ -140,14 +182,14 @@ def _default_duration(effort, activity, base_time, target):
 def _default_style(element):
     if isinstance(element, Event):
         res = element.reserve
-        prob_reserve = element.early_prob(element.late[RES])
+        prob_reserve = element.early_prob(element.late[EXP])
         tooltip  = f"Event {element.id}\n"
-        tooltip += f"early = {element.early[RES]:.2f}\n"
-        tooltip += f"late = {element.late[RES]:.2f}\n"
-        tooltip += f"reserve = {element.reserve[RES]:.2f}\n"
-    elif isinstance(element, Activity):
+        tooltip += f"early = {element.early[EXP]:.2f}\n"
+        tooltip += f"late = {element.late[EXP]:.2f}\n"
+        tooltip += f"reserve = {element.reserve[EXP]:.2f}\n"
+    elif isinstance(element, ArrowActivity):
         res = element.reserve
-        prob_reserve = element.early_end_prob(element.late_end[RES])
+        prob_reserve = element.early_end_prob(element.late_end[EXP])
         tooltip = element.letter
         if 'name' in element.data:
             tooltip += ' ' + element.data['name']
@@ -159,7 +201,7 @@ def _default_style(element):
 
     prob_thr = element.model.p
 
-    if abs(res[RES]) <= res[ERR]:
+    if abs(res[EXP]) <= res[ERR]:
         # Critical path element
         return {
             'color': '#ff0000',
@@ -188,77 +230,68 @@ def _default_style(element):
         }
 
 #==============================================================================
-class Activity:
-    def __init__(self, id, wbs_id, letter, model, src, dst, expected=0.0,
-                 exp_var=0.0, optimistic=0.0, pessimistic=0.0, data=None, is_dummy=False):
+class ArrowActivity(object):
+    def __init__(self, id, wbs_id, letter, model, src, dst, expected=None, data=None, is_dummy=False):
         # Validate types and values (explicit checks instead of asserts)
         if not isinstance(id, int):
             raise TypeError(f"id must be int, got {type(id)}")
+
         if not isinstance(wbs_id, int):
             raise TypeError(f"wbs_id must be int, got {type(wbs_id)}")
+
         if not isinstance(letter, str):
             raise TypeError(f"letter must be str, got {type(letter)}")
+
         if not isinstance(model, NetworkModel):
             raise TypeError(f"model must be NetworkModel, got {type(model)}")
+
         if not isinstance(src, Event):
             raise TypeError(f"src must be Event, got {type(src)}")
+
         if not isinstance(dst, Event):
             raise TypeError(f"dst must be Event, got {type(dst)}")
-        if not isinstance(expected, (int, float)):
-            raise TypeError(f"expected must be a real number, got {type(expected)}")
-        expected = float(expected)
-        if expected < 0.0:
-            raise ValueError(f"expected effort must be non-negative, got {expected}")
-        if not isinstance(exp_var, (int, float)):
-            raise TypeError(f"exp_var must be a real number, got {type(exp_var)}")
-        exp_var = float(exp_var)
-        if exp_var < 0.0:
-            raise ValueError(f"variance must be non-negative, got {exp_var}")
-        if data is not None and not isinstance(data, dict):
-            raise TypeError(f"data must be dict or None, got {type(data)}")
-        if not isinstance(optimistic, (int, float)):
-            raise TypeError(f"optimistic must be a real number, got {type(optimistic)}")
-        optimistic = float(optimistic)
-        if not isinstance(pessimistic, (int, float)):
-            raise TypeError(f"pessimistic must be a real number, got {type(pessimistic)}")
-        pessimistic = float(pessimistic)
+
+        if expected is None:
+            expected_arr = np.zeros((5,), dtype=float)
+
+        elif (isinstance(expected, np.ndarray)
+              and expected.shape == (5,)
+              and np.issubdtype(expected.dtype, np.floating)):
+            expected_arr = expected.astype(float, copy=True)
+
+        else:
+            raise TypeError(
+                "expected must be a float numpy.ndarray of shape (5,), "
+                f"got {type(expected).__name__} with shape "
+                f"{getattr(expected, 'shape', None)} and dtype "
+                f"{getattr(expected, 'dtype', None)}"
+            )
 
         self.id = id
         self.wbs_id = wbs_id
         self.letter = letter
+        self.data = data if data is not None else {}
+        self._is_dummy = is_dummy
+
         self.model = model
 
+        # Events
         self._src = src
         self._src._out_activities.append(self)
 
         self._dst = dst
         self._dst._in_activities.append(self)
 
-        self.expected = np.zeros((3,), dtype=float)
-        self.expected[RES] = expected
-        self.expected[VAR] = exp_var
-        self.expected[ERR] = EPS * expected
-
-        self.duration = np.zeros_like(self.expected)
-
-        self.data = data if data is not None else {}
-
-        self._is_dummy = is_dummy
+        # Effort
+        self.expected = expected_arr.copy()
 
         # CPM/PERT parameters
+        self.duration    = np.zeros_like(self.expected)
         self.early_start = np.zeros_like(self.expected)
-        self.late_start = np.zeros_like(self.expected)
-        self.early_end = np.zeros_like(self.expected)
-        self.late_end = np.zeros_like(self.expected)
-        self.reserve = np.zeros_like(self.expected)
-
-        self.optimistic = optimistic
-        self.opt_start = 0.
-        self.opt_end = 0.
-
-        self.pessimistic = pessimistic
-        self.pes_start = 0.
-        self.pes_end = 0.
+        self.late_start  = np.zeros_like(self.expected)
+        self.early_end   = np.zeros_like(self.expected)
+        self.late_end    = np.zeros_like(self.expected)
+        self.reserve     = np.zeros_like(self.expected)
 
     @property
     def src(self):
@@ -288,39 +321,19 @@ class Activity:
     def is_dummy(self):
         return self._is_dummy
 
-
-    def compute_final_duration(self):
-        # Early duration calculation
-        # Note:
-        # early_end[[RES,VAR]] == early_start[[RES,VAR]] + early[[RES,VAR]]
-        early = self.early_end - self.early_start
-        early[ERR] = self.early_end[ERR] + self.early_start[ERR]
-
-        # Late duration calculation
-        # Note:
-        # late_start[RES] == late_end[RES] - late[RES]
-        # late_start[VAR] == late_end[VAR] + late[VAR]
-        late = np.zeros_like(early)
-        late[RES] = self.late_end[RES] - self.late_start[RES]
-        late[VAR] = self.late_start[VAR] - self.late_end[VAR]
-        late[ERR] = self.late_end[ERR] + self.late_start[ERR]
-
-        # Choose most certain estimate
-        self.duration = _choice(early, late, late[RES] - early[RES])
-
     @property
     def early_start_pqe(self):
-        return _p_quantile_estimate(self.model.p, self.early_start, self.opt_start, self.pes_start)
+        return calc_ppf(self.model.p, self.early_start)
 
     def early_start_prob(self, val):
-        return _prob_estimate(val, self.early_start, self.opt_start, self.pes_start)
+        return calc_cdf(val, self.early_start)
 
     @property
     def early_end_pqe(self):
-        return _p_quantile_estimate(self.model.p, self.early_end, self.opt_end, self.pes_end)
+        return calc_ppf(self.model.p, self.early_end)
 
     def early_end_prob(self, val):
-        return _prob_estimate(val, self.early_end, self.opt_end, self.pes_end)
+        return calc_cdf(val, self.early_end)
 
     def __repr__(self):
         return str(self.to_dict())
@@ -334,35 +347,36 @@ class Activity:
         ret['letter'  ] = self.letter
         ret['src_id'  ] = self.src.id
         ret['dst_id'  ] = self.dst.id
-        ret['expected'] = self.expected[RES] # Resource effort estimate
-        ret['duration'] = self.duration[RES] # Actual duration
+        ret['expected'] = self.expected[EXP] # Resource effort estimate
+        ret['duration'] = self.duration[EXP] # Actual duration
         ret['is_dummy'] = self._is_dummy
 
         # CPM timing parameters
-        ret['early_start'] = self.early_start[RES]
-        ret['late_start' ] = self.late_start[RES]
-        ret['early_end'  ] = self.early_end[RES]
-        ret['late_end'   ] = self.late_end[RES]
-        ret['reserve'    ] = self.reserve[RES]
+        ret['early_start'] = self.early_start[EXP]
+        ret['late_start' ] = self.late_start[EXP]
+        ret['early_end'  ] = self.early_end[EXP]
+        ret['late_end'   ] = self.late_end[EXP]
+        ret['reserve'    ] = self.reserve[EXP]
 
         if self.model.is_pert:
             # PERT analysis fields
-            ret['exp_var'   ] = self.expected[VAR]   # Variance of effort estimate
-            ret['variance'  ] = self.duration[VAR]  # Variance of duration
-            ret['optimistic'] = self.optimistic   # Optimistic effort
-            ret['opt_start' ] = self.opt_start     # Optimistic start time
-            ret['opt_end'   ] = self.opt_end         # Optimistic end time
+            ret['exp_var'   ] = self.expected[VAR]    # Variance of effort estimate
+            ret['variance'  ] = self.duration[VAR]    # Variance of duration
 
-            ret['pessimistic'] = self.pessimistic  # Pessimistic effort
-            ret['pes_start'  ] = self.pes_start    # Pessimistic start time
-            ret['pes_end'    ] = self.pes_end      # Pessimistic end time
+            ret['optimistic'] = self.expected[LWR]    # Optimistic effort
+            ret['opt_start' ] = self.early_start[LWR] # Optimistic start time
+            ret['opt_end'   ] = self.early_end[LWR]   # Optimistic end time
+
+            ret['pessimistic'] = self.expected[UPR]    # Pessimistic effort
+            ret['pes_start'  ] = self.early_start[UPR] # Pessimistic start time
+            ret['pes_end'    ] = self.early_end[UPR]   # Pessimistic end time
 
             ret['early_start_var'] = self.early_start[VAR]
             ret['early_end_var'  ] = self.early_end[VAR]
             ret['early_start_pqe'] = self.early_start_pqe
             ret['early_end_pqe'  ] = self.early_end_pqe
 
-            ret['late_end_prob'  ] = self.early_end_prob(self.late_end[RES])
+            ret['late_end_prob'  ] = self.early_end_prob(self.late_end[EXP])
 
         if self.model.debug:
             # Debug information
@@ -372,6 +386,8 @@ class Activity:
             ret['late_end_err'   ] = self.late_end[ERR]
 
         return ret
+
+# <<==== Вы находитесь здесь
 
 #==============================================================================
 class Event:
