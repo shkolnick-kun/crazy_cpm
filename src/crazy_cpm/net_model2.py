@@ -387,10 +387,8 @@ class ArrowActivity(object):
 
         return ret
 
-# <<==== Вы находитесь здесь
-
 #==============================================================================
-class Event:
+class Event(object):
     def __init__(self, id, model):
         if not isinstance(id, int):
             raise TypeError(f"id must be int, got {type(id)}")
@@ -403,15 +401,12 @@ class Event:
         self._out_activities = []
 
         # CPM time parameters (calculated later)
-        self.early_pre = np.zeros((3,), dtype=float)
-        self.late_pre = np.zeros((3,), dtype=float)
-        self.early = np.zeros((3,), dtype=float)
-        self.late = np.zeros((3,), dtype=float)
-        self.reserve = np.zeros((3,), dtype=float)
+        self.early_pre = np.zeros((5,), dtype=float)
+        self.late_pre = np.zeros((5,), dtype=float)
+        self.early = np.zeros((5,), dtype=float)
+        self.late = np.zeros((5,), dtype=float)
+        self.reserve = np.zeros((5,), dtype=float)
         self.stage = 0
-
-        self.optimistic = 0.0
-        self.pessimistic = 0.0
 
         self.data = {} #User data
 
@@ -425,10 +420,10 @@ class Event:
 
     @property
     def early_pqe(self):
-        return _p_quantile_estimate(self.model.p, self.early, self.optimistic, self.pessimistic)
+        return calc_ppf(self.model.p, self.early)
 
     def early_prob(self, val):
-        return _prob_estimate(val, self.early, self.optimistic, self.pessimistic)
+        return calc_cdf(val, self.early)
 
     def __repr__(self):
         return str(self.to_dict())
@@ -440,28 +435,28 @@ class Event:
         # Basic CPM parameters
         ret['id'     ] = self.id
         ret['stage'  ] = self.stage
-        ret['early'  ] = self.early[RES]
-        ret['late'   ] = self.late[RES]
-        ret['reserve'] = self.reserve[RES]
+        ret['early'  ] = self.early[EXP]
+        ret['late'   ] = self.late[EXP]
+        ret['reserve'] = self.reserve[EXP]
 
         if self.model.is_pert:
             # PERT analysis fields
-            ret['optimistic' ] = self.optimistic
-            ret['pessimistic'] = self.pessimistic
+            ret['optimistic' ] = self.early[LWR]
+            ret['pessimistic'] = self.early[UPR]
             ret['early_var'  ] = self.early[VAR]
             ret['early_pqe'  ] = self.early_pqe
-            ret['late_prob'  ] = self.early_prob(self.late[RES])
+            ret['late_prob'  ] = self.early_prob(self.late[EXP])
 
         if self.model.debug:
             # Debug information
             ret['early_err'] = self.early[ERR]
             ret['late_err' ] = self.late[ERR]
 
-            ret['early_pre'     ] = self.early_pre[RES]
+            ret['early_pre'     ] = self.early_pre[EXP]
             ret['early_pre_var' ] = self.early_pre[VAR]
             ret['early_pre_err' ] = self.early_pre[ERR]
 
-            ret['late_pre'     ] = self.late_pre[RES]
+            ret['late_pre'     ] = self.late_pre[EXP]
             ret['late_pre_var' ] = self.late_pre[VAR]
             ret['late_pre_err' ] = self.late_pre[ERR]
 
@@ -488,7 +483,6 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
 
         mean = (a + 4 * m + b) / 6
         variance = ((b - a) / 6) ** 2
-        return mean, variance, a, m, b
 
     # 2. Check for two-point PERT estimation (medium priority)
     elif all(key in work_data for key in ['optimistic', 'pessimistic']):
@@ -500,11 +494,8 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
         if not (a <= b):
             raise ValueError(f"Invalid PERT estimates: must satisfy optimistic <= pessimistic. Got: {a}, {b}")
 
-        m = (2 * a + b) / 3
         mean = (3 * a + 2 * b) / 5
         variance = ((b - a) / 5) ** 2
-
-        return mean, variance, a, m, b
 
     # 3. Direct parameters (lowest priority - backward compatibility)
     elif 'expected' in work_data:
@@ -526,17 +517,23 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
                 a = mean - d
 
             b = a + 2 * d
-            m = (mean * 6 - a - b) / 4
         else:
             a = mean
             b = mean
-            m = mean
-
-        return mean, variance, a, m, b
 
     # 4. Error - insufficient data
     else:
         raise ValueError(f"Insufficient data for determining action effort parameters. Available keys: {list(work_data.keys())}")
+
+    ret = np.zeros((5,), dtype=float)
+    ret[EXP] = mean
+    ret[VAR] = variance
+    ret[LWR] = a
+    ret[UPR] = b
+    ret[ERR] = EPS * mean
+    return ret
+
+# <<==== Вы находитесь здесь
 
 #==============================================================================
 class NetworkModel:
