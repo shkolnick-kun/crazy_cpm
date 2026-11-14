@@ -91,7 +91,7 @@ def fit_beta(components):
     if err < 0.0:
         raise ValueError(f"Invalid error ({err}) must be >= 0.0")
 
-    ul = max(abs(a), abs(b))
+    ul = max(abs(a), abs(b), abs(b - a))
 
     if b - a <= 2 * EPS * ul:
         # This is the chain of deterministic processes, use M without g computation
@@ -154,12 +154,11 @@ def calc_cdf(val, components):
 
     return prob
 
-
 #==============================================================================
 def _choice(old, new, delta):
     err = new[ERR] + old[ERR]
     if delta >= err:
-        return new  # Certain result
+        return new.copy()  # Certain result
     elif delta >= -err:
         # Uncertain result, use mixing
         ret = np.zeros((5,), dtype=float)
@@ -170,7 +169,18 @@ def _choice(old, new, delta):
         ret[ERR] = 0.5 * err
         return ret
     else:
-        return old  # Certain result
+        return old.copy()  # Certain result
+
+#==============================================================================
+def _negative(vec):
+    ret = np.zeros((5,), dtype=float)
+    ret[EXP] = -vec[EXP]
+    ret[LWR] = -vec[UPR]
+    ret[UPR] = -vec[LWR]
+
+    ret[VAR] = vec[VAR]
+    ret[ERR] = vec[ERR]
+    return ret
 
 #==============================================================================
 def _default_duration(effort, activity, base_time, target):
@@ -293,6 +303,7 @@ class ArrowActivity(object):
         self.late_end    = np.zeros_like(self.expected)
         self.reserve     = np.zeros_like(self.expected)
 
+    #==========================================================================
     @property
     def src(self):
         return self._src
@@ -305,6 +316,7 @@ class ArrowActivity(object):
         self._src = new_src
         new_src._out_activities.append(self)
 
+    #==========================================================================
     @property
     def dst(self):
         return self._dst
@@ -317,27 +329,34 @@ class ArrowActivity(object):
         self._dst = new_dst
         new_dst._in_activities.append(self)
 
+    #==========================================================================
     @property
     def is_dummy(self):
         return self._is_dummy
 
+    #==========================================================================
     @property
     def early_start_pqe(self):
         return calc_ppf(self.model.p, self.early_start)
 
+    #==========================================================================
     def early_start_prob(self, val):
         return calc_cdf(val, self.early_start)
 
+    #==========================================================================
     @property
     def early_end_pqe(self):
         return calc_ppf(self.model.p, self.early_end)
 
+    #==========================================================================
     def early_end_prob(self, val):
         return calc_cdf(val, self.early_end)
 
+    #==========================================================================
     def __repr__(self):
         return str(self.to_dict())
 
+    #==========================================================================
     def to_dict(self):
         # Start with user data
         ret = self.data.copy()
@@ -387,6 +406,31 @@ class ArrowActivity(object):
 
         return ret
 
+    #==========================================================================
+    def compute_final_duration(self):
+        # Early duration calculation
+        # Note:
+        # early_end[[EXP, VAR, UPR, LWR]] == early_start[[EXP, VAR, UPR, LWR]] + early[[EXP, VAR, UPR, LWR]]
+        early = self.early_end - self.early_start
+        early[ERR] = self.early_end[ERR] + self.early_start[ERR]
+
+        # Late duration calculation
+        # Note:
+        # late_start[EXP] == late_end[EXP] - late[EXP]
+        # late_start[UPR] == late_end[UPR] - late[LWR]
+        # late_start[LWR] == late_end[LWR] - late[UPR]
+        # late_start[VAR] == late_end[VAR] + late[VAR]
+        late = np.zeros_like(early)
+        late[EXP] = self.late_end[EXP]   - self.late_start[EXP]
+        late[LWR] = self.late_end[UPR]   - self.late_start[UPR]
+        late[UPR] = self.late_end[LWR]   - self.late_start[LWR]
+        late[VAR] = self.late_start[VAR] - self.late_end[VAR]
+        late[ERR] = self.late_end[ERR]   + self.late_start[ERR]
+
+        # Choose most certain estimate
+        self.duration = _choice(early, late, late[EXP] - early[EXP])
+
+
 #==============================================================================
 class Event(object):
     def __init__(self, id, model):
@@ -410,24 +454,30 @@ class Event(object):
 
         self.data = {} #User data
 
+    #==========================================================================
     @property
     def in_activities(self):
         return tuple(self._in_activities)
 
+    #==========================================================================
     @property
     def out_activities(self):
         return tuple(self._out_activities)
 
+    #==========================================================================
     @property
     def early_pqe(self):
         return calc_ppf(self.model.p, self.early)
 
+    #==========================================================================
     def early_prob(self, val):
         return calc_cdf(val, self.early)
 
+    #==========================================================================
     def __repr__(self):
         return str(self.to_dict())
 
+    #==========================================================================
     def to_dict(self):
         # Start with user data
         ret = self.data.copy()
@@ -530,10 +580,40 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     ret[VAR] = variance
     ret[LWR] = a
     ret[UPR] = b
-    ret[ERR] = EPS * mean
-    return ret
+    ret[ERR] = EPS * max(abs(a), abs(b), abs(b - a))
 
-# <<==== Вы находитесь здесь
+    if np.sqrt(ret[VAR]) < ret[ERR]:
+        # Deterministic activity
+        ret[LWR] = ret[EXP]
+        ret[UPR] = ret[EXP]
+        ret[VAR] = 0.0
+        return ret
+
+    # Make sure that mode is in (a,b)
+    # Use MPERT math for corections
+    gamma = (mean - a) * (b - mean) / variance - 3.0
+
+    # Gamma must be > 0, so:
+    # the first part of gamma must be at least 3.0 * (1 + 2.0 * EPS)
+    # thus gamma threshold is 6.0 * EPS
+    if gamma < 6.0 * EPS:
+        gamma = 6.0 * EPS
+
+    # Now values corrections
+    thr = a + (b - a) / (gamma + 2.0)
+    if mean <= thr:
+        mean = thr + 2.0 * ret[ERR]
+
+    if mean >= b - (b - a) / (gamma + 2.0):
+        b = ((gamma + 2.0) * mean - a) / (gamma + 1.0) + 2.0 * ret[ERR]
+
+    variance = (mean - a) * (b - mean) / (gamma + 3.0)
+
+    ret[EXP] = mean
+    ret[VAR] = variance
+    ret[UPR] = b
+
+    return ret
 
 #==============================================================================
 class NetworkModel:
@@ -596,22 +676,27 @@ class NetworkModel:
         # Compute Event and Activity time parameters
         self._compute_time_params()
 
+    #==========================================================================
     @property
     def is_pert(self):
         return self._is_pert
 
+    #==========================================================================
     @property
     def p(self):
         return self._p
 
+    #==========================================================================
     @property
     def activities(self):
         return self._activities
 
+    #==========================================================================
     @property
     def events(self):
         return self._events
 
+    #==========================================================================
     def _parse_links(self, lnk_src, lnk_dst, links):
         if (lnk_src is not None or lnk_dst is not None) and links is not None:
             raise ValueError(
@@ -677,6 +762,7 @@ class NetworkModel:
         else:
             raise ValueError(f"Unsupported links format: {type(links)}")
 
+    #==========================================================================
     def _create_model(self, wbs_dict, lnk_src, lnk_dst, default_risk, next_act_id):
         # Validate link lengths
         if len(lnk_src) != len(lnk_dst):
@@ -712,28 +798,26 @@ class NetworkModel:
 
                 # Calculate expected effort and variance using unified function
                 try:
-                    expected, exp_var, optimistic, _, pessimistic = \
-                        _calculate_action_time_params(wbs_data, default_risk)
+                    expected = _calculate_action_time_params(wbs_data, default_risk)
                 except ValueError as e:
                     raise ValueError(f"Error processing activity {act_id} ({wbs_data.get('letter', 'unknown')}): {e}") from e
 
                 letter = wbs_data.get('letter', '')
 
                 # Even one wbs item with nonzero variance is enough to compute PERT
-                if exp_var > 0.0:
+                if expected[VAR] > 0.0:
                     self._is_pert = True
 
                 # Create data dict without fields stored as separate attributes
                 data_without_duplicates = self._remove_duplicate_fields(wbs_data)
 
-                self._add_activity(int(act_id), int(net_src[i]), int(net_dst[i]),
-                                   expected, exp_var, optimistic, pessimistic,
-                                   letter, data_without_duplicates)
+                self._add_activity(int(act_id), letter, int(net_src[i]), int(net_dst[i]),
+                                   expected, data_without_duplicates)
             else:
                 # Add a dummy activity (no effort, no letter, no data)
                 nd += 1  # One more dummy work
-                self._add_activity(0, int(net_src[i]), int(net_dst[i]),
-                                   0., 0., 0., 0., '#' + str(nd), {}, is_dummy=True)
+                self._add_activity(0, '#' + str(nd), int(net_src[i]), int(net_dst[i]),
+                                   None, {}, is_dummy=True)
                 dsrc.add(int(net_src[i]))
 
         # Network postprocessing
@@ -767,10 +851,11 @@ class NetworkModel:
             maxa = grpoi[k][0]
             for a in aoi:
                 # target is None because this is post-processing without scenario
-                if self._duration(a.expected[RES], a, None, None) > self._duration(maxa.expected[RES], maxa, None, None):
+                if self._duration(a.expected[EXP], a, None, None) > self._duration(maxa.expected[EXP], maxa, None, None):
                     a.dst, maxa.dst = maxa.dst, a.dst
                     maxa = a
 
+    #==========================================================================
     def _remove_duplicate_fields(self, wbs_data):
         # Create a copy to avoid modifying the original data
         data_copy = wbs_data.copy()
@@ -784,18 +869,15 @@ class NetworkModel:
 
         return data_copy
 
+    #==========================================================================
     def _compute_time_params(self):
-        if self.is_pert:
-            # For PERT models we must compute optimistic and pessimistic scenarios
-            self._compute_target('optimistic')
-            self._compute_target('pessimistic')
 
         self._compute_target('early_pre')
 
         # Set late times starting from project completion
-        late_pre = np.zeros((3,), dtype=float)
+        late_pre = np.zeros((5,), dtype=float)
         for e in self._events:
-            if e.early_pre[RES] > late_pre[RES]:
+            if e.early_pre[EXP] > late_pre[EXP]:
                 late_pre = e.early_pre.copy()
 
         for e in self._events:
@@ -809,9 +891,9 @@ class NetworkModel:
         self._compute_target('early')
 
         # Set late times starting from project completion
-        late = np.zeros((3,), dtype=float)
+        late = np.zeros((5,), dtype=float)
         for e in self._events:
-            if e.early[RES] > late[RES]:
+            if e.early[EXP] > late[EXP]:
                 late = e.early.copy()
 
         for e in self._events:
@@ -819,221 +901,337 @@ class NetworkModel:
 
         self._compute_target('late')
 
+        _VALS = [EXP, UPR, LWR]
+        _OTHR = [VAR, ERR]
+
         # Compute reserves
         for e in self._events:
-            e.reserve[VAR] = e.late[VAR] + e.early[VAR]
-            e.reserve[ERR] = e.late[ERR] + e.early[ERR]
+            e.reserve[_VALS] = e.late[_VALS] - e.early[_VALS]
+            e.reserve[_OTHR] = e.late[_OTHR] + e.early[_OTHR]
+
+            if e.reserve[EXP] < -e.reserve[ERR]:
+                raise RuntimeError(f"Event {e.id} has negative expected time reserve ({e.reserve[EXP]})")
+
+            if e.reserve[UPR] < -e.reserve[ERR]:
+                raise RuntimeError(f"Event {e.id} has negative upper time reserve ({e.reserve[UPR]})")
+
+            if e.reserve[LWR] < -e.reserve[ERR]:
+                raise RuntimeError(f"Event {e.id} has negative lower time reserve ({e.reserve[LWR]})")
+
             # Round off insignificant values
-            r = e.late[RES] - e.early[RES]
-            e.reserve[RES] = r if abs(r) > e.reserve[ERR] else 0.0
+            if e.reserve[EXP] < e.reserve[ERR]:
+                e.reserve[EXP] = 0.0
+
+            if e.reserve[UPR] < e.reserve[ERR]:
+                e.reserve[UPR] = 0.0
+
+            if e.reserve[LWR] < e.reserve[ERR]:
+                e.reserve[LWR] = 0.0
 
         for a in self._activities:
             # Compute start and end reserve values separately
             # These values may differ due to resource availability time dependence
-            start_res = np.zeros((3,), dtype=float)
-            start_res[RES] = a.late_start[RES] - a.early_start[RES]
-            start_res[VAR] = a.late_start[VAR] + a.early_start[VAR]
-            start_res[ERR] = a.late_start[ERR] + a.early_start[ERR]
+            start_res = np.zeros((5,), dtype=float)
+            start_res[_VALS] = a.late_start[_VALS] - a.early_start[_VALS]
+            start_res[_OTHR] = a.late_start[_OTHR] + a.early_start[_OTHR]
 
-            end_res = np.zeros((3,), dtype=float)
-            end_res[RES] = a.late_end[RES] - a.early_end[RES]
-            end_res[VAR] = a.late_end[VAR] + a.early_end[VAR]
-            end_res[ERR] = a.late_end[ERR] + a.early_end[ERR]
+            end_res = np.zeros((5,), dtype=float)
+            end_res[_VALS] = a.late_end[_VALS] - a.early_end[_VALS]
+            end_res[_OTHR] = a.late_end[_OTHR] + a.early_end[_OTHR]
 
             # Choose minimum reserve value
-            a.reserve = _choice(start_res, end_res, start_res[RES] - end_res[RES])
-
-            # Round off insignificant values
-            r = a.reserve[RES]
-            a.reserve[RES] = r if abs(r) > a.reserve[ERR] else 0.0
+            a.reserve = _choice(start_res, end_res, start_res[EXP] - end_res[EXP])
 
             # Check for programming errors
-            if r < -a.reserve[ERR]:
-                raise RuntimeError(f"Activity {a.id} has negative time reserve ({r})")
+            if a.reserve[EXP] < -a.reserve[ERR]:
+                raise RuntimeError(f"Activity {a.letter} has negative expected time reserve ({a.reserve[EXP]})")
 
+            if a.reserve[UPR] < -a.reserve[ERR]:
+                raise RuntimeError(f"Activity {a.letter} has negative upper time reserve ({a.reserve[UPR]})")
 
+            if a.reserve[LWR] < -a.reserve[ERR]:
+                raise RuntimeError(f"Activity {a.letter} has negative lower time reserve ({a.reserve[LWR]})")
 
+            # Round off insignificant values
+            if a.reserve[EXP] < a.reserve[ERR]:
+                a.reserve[EXP] = 0.0
+
+            if a.reserve[UPR] < a.reserve[ERR]:
+                a.reserve[UPR] = 0.0
+
+            if a.reserve[LWR] < a.reserve[ERR]:
+                a.reserve[LWR] = 0.0
+
+    #==========================================================================
     def _compute_target(self, target=None):
+
+        #======================================================================
         def _choice_early(old, new):
-            return _choice(old, new, new[RES] - old[RES])
+            return _choice(old, new, new[EXP] - old[EXP])
 
+        #======================================================================
         def _choice_late(old, new):
-            return _choice(old, new, old[RES] - new[RES])
+            return _choice(old, new, old[EXP] - new[EXP])
 
+        #======================================================================
+        def _delta_early(a):
+            return a.expected
+
+        #======================================================================
         def _delta_late(a):
-            ret = a.expected.copy()
-            ret[RES] = -a.expected[RES]
-            return ret
+            return _negative(a.expected)
 
-        def _duration_late(effort, activity, base_time, target):
-            ret = activity.duration.copy()
-            ret[RES] = -activity.duration[RES]
-            return ret
-
+        #======================================================================
         def _duration_vec(effort, activity, base_time, target):
             # Optimize for default duration function
             if _default_duration == self._duration:
                 return effort
 
-            dur = np.zeros((3,), dtype=float)
+            dur = np.zeros((5,), dtype=float)
 
             # Compute duration value and error bound
-            # effort[RES] is float: positive for forward pass, negative for backward pass
-            dur[RES] = self._duration(effort[RES], activity, base_time[RES], target)
-            dur[ERR] = EPS * abs(dur[RES])  # Error bound based on absolute duration
+            # effort[EXP] is float: positive for forward pass, negative for backward pass
+            dur[EXP] = self._duration(effort[EXP], activity, base_time[EXP], target)
+            # Yes, we use one time base here to guarantee that dur[LWR] <= dur[EXP] <= dur[UPR]
+            dur[UPR] = self._duration(effort[UPR], activity, base_time[EXP], target)
+            dur[LWR] = self._duration(effort[LWR], activity, base_time[EXP], target)
 
-            if 0. == effort[VAR] or not self.is_pert:
+            # Error bound
+            dur[ERR] = EPS * max(abs(dur[UPR]),  abs(dur[LWR]),  abs(dur[UPR] - dur[LWR]))
+
+            if np.sqrt(effort[VAR]) < dur[ERR] or not self.is_pert:
                 # Deterministic or fake activity
                 # VAR is zero already
+                dur[UPR] = dur[EXP]
+                dur[LWR] = dur[EXP]
                 return dur
 
             # Compute shape parameter for modified PERT distribution
-            alpha, beta = fit_beta(activity.expected[RES], activity.expected[VAR],
-                                   activity.optimistic, activity.pessimistic,
-                                   activity.expected[ERR])
+            alpha, beta = fit_beta(effort)
 
             if not alpha:
                 # Deterministic activity
+                dur[UPR] = dur[EXP]
+                dur[LWR] = dur[EXP]
                 return dur
 
             # Model is PERT and activity is not deterministic,
-            # will compute duration variance using modified PERT formula
+            # Make sure taht mode is in (dur[LWR], dur[UPR])
+            thr = dur[LWR] + (dur[UPR] - dur[LWR]) / (alpha + beta)
+            if dur[EXP] <= thr:
+                dur[EXP] = thr + 2.0 * dur[ERR]
 
-            # Compute optimistic and pessimistic duration estimates
-            if effort[RES] >= 0.:
-                # Forward pass: use positive effort values
-                a = self._duration(activity.optimistic , activity, base_time[RES], target)
-                b = self._duration(activity.pessimistic, activity, base_time[RES], target)
-            else:
-                # Backward pass: use negative effort values
-                a = self._duration(-activity.optimistic , activity, base_time[RES], target)
-                b = self._duration(-activity.pessimistic, activity, base_time[RES], target)
+            if dur[EXP] >= dur[UPR] - (dur[UPR] - dur[LWR]) / (alpha + beta):
+                dur[UPR] = (dur[EXP] * (alpha + beta) - dur[LWR]) / (alpha + beta - 1.0) + 2.0 * dur[ERR]
 
             # Use beta-distribution formula for variance calculation:
-            var_beta = alpha * beta / (alpha + beta + 1) / ((alpha + beta) ** 2)
-            dur[VAR] = var_beta * ((b - a) ** 2)
+            var_beta = alpha * beta / (alpha + beta + 1.0) / ((alpha + beta) ** 2)
+            dur[VAR] = var_beta * ((dur[UPR] - dur[LWR]) ** 2)
 
             return dur
 
-        def _check_and_fix_evt(e, target):
-            if 'early' == target:
-                if e.early[RES] < 0.0:
-                    e.early[RES] = 0.0
+        #======================================================================
+        def _sanitize_act(a, target):
 
-            elif 'late' == target:
-                if e.early[RES] - e.late[RES] >  e.late[ERR] + e.early[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal late time ({e.late[RES]} < {e.early[RES]}) ")
-
-                if e.late[RES] < e.early[RES]:
-                    e.late[RES] = e.early[RES]
-
-            return
-
-        def _check_and_fix_act(a, target):
             # Time params lower limit
 
-            if 'early' == target:
-                if a.early_start[RES] < 0.0:
-                    a.early_start[RES] = 0.0
+            if target in ['early_pre', 'early']:
+                # Decouple activities from events
+                a.early_start = a.early_start.copy()
+                a.early_end   = a.early_end.copy()
 
-                if a.early_start[RES] - a.early_end[RES] >  a.early_start[ERR] + a.early_end[ERR]:
-                    raise RuntimeError(f"Activity {a.id} has abnormal early end time ({a.early_end[RES]} < {a.early_start[RES]}) ")
+                if a.early_start[EXP] < 0.0:
+                    a.early_start[EXP] = 0.0
 
-                if a.early_end[RES] < a.early_start[RES]:
-                    a.early_end[RES] = a.early_start[RES]
+                if a.early_start[UPR] < 0.0:
+                    a.early_start[UPR] = 0.0
 
-            elif 'late' == target:
-                if a.early_start[RES] - a.late_start[RES] >  a.early_start[ERR] + a.late_start[ERR]:
-                    raise RuntimeError(f"Activity {a.id} has abnormal late start time ({a.late_start[RES]} < {a.early_start[RES]}) ")
+                if a.early_start[LWR] < 0.0:
+                    a.early_start[LWR] = 0.0
 
-                if a.late_start[RES] < a.early_start[RES]:
-                    a.late_start[RES] = a.early_start[RES]
+                if a.early_start[EXP] - a.early_end[EXP] >  a.early_start[ERR] + a.early_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected end time ({a.early_end[EXP]} < {a.early_start[EXP]})")
 
-                if a.late_start[RES] - a.late_end[RES] >  a.late_start[ERR] + a.late_end[ERR]:
-                    raise RuntimeError(f"Activity {a.id} has abnormal late end time ({a.late_end[RES]} < {a.late_start[RES]}) ")
+                if a.early_start[UPR] - a.early_end[UPR] >  a.early_start[ERR] + a.early_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} upper end time ({a.early_end[UPR]} < {a.early_start[UPR]})")
 
-                if a.late_end[RES] < a.late_start[RES]:
-                    a.late_end[RES] = a.late_start[RES]
+                if a.early_start[LWR] - a.early_end[LWR] >  a.early_start[ERR] + a.early_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} lower end time ({a.early_end[LWR]} < {a.early_start[LWR]})")
+
+                if a.early_end[EXP] < a.early_start[EXP]:
+                    a.early_end[EXP] = a.early_start[EXP]
+
+                if a.early_end[UPR] < a.early_start[UPR]:
+                    a.early_end[UPR] = a.early_start[UPR]
+
+                if a.early_end[LWR] < a.early_start[LWR]:
+                    a.early_end[LWR] = a.early_start[LWR]
+
+            elif target in ['late_pre', 'late']:
+                # Decouple activities from events
+                a.late_start = a.late_start.copy()
+                a.late_end   = a.late_end.copy()
+
+                if a.early_start[EXP] - a.late_start[EXP] >  a.early_start[ERR] + a.late_start[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected start time ({a.late_start[EXP]} < {a.early_start[EXP]})")
+
+                if a.early_start[UPR] - a.late_start[UPR] >  a.early_start[ERR] + a.late_start[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} upper start time ({a.late_start[UPR]} < {a.early_start[UPR]})")
+
+                if a.early_start[LWR] - a.late_start[LWR] >  a.early_start[ERR] + a.late_start[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} lower start time ({a.late_start[LWR]} < {a.early_start[LWR]})")
+
+                if a.late_start[EXP] < a.early_start[EXP]:
+                    a.late_start[EXP] = a.early_start[EXP]
+
+                if a.late_start[UPR] < a.early_start[UPR]:
+                    a.late_start[UPR] = a.early_start[UPR]
+
+                if a.late_start[LWR] < a.early_start[LWR]:
+                    a.late_start[LWR] = a.early_start[LWR]
+
+                if a.late_start[EXP] - a.late_end[EXP] >  a.late_start[ERR] + a.late_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expexted end time ({a.late_end[EXP]} < {a.late_start[EXP]})")
+
+                if a.late_start[UPR] - a.late_end[UPR] >  a.late_start[ERR] + a.late_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} upper end time ({a.late_end[UPR]} < {a.late_start[UPR]})")
+
+                if a.late_start[LWR] - a.late_end[LWR] >  a.late_start[ERR] + a.late_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} lower end time ({a.late_end[LWR]} < {a.late_start[LWR]})")
+
+                if a.late_end[EXP] < a.late_start[EXP]:
+                    a.late_end[EXP] = a.late_start[EXP]
+
+                if a.late_end[UPR] < a.late_start[UPR]:
+                    a.late_end[UPR] = a.late_start[UPR]
+
+                if a.late_end[LWR] < a.late_start[LWR]:
+                    a.late_end[LWR] = a.late_start[LWR]
 
             return
 
+        #======================================================================
+        def _sanitize_evt(e, target):
+
+            if 'early_pre' == target:
+                if e.early_pre[EXP] < 0.0:
+                    e.early_pre[EXP] = 0.0
+
+                if e.early_pre[UPR] < 0.0:
+                    e.early_pre[UPR] = 0.0
+
+                if e.early_pre[LWR] < 0.0:
+                    e.early_pre[LWR] = 0.0
+
+            elif 'late_pre' == target:
+                if e.early_pre[EXP] - e.late_pre[EXP] >  e.late_pre[ERR] + e.early_pre[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.late_pre[EXP]} < {e.early_pre[EXP]})")
+
+                if e.early_pre[UPR] - e.late_pre[UPR] >  e.late_pre[ERR] + e.early_pre[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal late upper preliminary time ({e.late_pre[UPR]} < {e.early_pre[UPR]})")
+
+                if e.early_pre[LWR] - e.late_pre[LWR] >  e.late_pre[ERR] + e.early_pre[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal late lower preliminary time ({e.late_pre[LWR]} < {e.early_pre[LWR]})")
+
+                if e.late_pre[EXP] < e.early_pre[EXP]:
+                    e.late_pre[EXP] = e.early_pre[EXP]
+
+                if e.late_pre[UPR] < e.early_pre[UPR]:
+                    e.late_pre[UPR] = e.early_pre[UPR]
+
+                if e.late_pre[LWR] < e.early_pre[LWR]:
+                    e.late_pre[LWR] = e.early_pre[LWR]
+
+            elif 'early' == target:
+                if e.early[EXP] < 0.0:
+                    e.early[EXP] = 0.0
+
+                if e.early[UPR] < 0.0:
+                    e.early[UPR] = 0.0
+
+                if e.early[LWR] < 0.0:
+                    e.early[LWR] = 0.0
+
+            elif 'late' == target:
+                if e.early[EXP] - e.late[EXP] >  e.late[ERR] + e.early[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal expected late time ({e.late[EXP]} < {e.early[EXP]})")
+
+                if e.early[UPR] - e.late[UPR] >  e.late[ERR] + e.early[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal upper late time ({e.late[UPR]} < {e.early[UPR]})")
+
+                if e.early[LWR] - e.late[LWR] >  e.late[ERR] + e.early[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal lower late time ({e.late[LWR]} < {e.early[LWR]})")
+
+                if e.late[EXP] < e.early[EXP]:
+                    e.late[EXP] = e.early[EXP]
+
+                if e.late[UPR] < e.early[UPR]:
+                    e.late[UPR] = e.early[UPR]
+
+                if e.late[LWR] < e.early[LWR]:
+                    e.late[LWR] = e.early[LWR]
+
+            return
+
+        #======================================================================
         if 'stage' == target:
-            act_base = None
-            act_new = None
-            act_next = 'dst'
-            fwd = '_out_activities'
-            rev = '_in_activities'
-            choice = max
-            delta = lambda a: 1
+            act_base      = None
+            act_new       = None
+            act_next      = 'dst'
+            fwd           = '_out_activities'
+            rev           = '_in_activities'
+            choice        = max
+            delta         = lambda a: 1
             process_delta = lambda d, a, b, t: d
 
         elif 'early_pre' == target:
-            act_base = 'early_start'
-            act_new = 'early_end'
-            act_next = 'dst'
-            fwd = '_out_activities'
-            rev = '_in_activities'
-            choice = _choice_early
-            delta = lambda a: a.expected
-            process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
+            act_base      = 'early_start'
+            act_new       = 'early_end'
+            act_next      = 'dst'
+            fwd           = '_out_activities'
+            rev           = '_in_activities'
+            choice        = _choice_early
+            delta         = _delta_early
+            process_delta = _duration_vec
 
         elif 'late_pre' == target:
-            act_base = 'late_end'
-            act_new = 'late_start'
-            act_next = 'src'
-            fwd = '_in_activities'
-            rev = '_out_activities'
-            choice = _choice_late
-            delta = _delta_late
-            process_delta = lambda d, a, b, t: _duration_vec(d, a, b, t)
+            act_base      = 'late_end'
+            act_new       = 'late_start'
+            act_next      = 'src'
+            fwd           = '_in_activities'
+            rev           = '_out_activities'
+            choice        = _choice_late
+            delta         = _delta_late
+            process_delta = _duration_vec
 
         elif 'early' == target:
-            act_base = 'early_start'
-            act_new = 'early_end'
-            act_next = 'dst'
-            fwd = '_out_activities'
-            rev = '_in_activities'
-            choice = _choice_early
-            delta = lambda a: a.expected
+            act_base      = 'early_start'
+            act_new       = 'early_end'
+            act_next      = 'dst'
+            fwd           = '_out_activities'
+            rev           = '_in_activities'
+            choice        = _choice_early
+            delta         = _delta_early
             process_delta = lambda d, a, b, t: a.duration
 
         elif 'late' == target:
-            act_base = 'late_end'
-            act_new = 'late_start'
-            act_next = 'src'
-            fwd = '_in_activities'
-            rev = '_out_activities'
-            choice = _choice_late
-            delta = _delta_late
-            process_delta = _duration_late
+            act_base      = 'late_end'
+            act_new       = 'late_start'
+            act_next      = 'src'
+            fwd           = '_in_activities'
+            rev           = '_out_activities'
+            choice        = _choice_late
+            delta         = _delta_late
+            process_delta = lambda d, a, b, t: _negative(a.duration)
 
-        elif 'optimistic' == target:
-            act_base = 'opt_start'
-            act_new = 'opt_end'
-            act_next = 'dst'
-            fwd = '_out_activities'
-            rev = '_in_activities'
-            choice = max
-            delta = lambda a: a.optimistic
-            process_delta = lambda d, a, b, t: self._duration(d, a, b, t)
-
-        elif 'pessimistic' == target:
-            act_base = 'pes_start'
-            act_new = 'pes_end'
-            act_next = 'dst'
-            fwd = '_out_activities'
-            rev = '_in_activities'
-            choice = max
-            delta = lambda a: a.pessimistic
-            process_delta = lambda d, a, b, t: self._duration(d, a, b, t)
         else:
             raise ValueError(f"Unknown 'target' value: {target}")
 
         # Initialize activity parameters and processing function
         if target != 'stage':
             for a in self._activities:
-                setattr(a, act_base, -1)
-                setattr(a, act_new, -1)
+                setattr(a, act_base, np.zeros((5,), dtype=float))
+                setattr(a, act_new,  np.zeros((5,), dtype=float))
 
         # Count dependencies for topological sorting
         n_dep = {e:len(getattr(e, rev)) for e in self._events}
@@ -1063,7 +1261,7 @@ class NetworkModel:
                     setattr(a, act_new, new_val)
 
                 if act_base or act_new:
-                    _check_and_fix_act(a, target)
+                    _sanitize_act(a, target)
 
                 next_evt = getattr(a, act_next)
 
@@ -1074,50 +1272,40 @@ class NetworkModel:
                 if 0 >= n_dep[next_evt]:
                     evt.append(next_evt)
 
-            _check_and_fix_evt(e, target)
+            _sanitize_evt(e, target)
 
             i += 1
             if i >= len(evt):
                 break
 
+    #==========================================================================
     def _add_event(self, i):
         self._events.append(Event(i, self))
 
-    def _add_activity(self, wbs_id, src_id, dst_id, expected, exp_var,
-                      optimistic, pessimistic, letter, data, is_dummy=False):
+    #==========================================================================
+    def _add_activity(self, wbs_id, letter, src_id, dst_id, expected, data, is_dummy=False):
         if not isinstance(wbs_id, int):
             raise TypeError(f"wbs_id must be int, got {type(wbs_id)}")
+
         if not isinstance(src_id, int):
             raise TypeError(f"src_id must be int, got {type(src_id)}")
+
         if not isinstance(dst_id, int):
             raise TypeError(f"dst_id must be int, got {type(dst_id)}")
-        if not isinstance(expected, (int, float)):
-            raise TypeError(f"expected must be a real number, got {type(expected)}")
-        expected = float(expected)
-        if expected < 0.0:
-            raise ValueError(f"expected must be non-negative, got {expected}")
-        if not isinstance(exp_var, (int, float)):
-            raise TypeError(f"exp_var must be a real number, got {type(exp_var)}")
-        exp_var = float(exp_var)
-        if exp_var < 0.0:
-            raise ValueError(f"exp_var must be non-negative, got {exp_var}")
-        if not isinstance(optimistic, (int, float)):
-            raise TypeError(f"optimistic must be a real number, got {type(optimistic)}")
-        optimistic = float(optimistic)
-        if not isinstance(pessimistic, (int, float)):
-            raise TypeError(f"pessimistic must be a real number, got {type(pessimistic)}")
-        pessimistic = float(pessimistic)
+
         if not isinstance(letter, str):
             raise TypeError(f"letter must be str, got {type(letter)}")
+
         if not isinstance(data, dict):
             raise TypeError(f"data must be dict, got {type(data)}")
 
-        act = Activity(self.next_act, wbs_id, letter, self,
+        act = ArrowActivity(self.next_act, wbs_id, letter, self,
                         self._events[src_id - 1], self._events[dst_id - 1],
-                        expected, exp_var, optimistic, pessimistic, data, is_dummy=is_dummy)
+                        expected, data, is_dummy=is_dummy)
         self._activities.append(act)
         self.next_act += 1
 
+    #==========================================================================
     def __repr__(self):
         _repr = 'Events:{\n'
         for e in self._events:
@@ -1131,6 +1319,7 @@ class NetworkModel:
 
         return _repr
 
+    #==========================================================================
     def to_dict(self):
         activities_data = [activity.to_dict() for activity in self._activities]
         events_data = [event.to_dict() for event in self._events]
@@ -1140,6 +1329,7 @@ class NetworkModel:
             'events': events_data
         }
 
+    #==========================================================================
     def to_dataframe(self):
         # Convert to dictionaries first
         model_dict = self.to_dict()
@@ -1156,6 +1346,7 @@ class NetworkModel:
 
         return activities_df, events_df
 
+    #==========================================================================
     def viz(self, output_path=None, group_by_stage=True, get_style=_default_style):
         if not callable(get_style):
             raise TypeError(f"Parameter get_style must be callable, got {type(get_style)}")
@@ -1164,13 +1355,15 @@ class NetworkModel:
         dot.graph_attr['rankdir'] = 'LR'
         dot.graph_attr['splines'] = 'polyline'
 
+        #======================================================================
         def _label_event(e):
             style = get_style(e)
             # Simple record label without HTML tags
             return '{{%d |{%.1f|%.1f}| %.2f}}' % (
-                e.id, e.early[RES], e.late[RES], e.reserve[RES]
+                e.id, e.early[EXP], e.late[EXP], e.reserve[EXP]
             ), style
 
+        #======================================================================
         # 1. Add event nodes (optionally grouped by stage)
         if group_by_stage:
             stages = {}
@@ -1204,9 +1397,9 @@ class NetworkModel:
 
             # Build label text for the label node
             if a.wbs_id:   # real activity
-                lbl = f"{a.letter}\\nt={a.duration[RES]:.1f}\\nr={a.reserve[RES]:.2f}"
+                lbl = f"{a.letter}\\nt={a.duration[EXP]:.1f}\\nr={a.reserve[EXP]:.2f}"
             else:          # dummy activity
-                lbl = f"{a.letter}\\nr={a.reserve[RES]:.2f}"
+                lbl = f"{a.letter}\\nr={a.reserve[EXP]:.2f}"
 
             # Unique identifier for the label node
             label_node_id = f"label_{a.id}"
@@ -1259,6 +1452,7 @@ class NetworkModel:
         return dot
 
 #==============================================================================
+# <<==== Вы находитесь здесь
 if __name__ == '__main__':
     import math
 
@@ -1337,8 +1531,8 @@ if __name__ == '__main__':
     for i, activity in enumerate(n_old._activities[:8]):  # Show first 8 activities
         if activity.wbs_id != 0:  # Skip dummy activities
             print(f"Activity {i + 1}: wbs_id={activity.wbs_id}, letter='{activity.letter}'")
-            print(f"  Expected effort: {activity.expected[RES]:.3f}, Variance: {activity.expected[VAR]:.3f}")
-            print(f"  Actual duration: {activity.duration[RES]:.3f}")
+            print(f"  Expected effort: {activity.expected[EXP]:.3f}, Variance: {activity.expected[VAR]:.3f}")
+            print(f"  Actual duration: {activity.duration[EXP]:.3f}")
             if activity.data:
                 print(f"  Data fields: {list(activity.data.keys())}")
 
@@ -1395,8 +1589,8 @@ if __name__ == '__main__':
     for activity in model_resource._activities:
         if activity.wbs_id != 0:
             print(f"Activity {activity.letter}: "
-                  f"Effort={activity.expected[RES]:.1f}h, "
-                  f"Duration={activity.duration[RES]:.1f} days, "
+                  f"Effort={activity.expected[EXP]:.1f}h, "
+                  f"Duration={activity.duration[EXP]:.1f} days, "
                   f"Team={activity.data.get('team_size', 1)} people, "
                   f"Productivity={activity.data.get('productivity', 1.0):.1f}")
 
