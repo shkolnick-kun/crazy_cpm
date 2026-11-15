@@ -25,7 +25,7 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
 
 ### Advanced Capabilities
  * **Network Optimization** — Automatic (sub)optimal dummy-activity generation.
- * **Statistical Analysis** — Propagation of mean and variance through the network.
+ * **Statistical Analysis** — Propagation of mean, variance and scenario bounds (optimistic / pessimistic) through the network.
  * **Probabilistic Estimates** — Quantile estimates and completion probabilities.
  * **Suitable for Small and Large Projects** — The modified PERT distribution gives correct estimates even for chains with few activities.
 
@@ -69,7 +69,7 @@ The package requires the following Python dependencies (installed automatically)
 ### Basic Usage
 
 ```python
-from crazy_cpm import NetworkModel
+from crazy_cpm import ActivityOnArrowModel
 
 # Define your Work Breakdown Structure (WBS)
 wbs = {
@@ -82,7 +82,7 @@ wbs = {
 links = [[1, 2], [2, 3]]
 
 # Create and analyze the network model
-model = NetworkModel(wbs, links=links)
+model = ActivityOnArrowModel(wbs, links=links)
 
 # Get results as DataFrames
 activities_df, events_df = model.to_dataframe()
@@ -93,9 +93,32 @@ print(events_df[['id', 'early', 'late', 'reserve']])
 model.viz('project_network.png')
 ```
 
+### Component Arrays
+
+Effort, time and reserve values are stored as 5-component numpy arrays
+`[EXP, VAR, LWR, UPR, ERR]`:
+
+ * `EXP` — expected (mean) value
+ * `VAR` — variance
+ * `LWR` — lower limit (optimistic scenario bound)
+ * `UPR` — upper limit (pessimistic scenario bound)
+ * `ERR` — error bound
+
+The component indices are exported as module-level constants
+(`EXP`, `VAR`, `LWR`, `UPR`, `ERR`), so indexing reads as
+`activity.early_start[EXP]`, `event.late[LWR]`, etc. `[0]`, `[1]`, ...
+also work but the named constants are clearer.
+
+In the PERT model, the `LWR` / `UPR` slots of `early_start`, `early_end`
+and `duration` hold the optimistic and pessimistic scenario times
+respectively, so the whole distribution travels through the network as a
+single array (no separate scenario passes).
+
 ### Advanced PERT Analysis
 
 ```python
+from crazy_cpm import ActivityOnArrowModel, EXP, LWR, UPR
+
 # Mixed effort input formats
 wbs_advanced = {
     1: {'letter': 'A', 'optimistic': 3.0, 'most_likely': 5.0, 'pessimistic': 8.0},
@@ -106,7 +129,7 @@ wbs_advanced = {
 links = [[1, 2], [2, 3]]
 
 # Create model with custom probability level (95%)
-model_pert = NetworkModel(wbs_advanced, links=links, p=0.95)
+model_pert = ActivityOnArrowModel(wbs_advanced, links=links, p=0.95)
 
 # Access probabilistic estimates on activities and events
 for activity in model_pert.activities:
@@ -114,8 +137,10 @@ for activity in model_pert.activities:
         continue  # skip dummy activities
     print(
         f"{activity.letter}: "
-        f"expected={activity.expected[0]:.2f}, "
-        f"duration={activity.duration[0]:.2f}, "
+        f"expected={activity.expected[EXP]:.2f}, "
+        f"duration={activity.duration[EXP]:.2f}, "
+        f"optimistic_start={activity.early_start[LWR]:.2f}, "
+        f"pessimistic_start={activity.early_start[UPR]:.2f}, "
         f"early_start_pqe={activity.early_start_pqe:.2f}, "
         f"early_end_pqe={activity.early_end_pqe:.2f}"
     )
@@ -123,10 +148,10 @@ for activity in model_pert.activities:
 for event in model_pert.events:
     print(
         f"Event {event.id}: "
-        f"early={event.early[0]:.2f}, "
-        f"late={event.late[0]:.2f}, "
+        f"early={event.early[EXP]:.2f}, "
+        f"late={event.late[EXP]:.2f}, "
         f"early_pqe={event.early_pqe:.2f}, "
-        f"late_prob={event.early_prob(event.late[0]):.3f}"
+        f"late_prob={event.early_prob(event.late[EXP]):.3f}"
     )
 ```
 
@@ -136,7 +161,7 @@ The `duration` callback lets you model resource allocation, productivity, and
 time-dependent availability:
 
 ```python
-from crazy_cpm import NetworkModel
+from crazy_cpm import ActivityOnArrowModel, EXP
 
 
 def resource_duration(effort, activity, base_time, target):
@@ -147,12 +172,13 @@ def resource_duration(effort, activity, base_time, target):
     ----------
     effort : float
         Resource effort. Positive for forward pass, negative for backward pass.
-    activity : Activity
+    activity : ArrowActivity
         Activity for context-aware calculations.
     base_time : float or None
         Base time during network traversal, or None for post-processing.
     target : str or None
-        Scenario identifier ('early', 'late', 'optimistic', 'pessimistic', or None).
+        Scenario identifier. One of ``'early_pre'``, ``'late_pre'``,
+        ``'early'``, ``'late'``, or ``None`` (for network post-processing).
 
     Returns
     -------
@@ -179,7 +205,7 @@ wbs_resource = {
 }
 links_resource = [[1, 2], [2, 3]]
 
-model_resource = NetworkModel(
+model_resource = ActivityOnArrowModel(
     wbs_resource, links=links_resource, duration=resource_duration
 )
 
@@ -188,8 +214,8 @@ for activity in model_resource.activities:
         continue
     print(
         f"{activity.letter}: "
-        f"effort={activity.expected[0]:.1f}h, "
-        f"duration={activity.duration[0]:.2f}, "
+        f"effort={activity.expected[EXP]:.1f}h, "
+        f"duration={activity.duration[EXP]:.2f}, "
         f"team={activity.data.get('team_size', 1)}"
     )
 ```
@@ -199,6 +225,20 @@ for activity in model_resource.activities:
  * Forward pass (early times): `effort >= 0` → `duration >= 0`
  * Backward pass (late times): `effort <= 0` → `duration <= 0`
  * Zero effort → zero duration
+
+**Callback invocation contract:**
+
+ * During the **preliminary** (`_pre`) passes the callback is invoked
+   **three times per activity** — for the `EXP`, `UPR`, and `LWR`
+   components of the effort estimate, all with the **same** `base_time`
+   (the `EXP` component of the event's base time). This is what
+   guarantees the ordering `dur[LWR] <= dur[EXP] <= dur[UPR]`.
+ * During the **final** passes the callback is **not** invoked: the
+   frozen duration computed by `ArrowActivity.compute_final_duration()`
+   is used instead. This is what keeps `late >= early` consistent when
+   the callback depends on `base_time`.
+ * During network post-processing (dummy-activity triangle optimization)
+   the callback is called with `base_time=None, target=None`.
 
 ## Input Formats
 
@@ -274,7 +314,7 @@ links = {
 Legacy format (two separate arguments):
 
 ```python
-model = NetworkModel(wbs, lnk_src=[1, 2, 3], lnk_dst=[2, 3, 4])
+model = ActivityOnArrowModel(wbs, lnk_src=[1, 2, 3], lnk_dst=[2, 3, 4])
 ```
 
 Do not pass `links` together with `lnk_src`/`lnk_dst` — the library will
@@ -282,11 +322,11 @@ raise `ValueError`.
 
 ## API Reference
 
-### NetworkModel Class
+### ActivityOnArrowModel Class
 
 The main class for network analysis:
 ```python
-model = NetworkModel(
+model = ActivityOnArrowModel(
     wbs_dict,                    # Required: Work Breakdown Structure dictionary
     lnk_src=None,                # Legacy: source activity IDs
     lnk_dst=None,                # Legacy: destination activity IDs
@@ -301,7 +341,7 @@ model = NetworkModel(
 
 **Attributes:**
 
- * `model.activities` — list of `Activity` objects
+ * `model.activities` — list of `ArrowActivity` objects
  * `model.events` — list of `Event` objects
  * `model.is_pert` — `True` if any activity has non-zero variance
  * `model.p` — probability level used for quantile estimates
@@ -311,11 +351,12 @@ model = NetworkModel(
 
  * `to_dataframe()` — Export results to pandas DataFrames
  * `to_dict()` — Export results to dictionary format
- * `viz(output_path=None, group_by_stage=False, get_style=_default_style)` — Generate network visualization
+ * `viz(output_path=None, group_by_stage=True, get_style=_default_style)` — Generate network visualization
 
 The `output_path` extension determines the rendering format
 (`.png`, `.svg`, or `.pdf`); if omitted, PNG is used.
-`group_by_stage=True` aligns events with the same topological stage.
+`group_by_stage=True` (the default) aligns events with the same
+topological stage.
 
 
 ### Output Examples
@@ -332,7 +373,9 @@ Columns depend on the input, but always include:
 For PERT models, additional columns appear: `exp_var`, `variance`,
 `optimistic`, `opt_start`, `opt_end`, `pessimistic`, `pes_start`,
 `pes_end`, `early_start_var`, `early_end_var`, `early_start_pqe`,
-`early_end_pqe`, `late_end_prob`.
+`early_end_pqe`, `late_end_prob`. The `optimistic` / `pessimistic` and
+`opt_*` / `pes_*` fields are taken from the `LWR` / `UPR` components of
+the underlying arrays.
 
 Custom fields from WBS (e.g. `name`) are expanded into separate columns.
 
@@ -345,7 +388,8 @@ Custom fields from WBS (e.g. `name`) are expanded into separate columns.
 | 3  | 2     | 8.0   | 8.0  | 0.0     |
 
 For PERT models, `optimistic`, `pessimistic`, `early_var`, `early_pqe`,
-`late_prob` are added.
+`late_prob` are added (`optimistic` / `pessimistic` come from
+`early[LWR]` / `early[UPR]`).
 
 ### Visualization
 
@@ -359,8 +403,8 @@ model.viz('project_network.pdf')  # PDF
 # If no extension is given, PNG is used
 model.viz('project_network')      # → project_network.png
 
-# group_by_stage=True aligns events with the same topological stage
-model.viz('project_network.png', group_by_stage=True)
+# group_by_stage=False places events freely (default: True)
+model.viz('project_network.png', group_by_stage=False)
 ```
 
 ![](doc/cpm_network.png)
@@ -378,7 +422,7 @@ Custom styling is possible via the `get_style` callback:
 
 ```python
 def my_style(element):
-    # element is Event or Activity
+    # element is Event or ArrowActivity
     return {
         'color': '#0000ff',
         'penwidth': '2',
