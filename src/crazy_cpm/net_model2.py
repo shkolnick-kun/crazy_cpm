@@ -909,24 +909,16 @@ class NetworkModel:
             e.reserve[_VALS] = e.late[_VALS] - e.early[_VALS]
             e.reserve[_OTHR] = e.late[_OTHR] + e.early[_OTHR]
 
+            # Check for programming errors
+            # Inariant holds only for expected values
             if e.reserve[EXP] < -e.reserve[ERR]:
                 raise RuntimeError(f"Event {e.id} has negative expected time reserve ({e.reserve[EXP]})")
 
-            if e.reserve[UPR] < -e.reserve[ERR]:
-                raise RuntimeError(f"Event {e.id} has negative upper time reserve ({e.reserve[UPR]})")
-
-            if e.reserve[LWR] < -e.reserve[ERR]:
-                raise RuntimeError(f"Event {e.id} has negative lower time reserve ({e.reserve[LWR]})")
-
             # Round off insignificant values
             if e.reserve[EXP] < e.reserve[ERR]:
+                e.reserve[UPR] -= e.reserve[EXP]
+                e.reserve[LWR] -= e.reserve[EXP]
                 e.reserve[EXP] = 0.0
-
-            if e.reserve[UPR] < e.reserve[ERR]:
-                e.reserve[UPR] = 0.0
-
-            if e.reserve[LWR] < e.reserve[ERR]:
-                e.reserve[LWR] = 0.0
 
         for a in self._activities:
             # Compute start and end reserve values separately
@@ -943,24 +935,15 @@ class NetworkModel:
             a.reserve = _choice(start_res, end_res, start_res[EXP] - end_res[EXP])
 
             # Check for programming errors
+            # Inariant holds only for expected values
             if a.reserve[EXP] < -a.reserve[ERR]:
                 raise RuntimeError(f"Activity {a.letter} has negative expected time reserve ({a.reserve[EXP]})")
 
-            if a.reserve[UPR] < -a.reserve[ERR]:
-                raise RuntimeError(f"Activity {a.letter} has negative upper time reserve ({a.reserve[UPR]})")
-
-            if a.reserve[LWR] < -a.reserve[ERR]:
-                raise RuntimeError(f"Activity {a.letter} has negative lower time reserve ({a.reserve[LWR]})")
-
             # Round off insignificant values
             if a.reserve[EXP] < a.reserve[ERR]:
+                a.reserve[UPR] -= a.reserve[EXP]
+                a.reserve[LWR] -= a.reserve[EXP]
                 a.reserve[EXP] = 0.0
-
-            if a.reserve[UPR] < a.reserve[ERR]:
-                a.reserve[UPR] = 0.0
-
-            if a.reserve[LWR] < a.reserve[ERR]:
-                a.reserve[LWR] = 0.0
 
     #==========================================================================
     def _compute_target(self, target=None):
@@ -983,9 +966,10 @@ class NetworkModel:
 
         #======================================================================
         def _duration_vec(effort, activity, base_time, target):
+
             # Optimize for default duration function
             if _default_duration == self._duration:
-                return effort
+                return effort.copy()
 
             dur = np.zeros((5,), dtype=float)
 
@@ -1040,13 +1024,9 @@ class NetworkModel:
                 a.early_start = a.early_start.copy()
                 a.early_end   = a.early_end.copy()
 
-                if a.early_start[EXP] < 0.0:
-                    a.early_start[EXP] = 0.0
-
-                if a.early_start[UPR] < 0.0:
-                    a.early_start[UPR] = 0.0
-
                 if a.early_start[LWR] < 0.0:
+                    a.early_start[EXP] -= a.early_start[LWR]
+                    a.early_start[UPR] -= a.early_start[LWR]
                     a.early_start[LWR] = 0.0
 
                 if a.early_start[EXP] - a.early_end[EXP] >  a.early_start[ERR] + a.early_end[ERR]:
@@ -1059,54 +1039,35 @@ class NetworkModel:
                     raise RuntimeError(f"Activity {a.letter} has abnormal {target} lower end time ({a.early_end[LWR]} < {a.early_start[LWR]})")
 
                 if a.early_end[EXP] < a.early_start[EXP]:
-                    a.early_end[EXP] = a.early_start[EXP]
-
-                if a.early_end[UPR] < a.early_start[UPR]:
-                    a.early_end[UPR] = a.early_start[UPR]
-
-                if a.early_end[LWR] < a.early_start[LWR]:
-                    a.early_end[LWR] = a.early_start[LWR]
+                    delta = a.early_start[EXP] - a.early_end[EXP]
+                    a.early_end[EXP] += delta
+                    a.early_end[UPR] += delta
+                    a.early_end[LWR] += delta
 
             elif target in ['late_pre', 'late']:
                 # Decouple activities from events
                 a.late_start = a.late_start.copy()
                 a.late_end   = a.late_end.copy()
 
+                # Inariant is preserved only for expected value
                 if a.early_start[EXP] - a.late_start[EXP] >  a.early_start[ERR] + a.late_start[ERR]:
                     raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected start time ({a.late_start[EXP]} < {a.early_start[EXP]})")
 
-                if a.early_start[UPR] - a.late_start[UPR] >  a.early_start[ERR] + a.late_start[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} upper start time ({a.late_start[UPR]} < {a.early_start[UPR]})")
-
-                if a.early_start[LWR] - a.late_start[LWR] >  a.early_start[ERR] + a.late_start[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} lower start time ({a.late_start[LWR]} < {a.early_start[LWR]})")
-
                 if a.late_start[EXP] < a.early_start[EXP]:
-                    a.late_start[EXP] = a.early_start[EXP]
+                    delta = a.early_start[EXP] - a.late_start[EXP]
+                    a.late_start[EXP] += delta
+                    a.late_start[UPR] += delta
+                    a.late_start[LWR] += delta
 
-                if a.late_start[UPR] < a.early_start[UPR]:
-                    a.late_start[UPR] = a.early_start[UPR]
-
-                if a.late_start[LWR] < a.early_start[LWR]:
-                    a.late_start[LWR] = a.early_start[LWR]
-
+                # Inariant is preserved only for expected value
                 if a.late_start[EXP] - a.late_end[EXP] >  a.late_start[ERR] + a.late_end[ERR]:
                     raise RuntimeError(f"Activity {a.letter} has abnormal {target} expexted end time ({a.late_end[EXP]} < {a.late_start[EXP]})")
 
-                if a.late_start[UPR] - a.late_end[UPR] >  a.late_start[ERR] + a.late_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} upper end time ({a.late_end[UPR]} < {a.late_start[UPR]})")
-
-                if a.late_start[LWR] - a.late_end[LWR] >  a.late_start[ERR] + a.late_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} lower end time ({a.late_end[LWR]} < {a.late_start[LWR]})")
-
                 if a.late_end[EXP] < a.late_start[EXP]:
-                    a.late_end[EXP] = a.late_start[EXP]
-
-                if a.late_end[UPR] < a.late_start[UPR]:
-                    a.late_end[UPR] = a.late_start[UPR]
-
-                if a.late_end[LWR] < a.late_start[LWR]:
-                    a.late_end[LWR] = a.late_start[LWR]
+                    delta = a.late_start[EXP] - a.late_end[EXP]
+                    a.late_end[EXP] += delta
+                    a.late_end[UPR] += delta
+                    a.late_end[LWR] += delta
 
             return
 
@@ -1114,62 +1075,38 @@ class NetworkModel:
         def _sanitize_evt(e, target):
 
             if 'early_pre' == target:
-                if e.early_pre[EXP] < 0.0:
-                    e.early_pre[EXP] = 0.0
-
-                if e.early_pre[UPR] < 0.0:
-                    e.early_pre[UPR] = 0.0
-
                 if e.early_pre[LWR] < 0.0:
+                    e.early_pre[EXP] -= e.early_pre[LWR]
+                    e.early_pre[UPR] -= e.early_pre[LWR]
                     e.early_pre[LWR] = 0.0
 
             elif 'late_pre' == target:
+                # Inariant is preserved only for expected value
                 if e.early_pre[EXP] - e.late_pre[EXP] >  e.late_pre[ERR] + e.early_pre[ERR]:
                     raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.late_pre[EXP]} < {e.early_pre[EXP]})")
 
-                if e.early_pre[UPR] - e.late_pre[UPR] >  e.late_pre[ERR] + e.early_pre[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal late upper preliminary time ({e.late_pre[UPR]} < {e.early_pre[UPR]})")
-
-                if e.early_pre[LWR] - e.late_pre[LWR] >  e.late_pre[ERR] + e.early_pre[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal late lower preliminary time ({e.late_pre[LWR]} < {e.early_pre[LWR]})")
-
                 if e.late_pre[EXP] < e.early_pre[EXP]:
-                    e.late_pre[EXP] = e.early_pre[EXP]
-
-                if e.late_pre[UPR] < e.early_pre[UPR]:
-                    e.late_pre[UPR] = e.early_pre[UPR]
-
-                if e.late_pre[LWR] < e.early_pre[LWR]:
-                    e.late_pre[LWR] = e.early_pre[LWR]
+                    delta = e.early_pre[EXP] - e.late_pre[EXP]
+                    e.late_pre[EXP] += delta
+                    e.late_pre[UPR] += delta
+                    e.late_pre[LWR] += delta
 
             elif 'early' == target:
-                if e.early[EXP] < 0.0:
-                    e.early[EXP] = 0.0
-
-                if e.early[UPR] < 0.0:
-                    e.early[UPR] = 0.0
-
                 if e.early[LWR] < 0.0:
+                    e.early[EXP] -= e.early[LWR]
+                    e.early[UPR] -= e.early[LWR]
                     e.early[LWR] = 0.0
 
             elif 'late' == target:
+                # Inariant is preserved only for expected value
                 if e.early[EXP] - e.late[EXP] >  e.late[ERR] + e.early[ERR]:
                     raise RuntimeError(f"Event {e.id} has abnormal expected late time ({e.late[EXP]} < {e.early[EXP]})")
 
-                if e.early[UPR] - e.late[UPR] >  e.late[ERR] + e.early[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal upper late time ({e.late[UPR]} < {e.early[UPR]})")
-
-                if e.early[LWR] - e.late[LWR] >  e.late[ERR] + e.early[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal lower late time ({e.late[LWR]} < {e.early[LWR]})")
-
                 if e.late[EXP] < e.early[EXP]:
-                    e.late[EXP] = e.early[EXP]
-
-                if e.late[UPR] < e.early[UPR]:
-                    e.late[UPR] = e.early[UPR]
-
-                if e.late[LWR] < e.early[LWR]:
-                    e.late[LWR] = e.early[LWR]
+                    delta = e.early[EXP] - e.late[EXP]
+                    e.late[EXP] += delta
+                    e.late[UPR] += delta
+                    e.late[LWR] += delta
 
             return
 
@@ -1452,7 +1389,6 @@ class NetworkModel:
         return dot
 
 #==============================================================================
-# <<==== Вы находитесь здесь
 if __name__ == '__main__':
     import math
 
