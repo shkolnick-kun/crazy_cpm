@@ -2994,7 +2994,7 @@ class NetworkModel:
             _repr += '        ' + str(e) + '\n'
         _repr += '}\n'
 
-        _repr += 'Activities:\n'
+        _repr += 'Activities:{\n'
         for a in self._activities:
             _repr += '        ' + str(a) + '\n'
         _repr += '}\n'
