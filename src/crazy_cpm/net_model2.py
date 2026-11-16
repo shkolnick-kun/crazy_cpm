@@ -1597,7 +1597,9 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     ret[UPR] = b
     ret[ERR] = EPS * max(abs(a), abs(b), abs(b - a))
 
-    if np.sqrt(ret[VAR]) <= ret[ERR]:
+    gamma_nom = (mean - a) * (b - mean)
+
+    if np.sqrt(ret[VAR]) <= ret[ERR] or ret[VAR] <= np.sqrt(EPS) * gamma_nom:
         # Deterministic activity
         ret[LWR] = ret[EXP]
         ret[UPR] = ret[EXP]
@@ -1605,8 +1607,8 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
         return ret
 
     # Make sure that mode is in (a,b)
-    # Use MPERT math for corections
-    gamma = (mean - a) * (b - mean) / variance - 3.0
+    # Use MPERT math for corrections
+    gamma = gamma_nom / variance - 3.0
 
     # Gamma must be > 0, so:
     # the first part of gamma must be at least 3.0 * (1 + 2.0 * EPS)
@@ -2092,7 +2094,7 @@ class ActivityOnArrowModel:
         and activities, and sets up the model for analysis. It delegates
         the AoA network generation to the C extension
         ``_ccpm.make_aoa``, then performs a post-processing step to place
-        maximum-effort activities on the long side of triangle groups.
+        maximum-duration activities on the long side of triangle groups.
 
         Parameters
         ----------
@@ -2349,7 +2351,7 @@ class ActivityOnArrowModel:
             e.reserve[_OTHR] = e.late[_OTHR] + e.early[_OTHR]
 
             # Check for programming errors
-            # Inariant holds only for expected values
+            # Invariant holds only for expected values
             if e.reserve[EXP] < -e.reserve[ERR]:
                 raise RuntimeError(f"Event {e.id} has negative expected time reserve ({e.reserve[EXP]})")
 
@@ -2374,7 +2376,7 @@ class ActivityOnArrowModel:
             a.reserve = _choice(start_res, end_res, start_res[EXP] - end_res[EXP])
 
             # Check for programming errors
-            # Inariant holds only for expected values
+            # Invariant holds only for expected values
             if a.reserve[EXP] < -a.reserve[ERR]:
                 raise RuntimeError(f"Activity {a.letter} has negative expected time reserve ({a.reserve[EXP]})")
 
@@ -2535,7 +2537,7 @@ class ActivityOnArrowModel:
               set to ``EPS * max(|dur[UPR]|, |dur[LWR]|,
               |dur[UPR] - dur[LWR]|)``.
             - For PERT models with non-zero effort variance (and
-              ``sqrt(effort[VAR]) >= dur[ERR]``), an MPERT-style mode
+              ``sqrt(effort[VAR]) >= effort[ERR]``), an MPERT-style mode
               correction is applied: if ``dur[EXP]`` is too close to
               ``dur[LWR]`` it is pushed inside by ``2 * dur[ERR]``; if
               it is too close to ``dur[UPR]``, ``dur[UPR]`` is grown
@@ -2562,34 +2564,35 @@ class ActivityOnArrowModel:
             # Error bound
             dur[ERR] = EPS * max(abs(dur[UPR]),  abs(dur[LWR]),  abs(dur[UPR] - dur[LWR]))
 
-            if np.sqrt(effort[VAR]) < dur[ERR] or not self.is_pert:
+            gamma_nom = (effort[EXP] - effort[LWR]) * (effort[UPR] - effort[EXP])
+
+            if (np.sqrt(effort[VAR]) <= effort[ERR] or
+                effort[VAR] <= np.sqrt(EPS) * gamma_nom or
+                not self.is_pert):
                 # Deterministic or fake activity
                 # VAR is zero already
                 dur[UPR] = dur[EXP]
                 dur[LWR] = dur[EXP]
                 return dur
 
-            # Compute shape parameter for modified PERT distribution
-            alpha, beta = _fit_beta(effort)
+            # Model is PERT and activity is not deterministic.
+            # Make sure that mode is in (dur[LWR], dur[UPR]),
+            # use MPERT math here
+            gamma = gamma_nom / effort[VAR] - 3.0
 
-            if not alpha:
-                # Deterministic activity
-                dur[UPR] = dur[EXP]
-                dur[LWR] = dur[EXP]
-                return dur
+            # Condition for mode
+            if gamma < 6.0 * EPS:
+                gamma = 6.0 * EPS
 
-            # Model is PERT and activity is not deterministic,
-            # Make sure taht mode is in (dur[LWR], dur[UPR])
-            thr = dur[LWR] + (dur[UPR] - dur[LWR]) / (alpha + beta)
+            # Now values corrections
+            thr = dur[LWR] + (dur[UPR] - dur[LWR]) / (gamma + 2.0)
             if dur[EXP] <= thr:
                 dur[EXP] = thr + 2.0 * dur[ERR]
 
-            if dur[EXP] >= dur[UPR] - (dur[UPR] - dur[LWR]) / (alpha + beta):
-                dur[UPR] = (dur[EXP] * (alpha + beta) - dur[LWR]) / (alpha + beta - 1.0) + 2.0 * dur[ERR]
+            if dur[EXP] >= dur[UPR] - (dur[UPR] - dur[LWR]) / (gamma + 2.0):
+                dur[UPR] = ((gamma + 2.0) * dur[EXP] - dur[LWR]) / (gamma + 1.0) + 2.0 * dur[ERR]
 
-            # Use beta-distribution formula for variance calculation:
-            var_beta = alpha * beta / (alpha + beta + 1.0) / ((alpha + beta) ** 2)
-            dur[VAR] = var_beta * ((dur[UPR] - dur[LWR]) ** 2)
+            dur[VAR] = (dur[EXP] - dur[LWR]) * (dur[UPR] - dur[EXP]) / (gamma + 3.0)
 
             return dur
 
@@ -2665,7 +2668,7 @@ class ActivityOnArrowModel:
                 a.late_start = a.late_start.copy()
                 a.late_end   = a.late_end.copy()
 
-                # Inariant is preserved only for expected value
+                # Invariant is preserved only for expected value
                 if a.early_start[EXP] - a.late_start[EXP] >  a.early_start[ERR] + a.late_start[ERR]:
                     raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected start time ({a.late_start[EXP]} < {a.early_start[EXP]})")
 
@@ -2675,9 +2678,9 @@ class ActivityOnArrowModel:
                     a.late_start[UPR] += delta
                     a.late_start[LWR] += delta
 
-                # Inariant is preserved only for expected value
+                # Invariant is preserved only for expected value
                 if a.late_start[EXP] - a.late_end[EXP] >  a.late_start[ERR] + a.late_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expexted end time ({a.late_end[EXP]} < {a.late_start[EXP]})")
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected end time ({a.late_end[EXP]} < {a.late_start[EXP]})")
 
                 if a.late_end[EXP] < a.late_start[EXP]:
                     delta = a.late_start[EXP] - a.late_end[EXP]
@@ -2725,7 +2728,7 @@ class ActivityOnArrowModel:
                     e.early_pre[LWR] = 0.0
 
             elif 'late_pre' == target:
-                # Inariant is preserved only for expected value
+                # Invariant is preserved only for expected value
                 if e.early_pre[EXP] - e.late_pre[EXP] >  e.late_pre[ERR] + e.early_pre[ERR]:
                     raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.late_pre[EXP]} < {e.early_pre[EXP]})")
 
@@ -2742,7 +2745,7 @@ class ActivityOnArrowModel:
                     e.early[LWR] = 0.0
 
             elif 'late' == target:
-                # Inariant is preserved only for expected value
+                # Invariant is preserved only for expected value
                 if e.early[EXP] - e.late[EXP] >  e.late[ERR] + e.early[ERR]:
                     raise RuntimeError(f"Event {e.id} has abnormal expected late time ({e.late[EXP]} < {e.early[EXP]})")
 
@@ -3076,8 +3079,8 @@ class ActivityOnArrowModel:
         - Dashed arrows: dummy activities
 
         Activity labels are embedded directly on edges through an
-        invisible intermediate node; the label itself is drawn as a
-        light-gray rounded box attached to the bend point of the edge.
+        intermediate label node; the label itself is drawn as a
+        light-gray rounded box on the edge.
         The label font size is fixed at 12 for all activity labels.
 
         The activity duration shown in the label is the
