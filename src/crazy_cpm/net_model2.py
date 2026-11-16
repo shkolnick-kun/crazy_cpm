@@ -219,109 +219,13 @@ def _unpack_components(components):
     return components[EXP], components[VAR], components[LWR], components[UPR], components[ERR]
 
 #==============================================================================
-def _fit_beta(components):
-    """
-    Internal beta-fit routine on a component vector.
-
-    Fits the two shape parameters ``(alpha, beta)`` of a beta distribution
-    supported on ``[LWR, UPR]`` so that its mean equals ``EXP`` and its
-    variance equals ``VAR``. Used by :func:`_calc_ppf` and
-    :func:`_calc_cdf` on top of the public :func:`fit_beta` wrapper.
-
-    Parameters
-    ----------
-    components : array-like
-        Array of shape ``(5,)`` with the layout
-        ``[EXP, VAR, LWR, UPR, ERR]``.
-
-    Returns
-    -------
-    tuple
-        ``(alpha, beta)`` — shape parameters, or ``(None, None)`` if the
-        distribution is considered deterministic (i.e., ``UPR - LWR``
-        is too small, or ``sqrt(VAR)`` is below the computation error
-        threshold, or the resulting shape parameters are non-positive).
-
-    Raises
-    ------
-    ValueError
-        If ``LWR > UPR``, if ``EXP`` is outside ``[LWR, UPR]``, or if
-        ``ERR < 0``.
-
-    Notes
-    -----
-    The function uses the method of moments for the beta distribution.
-    If the resulting ratio ``mu * (1 - mu) / var`` is less than or equal
-    to 1 (which would correspond to a degenerate distribution), the
-    ratio is clamped to ``1 + 2 * EPS`` to ensure positive shape
-    parameters. If the resulting shape parameters are still non-positive
-    (numerically degenerate), ``(None, None)`` is returned, treating the
-    activity as deterministic.
-
-    .. warning::
-        The method-of-moments fit assumes that the underlying duration
-        distribution is smooth and unimodal. When the ``duration``
-        callback is discontinuous (e.g., an activity can jump across a
-        resource availability window boundary), the resulting variance
-        is systematically underestimated. This is acceptable for the
-        fast-estimator use case but should be kept in mind when
-        interpreting PERT quantiles near calendar boundaries.
-    """
-    M, D, a, b, err = _unpack_components(components)
-
-    if a > b:
-        raise ValueError(
-            f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})"
-        )
-
-    if not (a <= M <= b):
-        raise ValueError(
-            f"Mean ({M}) must be between optimistic ({a}) "
-            f"and pessimistic ({b})"
-        )
-
-    if err < 0.0:
-        raise ValueError(f"Invalid error ({err}) must be >= 0.0")
-
-    ul = max(abs(a), abs(b), abs(b - a))
-
-    if b - a <= 2 * EPS * ul:
-        # Deterministic chain: use M without computing g
-        return None, None
-
-    if err < 2 * EPS * ul:
-        _thr = 2 * EPS * ul
-    else:
-        _thr = err
-
-    if np.sqrt(D) < _thr:
-        # Deterministic chain, D is within computation error
-        return None, None
-
-    mu = (M - a) / (b - a)
-    var = D / (b - a) ** 2
-
-    ratio = mu * (1 - mu) / var
-
-    if ratio <= 1:
-        ratio = 1 + 2 * EPS
-
-    alpha = mu * (ratio - 1)
-    beta = (1 - mu) * (ratio - 1)
-
-    if alpha <= 0.0 or beta <= 0.0:
-        return None, None
-
-    return alpha, beta
-
-#==============================================================================
 def fit_beta(M, D, a, b, err):
     """
     Public scalar-interface beta-distribution fitting.
 
     Fits the shape parameters ``(alpha, beta)`` of a beta distribution on
     ``[a, b]`` so that its mean equals ``M`` and its variance equals
-    ``D``. This is the scalar wrapper around :func:`_fit_beta`.
+    ``D``.
 
     Parameters
     ----------
@@ -346,40 +250,89 @@ def fit_beta(M, D, a, b, err):
     ------
     ValueError
         If ``a > b``, if ``M`` is outside ``[a, b]``, or if ``err < 0``.
+
+    Notes
+    -----
+    The function uses the method of moments for the beta distribution.
+    If the resulting ratio ``mu * (1 - mu) / var`` is less than or equal
+    to 1 (which would correspond to a degenerate distribution), the
+    ratio is clamped to ``1 + 2 * EPS`` to ensure positive shape
+    parameters. If the resulting shape parameters are still non-positive
+    (numerically degenerate), ``(None, None)`` is returned, treating the
+    activity as deterministic.
+
+    .. warning::
+        The method-of-moments fit assumes that the underlying duration
+        distribution is smooth and unimodal. When the ``duration``
+        callback is discontinuous (e.g., an activity can jump across a
+        resource availability window boundary), the resulting variance
+        is systematically underestimated. This is acceptable for the
+        fast-estimator use case but should be kept in mind when
+        interpreting PERT quantiles near calendar boundaries.
     """
-    components = np.array([M, D, a, b, err], dtype=float)
-    return _fit_beta(components)
+    if a > b:
+        raise ValueError(
+            f"Invalid bounds: optimistic ({a}) must be <= pessimistic ({b})"
+        )
+
+    if not (a <= M <= b):
+        raise ValueError(
+            f"Mean ({M}) must be between optimistic ({a}) "
+            f"and pessimistic ({b})"
+        )
+
+    if err < 0.0:
+        raise ValueError(f"Invalid error ({err}) must be >= 0.0")
+
+    ul = max(abs(a), abs(b), abs(b - a))
+    span = b - a
+
+    if span <= 2 * EPS * ul:
+        # Deterministic chain: use M without computing g
+        return None, None
+
+    # Effective error threshold: user-supplied bound or machine degeneracy
+    thr = max(err, 2 * EPS * ul)
+
+    if np.sqrt(D) < thr:
+        # Deterministic chain, D is within computation error
+        return None, None
+
+    mu = (M - a) / span
+    var = D / span ** 2
+    ratio = max(mu * (1 - mu) / var, 1 + 2 * EPS)
+
+    alpha = mu * (ratio - 1)
+    beta = (1 - mu) * (ratio - 1)
+
+    if alpha <= 0.0 or beta <= 0.0:
+        return None, None
+
+    return alpha, beta
 
 #==============================================================================
-def _calc_ppf(p, components):
+def _fit_beta(components):
     """
-    Internal PPF (percent-point function / quantile) on a component vector.
+    Array-interface wrapper around :func:`fit_beta`.
+
+    Accepts the component vector ``[EXP, VAR, LWR, UPR, ERR]``, unpacks
+    it, and forwards the scalar arguments to :func:`fit_beta`.
 
     Parameters
     ----------
-    p : float
-        Probability level (``0 < p < 1``)
     components : array-like
-        Component array ``[EXP, VAR, LWR, UPR, ERR]``
+        Array of shape ``(5,)`` with the layout
+        ``[EXP, VAR, LWR, UPR, ERR]``.
 
     Returns
     -------
-    float
-        Quantile estimate for the given probability. Returns ``EXP`` if
-        the distribution is treated as deterministic (see
-        :func:`_fit_beta`).
+    tuple
+        ``(alpha, beta)`` — shape parameters, or ``(None, None)`` if the
+        distribution is considered deterministic. See :func:`fit_beta`
+        for the full description of the fitting logic and its
+        ``Notes``/``.. warning::``.
     """
-    M, D, a, b, err = _unpack_components(components)
-
-    alpha, beta = _fit_beta(components)
-    if alpha is None:
-        return M
-
-    estimate = scipy.stats.beta.ppf(p, alpha, beta)
-    if np.isnan(estimate):
-        return M
-
-    return a + (b - a) * estimate
+    return fit_beta(*_unpack_components(components))
 
 #==============================================================================
 def calc_ppf(p, M, D, a, b, err=0.0):
@@ -415,38 +368,36 @@ def calc_ppf(p, M, D, a, b, err=0.0):
         If :func:`fit_beta` raises an error due to invalid bounds or
         parameters.
     """
-    components = np.array([M, D, a, b, err], dtype=float)
-    return _calc_ppf(p, components)
+    alpha, beta = fit_beta(M, D, a, b, err)
+    if alpha is None:
+        return M
+
+    q = scipy.stats.beta.ppf(p, alpha, beta)
+    if np.isnan(q):
+        return M
+
+    return a + (b - a) * q
 
 #==============================================================================
-def _calc_cdf(val, components):
+def _calc_ppf(p, components):
     """
-    Internal CDF on a component vector.
+    Array-interface wrapper around :func:`calc_ppf`.
 
     Parameters
     ----------
-    val : float
-        Value at which to evaluate the CDF
+    p : float
+        Probability level (``0 < p < 1``)
     components : array-like
         Component array ``[EXP, VAR, LWR, UPR, ERR]``
 
     Returns
     -------
     float
-        Probability ``P(X <= val)``. Returns ``1.0`` if ``val > EXP``
-        and ``0.0`` otherwise for deterministic distributions.
+        Quantile estimate for the given probability. Returns ``EXP`` if
+        the distribution is treated as deterministic (see
+        :func:`fit_beta`).
     """
-    M, D, a, b, err = _unpack_components(components)
-
-    alpha, beta = _fit_beta(components)
-    if alpha is None:
-        return 1.0 if val > M else 0.0
-
-    prob = scipy.stats.beta.cdf((val - a) / (b - a), alpha, beta)
-    if np.isnan(prob):
-        return 0.0
-
-    return prob
+    return calc_ppf(p, *_unpack_components(components))
 
 #==============================================================================
 def calc_cdf(val, M, D, a, b, err=0.0):
@@ -482,8 +433,35 @@ def calc_cdf(val, M, D, a, b, err=0.0):
         If :func:`fit_beta` raises an error due to invalid bounds or
         parameters.
     """
-    components = np.array([M, D, a, b, err], dtype=float)
-    return _calc_cdf(val, components)
+    alpha, beta = fit_beta(M, D, a, b, err)
+    if alpha is None:
+        return 1.0 if val > M else 0.0
+
+    prob = scipy.stats.beta.cdf((val - a) / (b - a), alpha, beta)
+    if np.isnan(prob):
+        return 0.0
+
+    return prob
+
+#==============================================================================
+def _calc_cdf(val, components):
+    """
+    Array-interface wrapper around :func:`calc_cdf`.
+
+    Parameters
+    ----------
+    val : float
+        Value at which to evaluate the CDF
+    components : array-like
+        Component array ``[EXP, VAR, LWR, UPR, ERR]``
+
+    Returns
+    -------
+    float
+        Probability ``P(X <= val)``. Returns ``1.0`` if ``val > EXP``
+        and ``0.0`` otherwise for deterministic distributions.
+    """
+    return calc_cdf(val, *_unpack_components(components))
 
 #==============================================================================
 def _choice(old, new, delta):
