@@ -284,15 +284,16 @@ def fit_beta(M, D, a, b, err):
     if err < 0.0:
         raise ValueError(f"Invalid error ({err}) must be >= 0.0")
 
-    ul = max(abs(a), abs(b), abs(b - a))
     span = b - a
 
-    if span <= 2 * EPS * ul:
+    ul = max(abs(a), abs(b), abs(span))
+
+    if span <= 2.0 * EPS * ul:
         # Deterministic chain: use M without computing g
         return None, None
 
     # Effective error threshold: user-supplied bound or machine degeneracy
-    thr = max(err, 2 * EPS * ul)
+    thr = max(err, 2.0 * EPS * ul)
 
     if np.sqrt(D) < thr:
         # Deterministic chain, D is within computation error
@@ -300,10 +301,10 @@ def fit_beta(M, D, a, b, err):
 
     mu = (M - a) / span
     var = D / span ** 2
-    ratio = max(mu * (1 - mu) / var, 1 + 2 * EPS)
+    ratio = max(mu * (1.0 - mu) / var, 1.0 + 2.0 * EPS)
 
-    alpha = mu * (ratio - 1)
-    beta = (1 - mu) * (ratio - 1)
+    alpha = mu * (ratio - 1.0)
+    beta = (1.0 - mu) * (ratio - 1.0)
 
     if alpha <= 0.0 or beta <= 0.0:
         return None, None
@@ -2641,6 +2642,30 @@ class ActivityOnArrowModel:
                     a.early_end[UPR] += delta
                     a.early_end[LWR] += delta
 
+                if a.early_start[EXP] - a.early_start[UPR] > a.early_start[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected early start time ({a.early_start[EXP]} > {a.early_start[UPR]})")
+
+                if a.early_start[LWR] - a.early_start[EXP] > a.early_start[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected early start time ({a.early_start[EXP]} < {a.early_start[LWR]})")
+
+                if a.early_start[EXP] > a.early_start[UPR]:
+                    a.early_start[EXP] = a.early_start[UPR]
+
+                if a.early_start[EXP] < a.early_start[LWR]:
+                    a.early_start[EXP] = a.early_start[LWR]
+
+                if a.early_end[EXP] - a.early_end[UPR] > a.early_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected early end time ({a.early_end[EXP]} > {a.early_end[UPR]})")
+
+                if a.early_end[LWR] - a.early_end[EXP] > a.early_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected early end time ({a.early_end[EXP]} < {a.early_end[LWR]})")
+
+                if a.early_end[EXP] > a.early_end[UPR]:
+                    a.early_end[EXP] = a.early_end[UPR]
+
+                if a.early_end[EXP] < a.early_end[LWR]:
+                    a.early_end[EXP] = a.early_end[LWR]
+
             elif target in ['late_pre', 'late']:
                 # Decouple activities from events
                 a.late_start = a.late_start.copy()
@@ -2665,6 +2690,30 @@ class ActivityOnArrowModel:
                     a.late_end[EXP] += delta
                     a.late_end[UPR] += delta
                     a.late_end[LWR] += delta
+
+                if a.late_start[EXP] - a.late_start[UPR] > a.late_start[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected late start time ({a.late_start[EXP]} > {a.late_start[UPR]})")
+
+                if a.late_start[LWR] - a.late_start[EXP] > a.late_start[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected late start time ({a.late_start[EXP]} < {a.late_start[LWR]})")
+
+                if a.late_start[EXP] > a.late_start[UPR]:
+                    a.late_start[EXP] = a.late_start[UPR]
+
+                if a.late_start[EXP] < a.late_start[LWR]:
+                    a.late_start[EXP] = a.late_start[LWR]
+
+                if a.late_end[EXP] - a.late_end[UPR] > a.late_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected late end time ({a.late_start[EXP]} > {a.late_start[UPR]})")
+
+                if a.late_end[LWR] - a.late_end[EXP] > a.late_end[ERR]:
+                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected late end time ({a.late_start[EXP]} < {a.late_start[LWR]})")
+
+                if a.late_end[EXP] > a.late_end[UPR]:
+                    a.late_end[EXP] = a.late_end[UPR]
+
+                if a.late_end[EXP] < a.late_end[LWR]:
+                    a.late_end[EXP] = a.late_end[LWR]
 
             return
 
@@ -2722,6 +2771,18 @@ class ActivityOnArrowModel:
                     e.early[UPR] -= e.early[LWR]
                     e.early[LWR] = 0.0
 
+                if e.early[EXP] - e.early[UPR] > e.early[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.early[EXP]} > {e.early[UPR]})")
+
+                if e.early[LWR] - e.early[EXP] > e.early[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.early[EXP]} < {e.early[LWR]})")
+
+                if e.early[EXP] > e.early[UPR]:
+                    e.early[EXP] = e.early[UPR]
+
+                if e.early[EXP] < e.early[LWR]:
+                    e.early[EXP] = e.early[LWR]
+
             elif 'late' == target:
                 # Invariant is preserved only for expected value
                 if e.early[EXP] - e.late[EXP] >  e.late[ERR] + e.early[ERR]:
@@ -2732,6 +2793,18 @@ class ActivityOnArrowModel:
                     e.late[EXP] += delta
                     e.late[UPR] += delta
                     e.late[LWR] += delta
+
+                if e.late[EXP] - e.late[UPR] > e.late[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.late[EXP]} > {e.late[UPR]})")
+
+                if e.late[LWR] - e.late[EXP] > e.late[ERR]:
+                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.late[EXP]} < {e.late[LWR]})")
+
+                if e.late[EXP] > e.late[UPR]:
+                    e.late[EXP] = e.late[UPR]
+
+                if e.late[EXP] < e.late[LWR]:
+                    e.late[EXP] = e.late[LWR]
 
             return
 
