@@ -1927,7 +1927,7 @@ class ActivityOnArrowModel:
         lnk_src, lnk_dst = self._parse_links(lnk_src, lnk_dst, links)
 
         # Create network model
-        self._create_model(wbs_dict, lnk_src, lnk_dst, default_risk, next_act_id)
+        dummy_srcs = self._create_model(wbs_dict, lnk_src, lnk_dst, default_risk, next_act_id)
 
         # After _create_model, events must be non-empty
         if len(self._events) == 0:
@@ -1936,14 +1936,17 @@ class ActivityOnArrowModel:
         # Compute stages of project
         self._compute_target('stage')
 
+        # Compute Event and Activity time parameters (two-phase; see the
+        # class-level Notes and _compute_time_params for details)
+        self._compute_time_params()
+
+        # Postprocess created network
+        self._network_postprocess(dummy_srcs)
+
         # Renumerate events according to the rules of network modeling
         self._events.sort(key=lambda e: e.stage)
         for i, e in enumerate(self._events, 1):
             e.id = i
-
-        # Compute Event and Activity time parameters (two-phase; see the
-        # class-level Notes and _compute_time_params for details)
-        self._compute_time_params()
 
     #==========================================================================
     @property
@@ -2152,6 +2155,10 @@ class ActivityOnArrowModel:
                                    None, {}, is_dummy=True)
                 dsrc.add(int(net_src[i]))
 
+        return dsrc
+
+    def _network_postprocess(self, dsrc):
+
         # Network postprocessing
         # Make sure that activities with largest efforts are on straight paths between events
         grpoi = {}
@@ -2182,8 +2189,7 @@ class ActivityOnArrowModel:
             # Maximum duration candidate
             maxa = grpoi[k][0]
             for a in aoi:
-                # target is None because this is post-processing without scenario
-                if self._duration(a.expected[EXP], a, None, None) > self._duration(maxa.expected[EXP], maxa, None, None):
+                if a.duration[EXP] > maxa.duration[EXP]:
                     a.dst, maxa.dst = maxa.dst, a.dst
                     maxa = a
 
