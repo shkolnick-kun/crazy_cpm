@@ -140,11 +140,27 @@ Advanced usage with resource-aware duration::
     During the ``'early_pre'``, ``'late_pre'``, ``'early'`` and ``'late'``
     passes the model checks the following CPM invariants:
 
-    - On early passes: ``early_start[LWR] >= 0``; ``early_end[c] >=
-      early_start[c]`` for each of ``c`` in ``{EXP, UPR, LWR}``.
-    - On late passes: ``late_start[EXP] >= early_start[EXP]``;
-      ``late_end[EXP] >= late_start[EXP]``.
-    - On both late passes: ``late[EXP] >= early[EXP]`` for events.
+    - On early passes:
+
+      - ``early_start[LWR] >= 0`` (clamped, not raised);
+      - ``early_end[c] >= early_start[c]`` for ``c in {EXP, UPR, LWR}``
+        (raised on violation beyond the error bound);
+      - ``early_start[EXP]`` and ``early_end[EXP]`` must lie within
+        ``[LWR, UPR]`` (clamped within the error bound, raised
+        otherwise).
+
+    - On late passes:
+
+      - ``late_start[EXP] >= early_start[EXP]``;
+      - ``late_end[EXP] >= late_start[EXP]``;
+      - ``late_start[EXP]`` and ``late_end[EXP]`` must lie within
+        ``[LWR, UPR]`` (clamped within the error bound, raised
+        otherwise).
+
+    - On both late passes (for events): ``late[EXP] >= early[EXP]``.
+    - On the final ``'early'`` / ``'late'`` passes (for events):
+      ``early[EXP]`` / ``late[EXP]`` must lie within ``[LWR, UPR]``
+      (clamped within the error bound, raised otherwise).
 
     Violations within the accumulated error bound are silently clamped;
     violations beyond it raise :exc:`RuntimeError`, which signals a
@@ -200,7 +216,7 @@ def _unpack_components(components):
     Returns
     -------
     tuple
-        ``(EXP, VAR, LWR, UPR, ERR)`` — five float scalars.
+        ``(EXP, VAR, LWR, UPR, ERR)`` -- five float scalars.
 
     Raises
     ------
@@ -243,7 +259,7 @@ def fit_beta(M, D, a, b, err):
     Returns
     -------
     tuple
-        ``(alpha, beta)`` — shape parameters, or ``(None, None)`` if the
+        ``(alpha, beta)`` -- shape parameters, or ``(None, None)`` if the
         distribution is treated as deterministic.
 
     Raises
@@ -328,7 +344,7 @@ def _fit_beta(components):
     Returns
     -------
     tuple
-        ``(alpha, beta)`` — shape parameters, or ``(None, None)`` if the
+        ``(alpha, beta)`` -- shape parameters, or ``(None, None)`` if the
         distribution is considered deterministic. See :func:`fit_beta`
         for the full description of the fitting logic and its
         ``Notes``/``.. warning::``.
@@ -488,10 +504,10 @@ def _choice(old, new, delta):
     numpy.ndarray
         Selected time estimate:
 
-        - If ``delta >= e`` where ``e = new[ERR] + old[ERR]`` — returns
+        - If ``delta >= e`` where ``e = new[ERR] + old[ERR]`` -- returns
           a copy of ``new`` (the difference is statistically significant).
-        - If ``delta <= -e`` — returns a copy of ``old``.
-        - Otherwise — returns a mixed estimate with
+        - If ``delta < -e`` -- returns a copy of ``old``.
+        - Otherwise -- returns a mixed estimate with
 
           - ``EXP = 0.5 * (new[EXP] + old[EXP])``
           - ``VAR = max(old[VAR], new[VAR])``
@@ -571,15 +587,14 @@ def _default_duration(effort, activity, base_time, target):
         - Negative number or zero for backward pass (late times calculation)
     activity : ArrowActivity
         Activity object for context-aware calculations
-    base_time : float or None
-        Base time from which the activity starts:
-
-        - ``float`` during network traversal (``target`` is one of
-          ``'early_pre'``, ``'late_pre'``, ``'early'``, ``'late'``)
-        - ``None`` during network post-processing (``target`` is ``None``)
-    target : str or None
-        Target scenario identifier: ``'early_pre'``, ``'late_pre'``,
-        ``'early'``, ``'late'``, or ``None`` (for post-processing).
+    base_time : float
+        Base time from which the activity starts -- the ``EXP`` component
+        of the event's base time (the callback is invoked only during
+        the preliminary ``'early_pre'`` / ``'late_pre'`` passes).
+    target : str
+        Target scenario identifier. Currently one of ``'early_pre'`` or
+        ``'late_pre'`` (the only passes in which the callback is
+        invoked).
 
     Returns
     -------
@@ -994,23 +1009,23 @@ class ArrowActivity(object):
         PERT-specific fields are only included when PERT analysis is
         enabled (``model.is_pert``):
 
-        - ``exp_var`` — variance of the effort estimate
-        - ``variance`` — variance of the frozen duration
-        - ``optimistic`` — optimistic effort (``expected[LWR]``)
-        - ``opt_start`` — optimistic scenario start (``early_start[LWR]``)
-        - ``opt_end`` — optimistic scenario end (``early_end[LWR]``)
-        - ``pessimistic`` — pessimistic effort (``expected[UPR]``)
-        - ``pes_start`` — pessimistic scenario start (``early_start[UPR]``)
-        - ``pes_end`` — pessimistic scenario end (``early_end[UPR]``)
-        - ``early_start_var``, ``early_end_var`` — variances of start/end
-        - ``early_start_pqe``, ``early_end_pqe`` — probabilistic
+        - ``exp_var`` -- variance of the effort estimate
+        - ``variance`` -- variance of the frozen duration
+        - ``optimistic`` -- optimistic effort (``expected[LWR]``)
+        - ``opt_start`` -- optimistic scenario start (``early_start[LWR]``)
+        - ``opt_end`` -- optimistic scenario end (``early_end[LWR]``)
+        - ``pessimistic`` -- pessimistic effort (``expected[UPR]``)
+        - ``pes_start`` -- pessimistic scenario start (``early_start[UPR]``)
+        - ``pes_end`` -- pessimistic scenario end (``early_end[UPR]``)
+        - ``early_start_var``, ``early_end_var`` -- variances of start/end
+        - ``early_start_pqe``, ``early_end_pqe`` -- probabilistic
           quantile estimates
-        - ``late_end_prob`` — probability that ``early_end`` is less than
+        - ``late_end_prob`` -- probability that ``early_end`` is less than
           ``late_end[EXP]``
 
         Debug-specific fields (only when ``model.debug`` is true):
         ``early_start_err``, ``late_start_err``, ``early_end_err``,
-        ``late_end_err`` — error bounds of the corresponding timing
+        ``late_end_err`` -- error bounds of the corresponding timing
         parameters.
 
         The returned dictionary is a copy of ``self.data`` extended with
@@ -1088,7 +1103,7 @@ class ArrowActivity(object):
         instead of re-invoking the user's ``duration`` callback.
 
         Freezing is required whenever the ``duration`` callback depends
-        on ``base_time`` — i.e. when resource availability varies over
+        on ``base_time`` -- i.e. when resource availability varies over
         time (work calendars, shift patterns, day/night cycles, etc.).
         Without freezing, the same activity would receive different
         durations in the forward and backward passes, which would break
@@ -1214,7 +1229,7 @@ class Event(object):
     -----
     This class uses identity-based ``__eq__``/``__hash__`` (default from
     ``object``). Do NOT define ``__eq__`` without also defining a
-    compatible ``__hash__`` — instances are used as dict keys in
+    compatible ``__hash__`` -- instances are used as dict keys in
     ``ActivityOnArrowModel._compute_target``. Do NOT add ``@dataclass``
     without ``eq=False``.
 
@@ -1222,7 +1237,7 @@ class Event(object):
     return **immutable tuples** (snapshots) of the current activity
     lists. The underlying lists are maintained by ``ArrowActivity.src`` /
     ``ArrowActivity.dst`` setters. To mutate the topology, reassign
-    ``activity.src`` or ``activity.dst`` — never mutate the internal
+    ``activity.src`` or ``activity.dst`` -- never mutate the internal
     lists directly.
 
     User-defined keys in ``data`` must not collide with the reserved
@@ -1277,7 +1292,7 @@ class Event(object):
         Returns an **immutable tuple** (snapshot) of the current incoming
         activities. The underlying list is maintained by the
         ``ArrowActivity.dst`` setter. To mutate topology, reassign
-        ``activity.dst = new_event`` — do not attempt to modify the
+        ``activity.dst = new_event`` -- do not attempt to modify the
         returned tuple (it is immutable) or the internal list directly.
         """
         return tuple(self._in_activities)
@@ -1290,7 +1305,7 @@ class Event(object):
         Returns an **immutable tuple** (snapshot) of the current outgoing
         activities. The underlying list is maintained by the
         ``ArrowActivity.src`` setter. To mutate topology, reassign
-        ``activity.src = new_event`` — do not attempt to modify the
+        ``activity.src = new_event`` -- do not attempt to modify the
         returned tuple (it is immutable) or the internal list directly.
         """
         return tuple(self._out_activities)
@@ -1353,21 +1368,21 @@ class Event(object):
         PERT-specific fields are only included when PERT analysis is
         enabled (``model.is_pert``):
 
-        - ``optimistic`` — optimistic scenario early time
+        - ``optimistic`` -- optimistic scenario early time
           (``early[LWR]``)
-        - ``pessimistic`` — pessimistic scenario early time
+        - ``pessimistic`` -- pessimistic scenario early time
           (``early[UPR]``)
-        - ``early_var`` — variance of the early time
-        - ``early_pqe`` — probabilistic quantile of the early time
-        - ``late_prob`` — probability that ``early`` is less than
+        - ``early_var`` -- variance of the early time
+        - ``early_pqe`` -- probabilistic quantile of the early time
+        - ``late_prob`` -- probability that ``early`` is less than
           ``late[EXP]``
 
         Debug-specific fields (only when ``model.debug`` is true):
 
-        - ``early_err``, ``late_err`` — phase-2 error bounds.
-        - ``early_pre``, ``early_pre_var``, ``early_pre_err`` — phase-1
+        - ``early_err``, ``late_err`` -- phase-2 error bounds.
+        - ``early_pre``, ``early_pre_var``, ``early_pre_err`` -- phase-1
           preliminary early time and its statistics.
-        - ``late_pre``, ``late_pre_var``, ``late_pre_err`` — phase-1
+        - ``late_pre``, ``late_pre_var``, ``late_pre_err`` -- phase-1
           preliminary late time and its statistics. Note that
           ``late_pre`` is an internal service value; the public API
           value is ``late``.
@@ -1663,15 +1678,16 @@ class ActivityOnArrowModel:
           * Negative number or zero for backward pass (late times
             calculation)
         - ``activity``: :class:`ArrowActivity` object for context
-        - ``base_time``: context-dependent:
-
-          * ``float`` during the traversal passes (``target`` is one of
-            ``'early_pre'``, ``'late_pre'``, ``'early'``, ``'late'``)
-          * ``None`` during network post-processing (``target`` is
-            ``None``)
-        - ``target``: str or None indicating the computation scenario:
-          ``'early_pre'``, ``'late_pre'``, ``'early'``, ``'late'``, or
-          ``None`` (for post-processing).
+        - ``base_time``: ``float`` -- the ``EXP`` component of the
+          event's base time. Currently the callback is invoked only
+          during the preliminary passes (``'early_pre'`` /
+          ``'late_pre'``), and all three calls (for ``effort[EXP]``,
+          ``effort[UPR]``, ``effort[LWR]``) receive the **same**
+          ``base_time``.
+        - ``target``: ``str`` -- currently one of ``'early_pre'`` or
+          ``'late_pre'`` (the only passes in which the callback is
+          invoked). During the final passes the model uses the frozen
+          ``ArrowActivity.duration`` and does not call the callback.
 
         Returns: float value representing actual duration with the same
         sign as ``effort``:
@@ -1682,8 +1698,9 @@ class ActivityOnArrowModel:
 
         .. note::
             The callback is invoked during the **preliminary** (``_pre``)
-            passes and during network post-processing, but **not** during
-            the **final** passes: the final passes use the frozen
+            passes only. It is **not** invoked during the **final**
+            (``'early'`` / ``'late'``) passes and **not** during network
+            post-processing: the final passes use the frozen
             :attr:`ArrowActivity.duration` value produced by
             :meth:`ArrowActivity.compute_final_duration` (the backward
             pass applies :func:`_negative`). See the class-level Notes
@@ -1722,14 +1739,28 @@ class ActivityOnArrowModel:
         when the CPM invariants are violated beyond the accumulated
         error bound:
 
-        - On early passes: ``early_start[LWR] >= 0`` (clamped, not
-          raised); ``early_end[c] >= early_start[c]`` for
-          ``c in {EXP, UPR, LWR}`` (raised on violation beyond error
-          bound).
-        - On late passes: ``late_start[EXP] >= early_start[EXP]`` and
-          ``late_end[EXP] >= late_start[EXP]`` (raised on violation
-          beyond error bound).
-        - On both late passes: ``late[EXP] >= early[EXP]`` for events.
+        - On early passes:
+
+          - ``early_start[LWR] >= 0`` (clamped, not raised);
+          - ``early_end[c] >= early_start[c]`` for
+            ``c in {EXP, UPR, LWR}`` (raised on violation beyond error
+            bound);
+          - ``early_start[EXP]`` and ``early_end[EXP]`` must lie within
+            ``[LWR, UPR]`` (clamped within the error bound, raised
+            otherwise).
+
+        - On late passes:
+
+          - ``late_start[EXP] >= early_start[EXP]``;
+          - ``late_end[EXP] >= late_start[EXP]``;
+          - ``late_start[EXP]`` and ``late_end[EXP]`` must lie within
+            ``[LWR, UPR]`` (clamped within the error bound, raised
+            otherwise).
+
+        - On both late passes (for events): ``late[EXP] >= early[EXP]``.
+        - On the final ``'early'`` / ``'late'`` passes (for events):
+          ``early[EXP]`` / ``late[EXP]`` must lie within ``[LWR, UPR]``
+          (clamped within the error bound, raised otherwise).
 
         These checks apply to both the preliminary (``_pre``) and the
         final passes. Such violations typically indicate a structural
@@ -1819,9 +1850,9 @@ class ActivityOnArrowModel:
     overall cost linear in the network size.
 
     **Scope of the approximation.** This is a *fast estimator*, not a
-    scheduler. The "hidden critical path" effect — where an activity's
+    scheduler. The "hidden critical path" effect -- where an activity's
     start or end coincides with a resource calendar boundary and the
-    reserve in front of it is misleading — is captured only in the
+    reserve in front of it is misleading -- is captured only in the
     first approximation, through the single-duration freeze. A rigorous
     treatment would require constraint programming or Monte-Carlo
     simulation over resource calendars, which are intentionally out of
@@ -1863,7 +1894,7 @@ class ActivityOnArrowModel:
     - Values whose violation is within the accumulated error bound are
       silently clamped to satisfy the invariants.
     - Values whose violation exceeds the accumulated error bound cause
-      a :exc:`RuntimeError`. This indicates a structural problem — for
+      a :exc:`RuntimeError`. This indicates a structural problem -- for
       example, a ``duration`` callback that maps non-negative effort
       to a negative duration, or a topology that is inconsistent with
       the signed backward-pass deltas.
@@ -2385,11 +2416,11 @@ class ActivityOnArrowModel:
         target : str
             What to compute. One of:
 
-            - ``'stage'`` — topological stage of each event
-            - ``'early_pre'`` — preliminary early times (forward pass)
-            - ``'late_pre'`` — preliminary late times (backward pass)
-            - ``'early'`` — final early times (forward pass)
-            - ``'late'`` — final late times (backward pass)
+            - ``'stage'`` -- topological stage of each event
+            - ``'early_pre'`` -- preliminary early times (forward pass)
+            - ``'late_pre'`` -- preliminary late times (backward pass)
+            - ``'early'`` -- final early times (forward pass)
+            - ``'late'`` -- final late times (backward pass)
 
         Raises
         ------
@@ -2407,15 +2438,29 @@ class ActivityOnArrowModel:
             :exc:`RuntimeError`:
 
             - On early passes (``'early_pre'`` / ``'early'``):
-              ``early_start[LWR] >= 0`` (clamped); ``early_end[c] >=
-              early_start[c]`` for ``c in {EXP, UPR, LWR}`` (raised on
-              violation beyond error bound).
+
+              - ``early_start[LWR] >= 0`` (clamped, not raised);
+              - ``early_end[c] >= early_start[c]`` for
+                ``c in {EXP, UPR, LWR}`` (raised on violation beyond
+                the error bound);
+              - ``early_start[EXP]`` and ``early_end[EXP]`` must lie
+                within ``[LWR, UPR]`` (clamped within the error bound,
+                raised otherwise).
+
             - On late passes (``'late_pre'`` / ``'late'``):
-              ``late_start[EXP] >= early_start[EXP]``; ``late_end[EXP]
-              >= late_start[EXP]`` (both raised on violation beyond
-              error bound).
-            - On late passes, for events: ``late[EXP] >= early[EXP]``
-              (raised on violation beyond error bound).
+
+              - ``late_start[EXP] >= early_start[EXP]``;
+              - ``late_end[EXP] >= late_start[EXP]``;
+              - ``late_start[EXP]`` and ``late_end[EXP]`` must lie
+                within ``[LWR, UPR]`` (clamped within the error bound,
+                raised otherwise).
+
+            - On both late passes, for events: ``late[EXP] >=
+              early[EXP]``.
+            - On the final ``'early'`` / ``'late'`` passes, for events:
+              ``early[EXP]`` / ``late[EXP]`` must lie within
+              ``[LWR, UPR]`` (clamped within the error bound, raised
+              otherwise).
 
             Violations within the accumulated error bound are silently
             clamped. The corresponding messages identify the offending
@@ -2450,9 +2495,9 @@ class ActivityOnArrowModel:
         during the ``'early_pre'``, ``'late_pre'``, ``'early'`` and
         ``'late'`` traversals by two local helpers:
 
-        - ``_sanitize_act(a, target)`` — called after each activity
+        - ``_sanitize_act(a, target)`` -- called after each activity
           update. Enforces the activity invariants listed above.
-        - ``_sanitize_evt(e, target)`` — called after each event is
+        - ``_sanitize_evt(e, target)`` -- called after each event is
           processed. Enforces the event invariants listed above.
 
         Correcting values during the traversal keeps downstream
@@ -2489,8 +2534,8 @@ class ActivityOnArrowModel:
             propagation for PERT analysis.
 
             Used by the preliminary (``_pre``) passes. The callback is
-            invoked three times — for ``effort[EXP]``, ``effort[UPR]``,
-            and ``effort[LWR]`` — all with the **same** ``base_time``
+            invoked three times -- for ``effort[EXP]``, ``effort[UPR]``,
+            and ``effort[LWR]`` -- all with the **same** ``base_time``
             (``base_time[EXP]``). Using a single base time is what
             guarantees ``dur[LWR] <= dur[EXP] <= dur[UPR]``.
 
@@ -2521,15 +2566,23 @@ class ActivityOnArrowModel:
               ``effort[UPR]``, and ``effort[LWR]``. The error bound is
               set to ``EPS * max(|dur[UPR]|, |dur[LWR]|,
               |dur[UPR] - dur[LWR]|)``.
-            - For PERT models with non-zero effort variance (and
-              ``sqrt(effort[VAR]) >= effort[ERR]``), an MPERT-style mode
-              correction is applied: if ``dur[EXP]`` is too close to
-              ``dur[LWR]`` it is pushed inside by ``2 * dur[ERR]``; if
-              it is too close to ``dur[UPR]``, ``dur[UPR]`` is grown
+            - For PERT models (``self.is_pert`` is true) with non-zero
+              effort variance, and only when
+              ``sqrt(effort[VAR]) > effort[ERR]`` **and**
+              ``effort[VAR] > sqrt(EPS) * gamma_nom``, an MPERT-style
+              mode correction is applied: if ``dur[EXP]`` is too close
+              to ``dur[LWR]`` it is pushed inside by ``2 * dur[ERR]``;
+              if it is too close to ``dur[UPR]``, ``dur[UPR]`` is grown
               so that the mean stays strictly inside; then ``dur[VAR]``
-              is recomputed from the beta-distribution formula
-              ``alpha * beta / (alpha + beta + 1) / (alpha + beta)^2 *
-              (dur[UPR] - dur[LWR])^2``.
+              is recomputed as
+              ``(dur[EXP] - dur[LWR]) * (dur[UPR] - dur[EXP]) /
+              (gamma + 3.0)`` (an algebraically equivalent form of the
+              beta-distribution variance formula, given
+              ``alpha = mu * (gamma + 2)`` and
+              ``beta = (1 - mu) * (gamma + 2)``, where
+              ``mu = (dur[EXP] - dur[LWR]) / (dur[UPR] - dur[LWR])``).
+              Otherwise the activity is treated as deterministic and
+              ``dur[UPR] = dur[LWR] = dur[EXP]``.
             - If the activity is deterministic, ``dur[UPR]`` and
               ``dur[LWR]`` are collapsed to ``dur[EXP]``.
             """
@@ -2605,21 +2658,39 @@ class ActivityOnArrowModel:
 
             Notes
             -----
-            - On early passes: if ``early_start[LWR] < 0``, all three
-              components of ``early_start`` are shifted up by
-              ``-early_start[LWR]`` (so that ``early_start[LWR] == 0``).
-              Then the invariant ``early_end[c] >= early_start[c]`` is
-              checked for ``c in {EXP, UPR, LWR}``; violations beyond
-              the error bound raise :exc:`RuntimeError`, and violations
-              within the bound are clamped by shifting ``early_end``
-              upward by the ``EXP``-component deficit (all three
-              components of ``early_end`` shift together).
-            - On late passes: only the ``EXP`` component is checked
-              (``late_start[EXP] >= early_start[EXP]`` and
-              ``late_end[EXP] >= late_start[EXP]``). Violations within
-              the bound are clamped by shifting all three components of
-              ``late_start`` (resp. ``late_end``) upward by the
-              ``EXP``-component deficit.
+            - On early passes (``'early_pre'`` / ``'early'``):
+
+              1. If ``early_start[LWR] < 0``, all three components of
+                 ``early_start`` are shifted up by ``-early_start[LWR]``
+                 (so that ``early_start[LWR] == 0``).
+              2. The invariant ``early_end[c] >= early_start[c]`` is
+                 checked for ``c in {EXP, UPR, LWR}``; violations beyond
+                 the accumulated error bound raise :exc:`RuntimeError`.
+              3. If ``early_end[EXP] < early_start[EXP]`` (within the
+                 error bound), all three components of ``early_end``
+                 are shifted upward by the ``EXP``-component deficit.
+              4. The consistency of ``early_start[EXP]`` with
+                 ``early_start[LWR]`` / ``early_start[UPR]`` is checked:
+                 if ``early_start[EXP]`` lies outside ``[LWR, UPR]`` by
+                 more than the error bound, :exc:`RuntimeError` is
+                 raised; otherwise ``early_start[EXP]`` is clamped into
+                 that range. The same check / clamp is applied to
+                 ``early_end``.
+
+            - On late passes (``'late_pre'`` / ``'late'``):
+
+              1. If ``late_start[EXP] < early_start[EXP]`` by more than
+                 the error bound, :exc:`RuntimeError` is raised; within
+                 the bound, all three components of ``late_start`` are
+                 shifted upward by the ``EXP``-component deficit.
+              2. If ``late_end[EXP] < late_start[EXP]`` by more than
+                 the error bound, :exc:`RuntimeError` is raised; within
+                 the bound, all three components of ``late_end`` are
+                 shifted upward by the ``EXP``-component deficit.
+              3. The consistency of ``late_start[EXP]`` with
+                 ``late_start[LWR]`` / ``late_start[UPR]`` is checked
+                 (same raise / clamp logic as for the early passes).
+                 The same check / clamp is applied to ``late_end``.
             """
             # Time params lower limit
 
@@ -2747,12 +2818,22 @@ class ActivityOnArrowModel:
 
             Notes
             -----
-            - On ``'early_pre'`` / ``'early'``: if ``early[LWR] < 0``,
-              all three components are shifted up by ``-early[LWR]``.
-            - On ``'late_pre'`` / ``'late'``: the ``EXP`` invariant
-              ``late[EXP] >= early[EXP]`` is checked; violations within
-              the error bound are clamped by shifting all three
-              components of ``late`` upward by the ``EXP`` deficit.
+            - On ``'early_pre'``: if ``early_pre[LWR] < 0``, all three
+              components are shifted up by ``-early_pre[LWR]``.
+            - On ``'late_pre'``: the ``EXP`` invariant
+              ``late_pre[EXP] >= early_pre[EXP]`` is checked; violations
+              within the error bound are clamped by shifting all three
+              components of ``late_pre`` upward by the ``EXP`` deficit.
+            - On ``'early'`` (final): in addition to the ``LWR >= 0``
+              clamp, the consistency of ``early[EXP]`` with
+              ``early[LWR]`` / ``early[UPR]`` is checked (raise beyond
+              the error bound, clamp within it).
+            - On ``'late'`` (final): the ``EXP`` invariant
+              ``late[EXP] >= early[EXP]`` is checked (raise beyond the
+              error bound, clamp within it). In addition, the
+              consistency of ``late[EXP]`` with ``late[LWR]`` /
+              ``late[UPR]`` is checked (raise beyond the error bound,
+              clamp within it).
             """
             if 'early_pre' == target:
                 if e.early_pre[LWR] < 0.0:
@@ -3045,7 +3126,7 @@ class ActivityOnArrowModel:
         Returns
         -------
         tuple
-            ``(activities_df, events_df)`` — pandas DataFrames for
+            ``(activities_df, events_df)`` -- pandas DataFrames for
             activities and events.
 
         Notes
@@ -3084,10 +3165,10 @@ class ActivityOnArrowModel:
             Output path for saving the visualization file. The rendering
             format is determined by the file extension:
 
-            - ``.png`` — Portable Network Graphics (default if no
+            - ``.png`` -- Portable Network Graphics (default if no
               extension is given)
-            - ``.svg`` — Scalable Vector Graphics
-            - ``.pdf`` — Portable Document Format
+            - ``.svg`` -- Scalable Vector Graphics
+            - ``.pdf`` -- Portable Document Format
 
             If ``None``, the graph is not rendered to a file (only the
             ``Digraph`` object is returned).
@@ -3141,7 +3222,7 @@ class ActivityOnArrowModel:
         The label font size is fixed at 12 for all activity labels.
 
         The activity duration shown in the label is the
-        :attr:`ArrowActivity.duration` attribute — the same frozen value
+        :attr:`ArrowActivity.duration` attribute -- the same frozen value
         that is used during the final forward pass and reported by
         :meth:`ArrowActivity.to_dict`; the backward pass applies
         :func:`_negative` locally inside
