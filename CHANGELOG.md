@@ -118,22 +118,23 @@ Remaining values are:
 
 * early_pre
 * late_pre
-* early
-* late
-* None (during network post-processing)
 
-If your callback branches on target, remove the removed cases.
+If your callback branches on target, remove the removed cases. Note that
+**early**, **late**, and **None** are no longer passed to the callback at
+all — see the next section.
 
 ### Duration callback invocation contract
 
-The callback is still invoked only during the preliminary passes and during
-network post-processing. Two important clarifications:
+The callback is invoked **only during the preliminary passes**
+(early_pre and late_pre). It is **not** invoked during the final passes
+and **not** during network post-processing. Two important clarifications:
 
-* **Preliminary passes:** the callback is invoked **three times per
-  activity** — for the EXP, UPR, and LWR components of the effort estimate.
-  All three calls receive the **same** base time (the EXP component of the
-  event's base time). This guarantees the ordering
-  **dur[LWR] <= dur[EXP] <= dur[UPR]**.
+* **Preliminary passes:** in each preliminary pass the callback is invoked
+  **three times per activity** — for the EXP, UPR, and LWR components of
+  the effort estimate. Across both preliminary passes this is six calls
+  per activity. All three calls within a pass receive the **same** base
+  time (the EXP component of the event's base time). This guarantees the
+  ordering **dur[LWR] <= dur[EXP] <= dur[UPR]**.
 * **Final passes:** the callback is **not** invoked. The frozen
   **ArrowActivity.duration** value is used instead (the backward pass
   applies the new **negative** helper to it).
@@ -165,9 +166,24 @@ restore the old behavior.
 * **Scenario-aware duration computation** inside the preliminary pass: the
   LWR and UPR scenario durations are computed alongside the EXP duration,
   all with the same base time.
-* **Scenario-aware sanitizers**: early passes now check the CPM ordering
-  invariants (early_end >= early_start) separately for EXP, UPR, and LWR;
-  the late passes check only EXP.
+* **Scenario-aware sanitizers**: the early passes now enforce
+
+  * early_start[LWR] >= 0 (clamped, not raised);
+  * early_end[c] >= early_start[c] for c in {EXP, UPR, LWR}
+    (raised beyond the error bound, clamped within it);
+  * early_start[EXP] and early_end[EXP] lie within [LWR, UPR]
+    (raised beyond the error bound, clamped within it).
+
+  The late passes enforce
+
+  * late_start[EXP] >= early_start[EXP];
+  * late_end[EXP] >= late_start[EXP];
+  * late_start[EXP] and late_end[EXP] lie within [LWR, UPR].
+
+  Events additionally get early[EXP] inside [LWR, UPR] on the early pass
+  and late[EXP] >= early[EXP] plus late[EXP] inside [LWR, UPR] on the
+  late pass. The same invariants are checked against the _pre attributes
+  on the preliminary passes.
 
 ---
 
@@ -176,14 +192,29 @@ restore the old behavior.
 * **Public API surface for component access.** Time / effort / reserve
   values are now uniformly 5-component arrays. Use the named component
   constants (EXP, VAR, LWR, UPR, ERR) for readability.
-* **CPM invariants in the early passes** are checked for all three of
-  EXP, UPR, and LWR (early_end[c] >= early_start[c]). A violation beyond
-  the accumulated error bound raises RuntimeError; violations within the
-  bound are clamped by shifting all three components together.
-* **CPM invariants in the late passes** are checked only for the EXP
-  component, because the signed backward-pass transform of the scenario
-  bounds does not preserve the (LWR, UPR) ordering in the same way as it
-  does for EXP.
+* **CPM invariants in the early passes** cover:
+
+  * early_start[LWR] >= 0 (clamped);
+  * early_end[c] >= early_start[c] for c in {EXP, UPR, LWR};
+  * early_start[EXP] and early_end[EXP] lie within [LWR, UPR].
+
+  A violation beyond the accumulated error bound raises RuntimeError;
+  violations within the bound are clamped by shifting all three
+  components together. The EXP-in-[LWR,UPR] check is a new v2.0.0
+  invariant.
+
+* **CPM invariants in the late passes** cover:
+
+  * late_start[EXP] >= early_start[EXP];
+  * late_end[EXP] >= late_start[EXP];
+  * late_start[EXP] and late_end[EXP] lie within [LWR, UPR].
+
+  The scenario bounds (LWR, UPR) are *not* re-checked against the
+  late_end >= late_start ordering, because the signed backward-pass
+  transform (**negative**) swaps and negates them, so the LWR/UPR
+  ordering is reversed by construction. Only the EXP component carries
+  the CPM ordering.
+
 * **Clamping of negative lower bounds.** When early[LWR] < 0 on the early
   passes (or early_pre[LWR] < 0 on the preliminary passes), the bound is
   clamped to zero by shifting all three components of the array upward by
@@ -243,11 +274,11 @@ restore the old behavior.
    * event.pessimistic becomes event.early[UPR]
 
 3. Update duration callbacks: remove any branches on target values
-   opt_pre, pes_pre, optimistic, pessimistic. The callback may now be
-   called up to three times per activity per preliminary pass — once per
-   component (EXP, UPR, LWR) with the same base time. Make sure the
-   callback is pure (no side effects) and consistent across the three
-   calls.
+   opt_pre, pes_pre, optimistic, pessimistic. The callback will be called
+   three times per activity in each preliminary pass — once per component
+   (EXP, UPR, LWR) with the same base time. Across both preliminary
+   passes this is six calls per activity. Make sure the callback is pure
+   (no side effects) and consistent across the calls.
 
 4. Update scalar indexing: change arr[RES] to arr[EXP]. Multi-element
    initialization must now allocate length 5 (e.g. numpy.zeros(5) instead
