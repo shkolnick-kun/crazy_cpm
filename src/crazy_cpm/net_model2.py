@@ -1885,9 +1885,9 @@ class ActivityOnArrowModel:
        freezing of the durations.
     3. :meth:`_network_postprocess` -- move maximum-duration activities
        onto the straight edges of the triangle groups.
-    4. :meth:`_compute_target` with ``'stage'`` -- topological stage of
+    4. :meth:`_compute_time_params` -- final passes and time reserves.
+    5. :meth:`_compute_target` with ``'stage'`` -- topological stage of
        every event, computed on the post-processed topology.
-    5. :meth:`_compute_time_params` -- final passes and time reserves.
     6. Sort the events by ``stage`` and renumber ``Event.id`` starting
        from ``1``.
 
@@ -1999,11 +1999,11 @@ class ActivityOnArrowModel:
         # Postprocess created network
         self._network_postprocess(dummy_srcs)
 
-        # Compute stages of project on the post-processed topology
-        self._compute_target('stage')
-
         # Compute Event and Activity time parameters (phase 2)
         self._compute_time_params()
+
+        # Compute stages of project on the post-processed topology
+        self._compute_target('stage')
 
         # Renumerate events according to the rules of network modeling
         self._events.sort(key=lambda e: e.stage)
@@ -3750,5 +3750,3 @@ if __name__ == '__main__':
         n_old.viz(output_path=viz_path)
         print(f"Visualization saved as '{viz_path}'")
     print(f"Target directory: {target_dir}")
-
-    
