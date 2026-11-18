@@ -27,7 +27,7 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
  * **Network Optimization** — Automatic (sub)optimal dummy-activity generation.
  * **Statistical Analysis** — Propagation of mean, variance and scenario bounds (optimistic / pessimistic) through the network.
  * **Probabilistic Estimates** — Quantile estimates and completion probabilities.
- * **Suitable for Small and Large Projects** — The modified PERT distribution gives correct estimates even for chains with few activities.
+ * **Suitable for Small and Medium sized Projects** — The modified PERT distribution gives correct estimates even for chains with few activities.
 
 ### Technical Features
  * **High Performance** — C backend for computationally intensive network analysis.

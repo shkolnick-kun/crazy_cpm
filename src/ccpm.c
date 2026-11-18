@@ -563,6 +563,9 @@ ccpmResultEn ccpm_add_a_dummy(uint32_t * min_deps, uint32_t * deps, uint8_t * de
     CCPM_CHECK_RETURN(full_dep_map, CCPM_EINVAL);
     CCPM_CHECK_RETURN(n_cur < n_max, CCPM_EINVAL);
 
+    /*Check for limits*/
+    CCPM_CHECK_RETURN(CCPM_LLEN(act_pos) <= n_max, CCPM_ELIM);
+
     CCPM_LOG_PRINTF("Adding dummy activity at position %d\n", (int)n_cur);
 
     /* Add fake activity ID to act_ids list */
@@ -570,9 +573,6 @@ ccpmResultEn ccpm_add_a_dummy(uint32_t * min_deps, uint32_t * deps, uint8_t * de
 
     /* Add current position to act_pos list */
     CCPM_LAPP(act_pos, n_cur);
-
-    /*Check for limits*/
-    CCPM_CHECK_RETURN(CCPM_LLEN(act_pos) < CCPM_FAKE, CCPM_ELIM);
 
     /* Set dummy minimal dependencies */
     CCPM_LCLR(min_act_dep + n_max * n_cur);
@@ -1054,6 +1054,9 @@ ccpmResultEn ccpm_build_network(size_t n_max,
                     /* Need to add a dummy activity */
                     size_t nxt_pos = CCPM_LLEN(act_ids);
 
+                    /*Check for limits*/
+                    CCPM_CHECK_RETURN(nxt_pos <= n_max, CCPM_ELIM);
+
                     CCPM_LAPP(act_pos, nxt_pos);
                     CCPM_LAPP(act_ids, CCPM_FAKE);
 
@@ -1372,7 +1375,7 @@ ccpmResultEn ccpm_optimize_network_stage_2(size_t n_max,
 ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids,     uint32_t * act_pos,
                                      uint32_t * act_src,     uint32_t * act_dst,
                                      uint32_t * to_do,       uint32_t * events,
-                                     uint32_t * sort_values, uint32_t * tmp)
+                                     uint32_t * sort_values, uint32_t * tmp, size_t n_max)
 {
     ccpmResultEn ret = CCPM_OK;
     size_t i;
@@ -1438,6 +1441,11 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids,     uint32_t * act_pos,
             if ((CCPM_LITEM(act_dst, i) == CCPM_LITEM(act_dst, j)) &&
                 (CCPM_LITEM(act_src, i) == CCPM_LITEM(act_src, j)))
             {
+                size_t nxt_pos = CCPM_LLEN(act_ids);
+
+                /*Check for limits*/
+                CCPM_CHECK_RETURN(nxt_pos <= n_max, CCPM_ELIM);
+
                 /* Mark second activity as not to_do */
                 CCPM_LITEM(to_do, j) = false;
 
@@ -1446,7 +1454,6 @@ ccpmResultEn ccpm_add_needed_dummies(uint16_t * act_ids,     uint32_t * act_pos,
                 CCPM_LITEM(act_dst, j) = evt;
 
                 /* Add dummy activity */
-                size_t nxt_pos = CCPM_LLEN(act_ids);
                 CCPM_LAPP(act_pos, nxt_pos);
                 CCPM_LAPP(act_ids, CCPM_FAKE);
                 CCPM_LAPP(act_src, evt);
@@ -1786,7 +1793,7 @@ ccpmResultEn ccpm_make_aoa(uint16_t * act_ids, uint16_t * lnk_src, uint16_t * ln
     //n_events = CCPM_LLEN(_events);
     CCPM_TRY_GOTO_END(ccpm_add_needed_dummies(_act_ids, _act_pos,
                                              _act_src, _act_dst, _started, _events,
-                                             _sort_values, _tmp));
+                                             _sort_values, _tmp, n_max));
     _CCPM_PRINT_NET(_act_src, _act_dst);
     _CCPM_PRINT_ACT_POS(_act_ids, _act_pos);
 
