@@ -237,6 +237,28 @@ restore the old behavior.
   **Event.to_dict()** have changed to reflect the removal of opt_pre and
   pes_pre. Users relying on those field names in the output should switch
   to **early[LWR]** and **early[UPR]**.
+* **Split of the time-parameter computation.** The monolithic
+  **_compute_time_params** is now two methods:
+  **_compute_time_params_pre** (preliminary passes plus the freezing of the
+  per-activity durations via **ArrowActivity.compute_final_duration**) and
+  **_compute_time_params** (final passes plus the time reserves). The
+  triangle-group optimization **_network_postprocess** runs between them,
+  so it compares already frozen **ArrowActivity.duration** values and the
+  final passes re-traverse the post-processed topology.
+* **Event stage is computed after the network post-processing.** The
+  'stage' pass runs after **_network_postprocess**, so **Event.stage**
+  describes the post-processed topology. As a consequence, the final
+  **Event.id** numbering (assigned by sorting the events by stage) and the
+  layers produced by **viz(group_by_stage=True)** may differ from previous
+  builds. Note that **Event.stage** is zero on every event while the
+  preliminary and final passes run, so a duration callback must not rely
+  on it.
+* **Event renumbering moved to the end of construction.** **Event.id** is
+  reassigned only after the topology has been finalised by
+  **_network_postprocess**. The IDs seen by a duration callback during the
+  time passes are therefore the construction-time IDs, not the final ones;
+  **_network_postprocess** itself also works with the construction-time
+  IDs.
 
 ---
 

@@ -174,11 +174,12 @@ def resource_duration(effort, activity, base_time, target):
         Resource effort. Positive for forward pass, negative for backward pass.
     activity : ArrowActivity
         Activity for context-aware calculations.
-    base_time : float or None
-        Base time during network traversal, or None for post-processing.
-    target : str or None
-        Scenario identifier. One of ``'early_pre'``, ``'late_pre'``,
-        ``'early'``, ``'late'``, or ``None`` (for network post-processing).
+    base_time : float
+        Base time during network traversal — the ``EXP`` component of the
+        source event's base time. The callback is invoked only during the
+        preliminary passes, so it is never ``None``.
+    target : str
+        Scenario identifier. One of ``'early_pre'`` or ``'late_pre'``.
 
     Returns
     -------
@@ -238,7 +239,8 @@ for activity in model_resource.activities:
    is used instead. This is what keeps `late >= early` consistent when
    the callback depends on `base_time`.
  * During network post-processing (dummy-activity triangle optimization)
-   the callback is called with `base_time=None, target=None`.
+   the callback is **not** invoked either: the already frozen
+   `ArrowActivity.duration[EXP]` values are compared instead.
 
 ## Input Formats
 

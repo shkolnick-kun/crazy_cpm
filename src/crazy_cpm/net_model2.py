@@ -605,9 +605,9 @@ def _default_duration(effort, activity, base_time, target):
     -----
     The function must preserve the sign of the ``effort`` parameter to
     ensure correct forward and backward pass calculations in the network.
-    When ``base_time`` is ``None``, the function should return a duration
-    estimate without considering time-based resource availability
-    constraints.
+    ``base_time`` is always a ``float``: the callback is invoked only
+    during the preliminary (``'early_pre'`` / ``'late_pre'``) passes, and
+    the model never passes ``None``.
 
     Examples
     --------
@@ -1094,13 +1094,15 @@ class ArrowActivity(object):
         Freeze forward- and backward-pass durations from the preliminary
         (``_pre``) phase results.
 
-        This method is the **bridge between the two phases** of
-        :meth:`ActivityOnArrowModel._compute_time_params`. It reads the
-        preliminary times (``early_start``/``early_end``,
-        ``late_start``/``late_end`` as populated by the ``_pre`` passes),
-        derives a single fixed duration, and stores it in
-        :attr:`duration`. The second phase then uses this frozen value
-        instead of re-invoking the user's ``duration`` callback.
+        This method is the **bridge between the two phases**: it is
+        called at the end of
+        :meth:`ActivityOnArrowModel._compute_time_params_pre`, and the
+        second phase (:meth:`ActivityOnArrowModel._compute_time_params`)
+        then uses the frozen value instead of re-invoking the user's
+        ``duration`` callback. It reads the preliminary times
+        (``early_start``/``early_end``, ``late_start``/``late_end`` as
+        populated by the ``_pre`` passes), derives a single fixed
+        duration, and stores it in :attr:`duration`.
 
         Freezing is required whenever the ``duration`` callback depends
         on ``base_time`` -- i.e. when resource availability varies over
@@ -1825,7 +1827,8 @@ class ActivityOnArrowModel:
     Notes
     -----
     **Two-phase time computation.** Time parameters are computed in two
-    phases (see :meth:`_compute_time_params` for the full sequence):
+    phases separated by the network post-processing (see
+    :meth:`_compute_time_params_pre` and :meth:`_compute_time_params`):
 
     1. The preliminary (``_pre``) passes compute early/late times using
        the raw resource effort estimates. The user's ``duration``
@@ -1836,9 +1839,12 @@ class ActivityOnArrowModel:
     2. :meth:`ArrowActivity.compute_final_duration` freezes a single
        duration value (``ArrowActivity.duration``) derived from those
        preliminary values.
-    3. The final passes re-traverse the network using the frozen
-       duration (the backward pass applies :func:`_negative`). The
-       user's ``duration`` callback is **not** invoked again in the
+    3. :meth:`_network_postprocess` moves maximum-duration activities
+       onto the straight edges of the triangle groups. It compares the
+       already frozen durations, so it can only run at this point.
+    4. The final passes re-traverse the post-processed network using the
+       frozen duration (the backward pass applies :func:`_negative`).
+       The user's ``duration`` callback is **not** invoked again in the
        final passes.
 
     Freezing is required whenever the ``duration`` callback depends on
@@ -1869,6 +1875,28 @@ class ActivityOnArrowModel:
       mismatch. The value reported by :meth:`ArrowActivity.to_dict` is
       the frozen one.
 
+    **Construction order.** :meth:`__init__` performs the following
+    steps in exactly this order:
+
+    1. :meth:`_create_model` -- build the AoA network (real and dummy
+       activities) and collect the source events of the dummy
+       activities.
+    2. :meth:`_compute_time_params_pre` -- preliminary passes, then
+       freezing of the durations.
+    3. :meth:`_network_postprocess` -- move maximum-duration activities
+       onto the straight edges of the triangle groups.
+    4. :meth:`_compute_target` with ``'stage'`` -- topological stage of
+       every event, computed on the post-processed topology.
+    5. :meth:`_compute_time_params` -- final passes and time reserves.
+    6. Sort the events by ``stage`` and renumber ``Event.id`` starting
+       from ``1``.
+
+    Note that the triangle-group optimization runs after the durations
+    have been frozen (it compares them) and before both the stage pass
+    and the final passes, so the stages and the event times both
+    describe the post-processed topology, while the final event numbering
+    is assigned only after the topology has been modified.
+
     **Duration callback contract.** The duration callback function must
     preserve the sign of the effort parameter to ensure correct forward
     and backward pass calculations:
@@ -1879,9 +1907,10 @@ class ActivityOnArrowModel:
       ``duration <= 0``
     - For zero effort: ``duration == 0``
 
-    When ``base_time`` is ``None`` in the duration callback, it
-    indicates that the function should return a duration estimate
-    without considering time-based resource availability constraints.
+    ``base_time`` is always a ``float`` -- the ``EXP`` component of the
+    source event's base time. The callback is invoked only during the
+    preliminary (``'early_pre'`` / ``'late_pre'``) passes, so it is never
+    called with ``None``.
 
     **Numerical consistency.** Numerical consistency of early/late time
     parameters is enforced *during* the forward and backward passes (see
@@ -1964,14 +1993,14 @@ class ActivityOnArrowModel:
         if len(self._events) == 0:
             raise RuntimeError("Network construction resulted in no events. Check input data.")
 
-        # Compute stages of project
-        self._compute_target('stage')
-
         # Compute Event and Activity time parameters (phase 1)
         self._compute_time_params_pre()
 
         # Postprocess created network
         self._network_postprocess(dummy_srcs)
+
+        # Compute stages of project on the post-processed topology
+        self._compute_target('stage')
 
         # Compute Event and Activity time parameters (phase 2)
         self._compute_time_params()
@@ -2107,9 +2136,11 @@ class ActivityOnArrowModel:
 
         Internal method that constructs the network graph, creates events
         and activities, and sets up the model for analysis. It delegates
-        the AoA network generation to the C extension
-        ``_ccpm.make_aoa``, then performs a post-processing step to place
-        maximum-duration activities on the long side of triangle groups.
+        the AoA network generation to the C extension ``_ccpm.make_aoa``.
+        The triangle-group optimization that places maximum-duration
+        activities on the straight edges is performed separately, by
+        :meth:`_network_postprocess`, between the two time-computation
+        phases.
 
         Parameters
         ----------
@@ -2123,6 +2154,14 @@ class ActivityOnArrowModel:
             Default risk factor for effort estimation
         next_act_id : int
             Starting ID for automatically generated activities
+
+        Returns
+        -------
+        set of int
+            IDs of the events that are sources of dummy activities. The
+            set is consumed by :meth:`_network_postprocess` and is
+            expressed in the event IDs assigned during construction, i.e.
+            before the final renumbering.
 
         Raises
         ------
@@ -2191,6 +2230,58 @@ class ActivityOnArrowModel:
         return dsrc
 
     def _network_postprocess(self, dsrc):
+        """
+        Place maximum-duration activities on the straight edges of
+        triangle groups.
+
+        A *triangle group* is a pair of events ``(W, Z)`` connected both
+        directly, by a single activity ``a`` (``W -> Z``), and
+        indirectly, through an intermediate event ``X``
+        (``W -> X -> Z``). Every event that is a source of a dummy
+        activity and has at most one incoming and at most one outgoing
+        activity is treated as a candidate intermediate event; the group
+        key is ``(bck[0].src.id, fwd[0].dst.id)``, i.e. ``(W, Z)``. All
+        candidates sharing a key are collected in one group, but only if
+        a direct ``W -> Z`` activity exists.
+
+        For each group the activity with the largest frozen
+        :attr:`ArrowActivity.duration` is moved onto the direct edge by
+        swapping destinations: the ``W -> X`` candidate becomes
+        ``W -> Z``, and the previously direct ``W -> Z`` activity becomes
+        ``W -> X``.
+
+        Parameters
+        ----------
+        dsrc : set of int
+            IDs of the events that are sources of dummy activities, as
+            returned by :meth:`_create_model`. The IDs are the ones
+            assigned during construction, i.e. before the final
+            renumbering.
+
+        Notes
+        -----
+        - This method is called from :meth:`__init__` *between* the two
+          time-computation phases: after
+          :meth:`_compute_time_params_pre` (which freezes
+          :attr:`ArrowActivity.duration`) and before
+          :meth:`_compute_time_params` (which recomputes the event times
+          for the post-processed topology).
+        - Durations are compared using the **frozen**
+          ``duration[EXP]`` values produced by
+          :meth:`ArrowActivity.compute_final_duration`; the ``duration``
+          callback is not invoked here.
+        - The swap does not invalidate the frozen durations: only the
+          destination events are exchanged, while both swapped activities
+          keep their source event and therefore their ``base_time`` (the
+          ``EXP`` component of the source event's time), on which the
+          callback result depends.
+        - Only the destination links are changed. Event ``stage`` values
+          are computed after this method (see the construction order in
+          :class:`ActivityOnArrowModel`), so they describe the
+          post-processed topology.
+        - If no direct ``W -> Z`` activity exists, the group is not
+          registered and the candidate is left untouched.
+        """
 
         # Network postprocessing
         # Make sure that activities with largest efforts are on straight paths between events
@@ -2261,49 +2352,41 @@ class ActivityOnArrowModel:
     #==========================================================================
     def _compute_time_params_pre(self):
         """
-        Compute all time parameters for events and activities.
+        Compute the preliminary (phase 1) time parameters and freeze the
+        per-activity durations.
 
-        This method performs the full two-phase computation: preliminary
-        (``_pre``) passes on raw effort estimates, freezing of
-        per-activity durations via
-        :meth:`ArrowActivity.compute_final_duration`, then final passes
-        on the frozen durations.
+        This is the first of the two time-computation phases. It runs the
+        preliminary (``_pre``) passes on the raw effort estimates and then
+        freezes a single duration value per activity via
+        :meth:`ArrowActivity.compute_final_duration`. The final passes and
+        the time reserves are computed by :meth:`_compute_time_params`,
+        which :meth:`__init__` calls after :meth:`_network_postprocess`.
 
         Raises
         ------
         RuntimeError
-            If any activity or event has a negative expected time
-            reserve, indicating a programming error or corrupted network.
-            Also propagates :exc:`RuntimeError` from
-            :meth:`_compute_target`, which is raised when a CPM invariant
-            is violated beyond the accumulated error bound. These checks
-            apply to both the preliminary and the final passes.
+            Propagates :exc:`RuntimeError` from :meth:`_compute_target`,
+            which is raised when a CPM invariant is violated beyond the
+            accumulated error bound.
 
         Notes
         -----
-        The computation is performed in **two phases**.
+        The phase consists of the following steps:
 
-        **Phase 1 (preliminary).** A forward pass (``early_pre``) and a
-        backward pass (``late_pre``) are run using the raw
-        ``a.expected`` effort estimate. The forward pass invokes the
-        user's ``duration`` callback via the inner ``_duration_vec`` of
-        :meth:`_compute_target` (for each of ``EXP``, ``UPR``, and
-        ``LWR`` with the same base time). The backward pass starts from
-        the maximum preliminary early time across all events.
-
-        **Bridge.** :meth:`ArrowActivity.compute_final_duration` reads
-        the preliminary times and freezes a single duration value per
-        activity (``ArrowActivity.duration``). Because the same frozen
-        value is used by both final passes (the backward pass applies
-        :func:`_negative`), the start and end reserves are equal by
-        construction.
-
-        **Phase 2 (final).** The forward pass (``early``) and the
-        backward pass (``late``) re-traverse the network using the
-        frozen ``duration``; the user's ``duration`` callback is **not**
-        invoked here. The backward pass starts from the maximum final
-        early time across all events. Time reserves are computed after
-        phase 2 from the final event and activity times.
+        1. Forward pass (``'early_pre'``) over the raw ``a.expected``
+           effort estimate. The user's ``duration`` callback is invoked
+           via the inner ``_duration_vec`` of :meth:`_compute_target`
+           (once for each of ``EXP``, ``UPR``, and ``LWR``, all with the
+           same base time).
+        2. Initialisation of ``late_pre`` for every event from the
+           maximum ``early_pre`` across the network, followed by the
+           backward pass (``'late_pre'``).
+        3. Freezing of the durations: for every activity,
+           :meth:`ArrowActivity.compute_final_duration` derives a single
+           ``duration`` value from the preliminary times. Because the
+           same frozen value is used by both final passes (the backward
+           pass applies :func:`_negative`), the start and end reserves
+           are equal by construction.
 
         Numerical consistency of time parameters is enforced *during*
         the network traversal inside :meth:`_compute_target` by the
@@ -2318,18 +2401,9 @@ class ActivityOnArrowModel:
         inside :meth:`_compute_target` and propagate through this
         method.
 
-        Once all time parameters are computed, time reserves with
-        ``reserve[EXP] < reserve[ERR]`` (including slightly negative
-        reserves within the error bound) are rounded to zero: the
-        ``LWR`` and ``UPR`` components of the reserve vector are shifted
-        by ``-reserve[EXP]`` and ``reserve[EXP]`` is set to ``0.0``.
-        This keeps the reserve triple consistent (``LWR <= 0 <= UPR``)
-        while preserving the scenario range. Reserves with
-        ``reserve[EXP] < -reserve[ERR]`` raise :exc:`RuntimeError`.
-
-        For activities, the start and end reserves are computed
-        separately (because resource availability may be time-dependent)
-        and the most certain one is selected via :func:`_choice`.
+        This method is called from :meth:`__init__` before
+        :meth:`_network_postprocess`, which relies on the frozen
+        :attr:`ArrowActivity.duration` values produced here.
         """
         self._compute_target('early_pre')
 
@@ -2349,6 +2423,50 @@ class ActivityOnArrowModel:
 
 
     def _compute_time_params(self):
+        """
+        Compute the final (phase 2) time parameters and the time reserves.
+
+        This is the second of the two time-computation phases. It
+        re-traverses the network using the durations frozen by
+        :meth:`_compute_time_params_pre` and then derives the reserves.
+        The user's ``duration`` callback is **not** invoked here.
+
+        Raises
+        ------
+        RuntimeError
+            If any activity or event has a negative expected time
+            reserve, indicating a programming error or corrupted network.
+            Also propagates :exc:`RuntimeError` from
+            :meth:`_compute_target`, which is raised when a CPM invariant
+            is violated beyond the accumulated error bound.
+
+        Notes
+        -----
+        The phase consists of the following steps:
+
+        1. Forward pass (``'early'``) using the frozen
+           :attr:`ArrowActivity.duration` as the delta.
+        2. Initialisation of ``late`` for every event from the maximum
+           ``early`` across the network, followed by the backward pass
+           (``'late'``) using :func:`_negative` of the same frozen
+           duration.
+        3. Time reserves. Reserves with ``reserve[EXP] < reserve[ERR]``
+           (including slightly negative reserves within the error bound)
+           are rounded to zero: the ``LWR`` and ``UPR`` components of the
+           reserve vector are shifted by ``-reserve[EXP]`` and
+           ``reserve[EXP]`` is set to ``0.0``. This keeps the reserve
+           triple consistent (``LWR <= 0 <= UPR``) while preserving the
+           scenario range. Reserves with ``reserve[EXP] <
+           -reserve[ERR]`` raise :exc:`RuntimeError`.
+
+        For activities, the start and end reserves are computed
+        separately (because resource availability may be time-dependent)
+        and the most certain one is selected via :func:`_choice`.
+
+        This method is called from :meth:`__init__` after
+        :meth:`_network_postprocess`, so it works on the post-processed
+        topology and recomputes the event times for it.
+        """
         self._compute_target('early')
 
         # Set late times starting from project completion
@@ -3448,16 +3566,15 @@ if __name__ == '__main__':
             - Negative number or zero for backward pass
         activity : ArrowActivity
             Activity object containing resource data
-        base_time : float or None
+        base_time : float
             Base time for availability calculations during network
-            traversal, or ``None`` for network post-processing. For the
-            internal ``EXP`` / ``UPR`` / ``LWR`` calls, ``base_time``
-            is the same scalar (the ``EXP`` component of the event's
-            base time).
-        target : str or None
+            traversal -- the ``EXP`` component of the source event's
+            base time. For the internal ``EXP`` / ``UPR`` / ``LWR`` calls
+            this is the same scalar. The callback is invoked only during
+            the preliminary passes, so ``base_time`` is never ``None``.
+        target : str
             Target scenario identifier (can be used for scenario-specific
-            logic). One of ``'early_pre'``, ``'late_pre'``, ``'early'``,
-            ``'late'``, or ``None``.
+            logic). One of ``'early_pre'`` or ``'late_pre'``.
 
         Returns
         -------
@@ -3467,7 +3584,7 @@ if __name__ == '__main__':
         team = activity.data.get('team_size', 1)
         prod = activity.data.get('productivity', 1.0)
 
-        if base_time is None or effort == 0 or team * prod <= 0:
+        if effort == 0 or team * prod <= 0:
             return effort
 
         daily_cap = team * prod
@@ -3633,3 +3750,5 @@ if __name__ == '__main__':
         n_old.viz(output_path=viz_path)
         print(f"Visualization saved as '{viz_path}'")
     print(f"Target directory: {target_dir}")
+
+    
