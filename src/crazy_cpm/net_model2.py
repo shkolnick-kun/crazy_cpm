@@ -1967,12 +1967,14 @@ class ActivityOnArrowModel:
         # Compute stages of project
         self._compute_target('stage')
 
-        # Compute Event and Activity time parameters (two-phase; see the
-        # class-level Notes and _compute_time_params for details)
-        self._compute_time_params()
+        # Compute Event and Activity time parameters (phase 1)
+        self._compute_time_params_pre()
 
         # Postprocess created network
         self._network_postprocess(dummy_srcs)
+
+        # Compute Event and Activity time parameters (phase 2)
+        self._compute_time_params()
 
         # Renumerate events according to the rules of network modeling
         self._events.sort(key=lambda e: e.stage)
@@ -2257,7 +2259,7 @@ class ActivityOnArrowModel:
         return data_copy
 
     #==========================================================================
-    def _compute_time_params(self):
+    def _compute_time_params_pre(self):
         """
         Compute all time parameters for events and activities.
 
@@ -2345,6 +2347,8 @@ class ActivityOnArrowModel:
         for a in self._activities:
             a.compute_final_duration()
 
+
+    def _compute_time_params(self):
         self._compute_target('early')
 
         # Set late times starting from project completion
