@@ -1629,6 +1629,396 @@ def _calculate_action_time_params(work_data, default_risk=0.3):
     return ret
 
 #==============================================================================
+def _sanitize_ordering(vec, label, where, target):
+    """
+    Enforce the component ordering ``LWR <= EXP <= UPR`` on a component
+    vector in place.
+
+    The function handles three cases:
+
+    1. The interval is inverted beyond the error bound
+       (``LWR - UPR > ERR``): raises :exc:`RuntimeError`.
+    2. The interval is inverted within the error bound: collapses
+       ``LWR`` and ``UPR`` to ``EXP`` (after verifying that ``EXP`` also
+       lies within ``ERR`` of the inverted interval).
+    3. ``EXP`` lies outside ``[LWR, UPR]`` but within the error bound:
+       shifts the whole interval so that ``EXP`` falls inside, preserving
+       its width. A shift larger than ``ERR`` raises
+       :exc:`RuntimeError`.
+
+    Parameters
+    ----------
+    vec : numpy.ndarray
+        Component array ``[EXP, VAR, LWR, UPR, ERR]``, modified in place.
+    label : str
+        Human-readable element label used in error messages (e.g.
+        ``"Activity A"`` or ``"Event 3"``).
+    where : str
+        Name of the quantity being sanitized (e.g. ``'early start'``,
+        ``'late end'``), used in error messages.
+    target : str
+        Name of the current pass (e.g. ``'early_pre'``, ``'late'``),
+        used in error messages.
+
+    Raises
+    ------
+    RuntimeError
+        If the violation exceeds the accumulated error bound.
+    """
+    # Step 1: interval inverted beyond the error bound
+    if vec[LWR] - vec[UPR] > vec[ERR]:
+        raise RuntimeError(
+            f"{label} has abnormal {target} {where} interval "
+            f"({vec[LWR]} > {vec[UPR]})"
+        )
+
+    # Step 2: interval inverted within the error bound — collapse to EXP
+    if vec[LWR] > vec[UPR]:
+        # EXP must also lie within ERR of the (inverted) interval,
+        # otherwise the noise assumption does not hold
+        if vec[UPR] - vec[EXP] > vec[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal {target} {where} "
+                f"({vec[EXP]} < {vec[UPR]})"
+            )
+        if vec[EXP] - vec[LWR] > vec[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal {target} {where} "
+                f"({vec[EXP]} > {vec[LWR]})"
+            )
+        vec[LWR] = vec[EXP]
+        vec[UPR] = vec[EXP]
+        return
+
+    # Step 3: clamp EXP into [LWR, UPR] by shifting the whole interval
+    if vec[EXP] < vec[LWR]:
+        delta = vec[LWR] - vec[EXP]
+        if delta > vec[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal {target} {where} "
+                f"({vec[EXP]} < {vec[LWR]})"
+            )
+        vec[EXP] += delta
+        vec[UPR] += delta
+    elif vec[EXP] > vec[UPR]:
+        delta = vec[EXP] - vec[UPR]
+        if delta > vec[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal {target} {where} "
+                f"({vec[EXP]} > {vec[UPR]})"
+            )
+        vec[EXP] -= delta
+        vec[LWR] -= delta
+
+    return
+
+#==============================================================================
+def _sanitize_end_ge_start(start_vec, end_vec, label, target):
+    """
+    Enforce the invariant ``end >= start`` component-wise, in place.
+
+    For each of the components ``EXP``, ``UPR``, ``LWR`` the function
+    checks that ``start <= end``. Violations larger than the sum of the
+    two error bounds raise :exc:`RuntimeError`. A violation of the
+    ``EXP`` component within the error bound is corrected by shifting
+    the entire ``end`` vector (``EXP``, ``UPR``, ``LWR``) by the
+    required delta.
+
+    Parameters
+    ----------
+    start_vec : numpy.ndarray
+        Start-time component array ``[EXP, VAR, LWR, UPR, ERR]``.
+    end_vec : numpy.ndarray
+        End-time component array ``[EXP, VAR, LWR, UPR, ERR]``, modified
+        in place.
+    label : str
+        Human-readable element label used in error messages.
+    target : str
+        Name of the current pass, used in error messages.
+
+    Raises
+    ------
+    RuntimeError
+        If ``end < start`` for any checked component beyond the sum of
+        the corresponding error bounds.
+    """
+    for c in (EXP, UPR, LWR):
+        diff = start_vec[c] - end_vec[c]
+        if diff > start_vec[ERR] + end_vec[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal {target} end time "
+                f"({end_vec[c]} < {start_vec[c]}) for component {c}"
+            )
+
+    if start_vec[EXP] > end_vec[EXP]:
+        delta = start_vec[EXP] - end_vec[EXP]
+        end_vec[EXP] += delta
+        end_vec[UPR] += delta
+        end_vec[LWR] += delta
+
+    return
+
+#==============================================================================
+def _sanitize_act(a, target):
+    """
+    Enforce the CPM invariants on an activity's time parameters in place.
+
+    Depending on ``target``, the function sanitizes either the early
+    (``'early_pre'`` / ``'early'``) or the late (``'late_pre'`` /
+    ``'late'``) parameters of ``a``:
+
+    For early passes:
+
+    - decouples ``early_start`` / ``early_end`` from the event arrays
+      (``copy()``) before modifying them;
+    - clamps ``early_start[LWR]`` to ``>= 0`` by shifting the whole
+      vector;
+    - normalizes component ordering, enforces ``early_end >=
+      early_start``, then re-normalizes ordering.
+
+    For late passes:
+
+    - decouples ``late_start`` / ``late_end`` from the event arrays;
+    - checks ``late_start[EXP] >= early_start[EXP]`` and
+      ``late_end[EXP] >= late_start[EXP]`` (shifting the scenario bounds
+      together with ``EXP`` if within the error bound, raising
+      otherwise);
+    - normalizes component ordering, enforces ``late_end >=
+      late_start``, then re-normalizes ordering.
+
+    Parameters
+    ----------
+    a : ArrowActivity
+        Activity to sanitize.
+    target : str
+        One of ``'early_pre'``, ``'early'``, ``'late_pre'``, ``'late'``.
+
+    Raises
+    ------
+    RuntimeError
+        If any invariant is violated beyond the accumulated error bound.
+    """
+    label = f"Activity {a.letter}"
+
+    if target in ['early_pre', 'early']:
+        # Decouple activities from events
+        a.early_start = a.early_start.copy()
+        a.early_end   = a.early_end.copy()
+
+        # Time params lower limit
+        if a.early_start[LWR] < 0.0:
+            a.early_start[EXP] -= a.early_start[LWR]
+            a.early_start[UPR] -= a.early_start[LWR]
+            a.early_start[LWR] = 0.0
+
+        # Normalize component ordering, then enforce end >= start,
+        # then re-normalize ordering (the end shift may perturb it)
+        _sanitize_ordering(a.early_start, label, 'early start', target)
+        _sanitize_ordering(a.early_end,   label, 'early end',   target)
+        _sanitize_end_ge_start(a.early_start, a.early_end, label, target)
+        _sanitize_ordering(a.early_start, label, 'early start', target)
+        _sanitize_ordering(a.early_end,   label, 'early end',   target)
+
+    elif target in ['late_pre', 'late']:
+        # Decouple activities from events
+        a.late_start = a.late_start.copy()
+        a.late_end   = a.late_end.copy()
+
+        # Invariant is preserved only for expected value
+        if a.early_start[EXP] - a.late_start[EXP] > a.early_start[ERR] + a.late_start[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal {target} expected start time "
+                f"({a.late_start[EXP]} < {a.early_start[EXP]})"
+            )
+
+        if a.late_start[EXP] < a.early_start[EXP]:
+            delta = a.early_start[EXP] - a.late_start[EXP]
+            a.late_start[EXP] += delta
+            a.late_start[UPR] += delta
+            a.late_start[LWR] += delta
+
+        # Invariant is preserved only for expected value
+        if a.late_start[EXP] - a.late_end[EXP] > a.late_start[ERR] + a.late_end[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal {target} expected end time "
+                f"({a.late_end[EXP]} < {a.late_start[EXP]})"
+            )
+
+        if a.late_end[EXP] < a.late_start[EXP]:
+            delta = a.late_start[EXP] - a.late_end[EXP]
+            a.late_end[EXP] += delta
+            a.late_end[UPR] += delta
+            a.late_end[LWR] += delta
+
+        # Normalize component ordering, then enforce end >= start,
+        # then re-normalize ordering (the end shift may perturb it)
+        _sanitize_ordering(a.late_start, label, 'late start', target)
+        _sanitize_ordering(a.late_end,   label, 'late end',   target)
+        _sanitize_end_ge_start(a.late_start, a.late_end, label, target)
+        _sanitize_ordering(a.late_start, label, 'late start', target)
+        _sanitize_ordering(a.late_end,   label, 'late end',   target)
+
+    return
+
+#==============================================================================
+def _sanitize_evt(e, target):
+    """
+    Enforce the CPM invariants on an event's time parameters in place.
+
+    Depending on ``target``:
+
+    - ``'early_pre'``: clamps ``early_pre[LWR]`` to ``>= 0`` by shifting
+      ``EXP`` and ``UPR``.
+    - ``'late_pre'``: checks ``late_pre[EXP] >= early_pre[EXP]``
+      (shifting the scenario bounds if within the error bound, raising
+      otherwise).
+    - ``'early'``: clamps ``early[LWR]`` to ``>= 0`` and then normalizes
+      component ordering.
+    - ``'late'``: checks ``late[EXP] >= early[EXP]`` (shifting the
+      scenario bounds if within the error bound, raising otherwise) and
+      then normalizes component ordering.
+
+    Parameters
+    ----------
+    e : Event
+        Event to sanitize.
+    target : str
+        One of ``'early_pre'``, ``'late_pre'``, ``'early'``, ``'late'``.
+
+    Raises
+    ------
+    RuntimeError
+        If ``late < early`` beyond the accumulated error bound.
+    """
+    label = f"Event {e.id}"
+
+    if 'early_pre' == target:
+        if e.early_pre[LWR] < 0.0:
+            e.early_pre[EXP] -= e.early_pre[LWR]
+            e.early_pre[UPR] -= e.early_pre[LWR]
+            e.early_pre[LWR] = 0.0
+
+    elif 'late_pre' == target:
+        # Invariant is preserved only for expected value
+        if e.early_pre[EXP] - e.late_pre[EXP] > e.late_pre[ERR] + e.early_pre[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal late expected preliminary time "
+                f"({e.late_pre[EXP]} < {e.early_pre[EXP]})"
+            )
+
+        if e.late_pre[EXP] < e.early_pre[EXP]:
+            delta = e.early_pre[EXP] - e.late_pre[EXP]
+            e.late_pre[EXP] += delta
+            e.late_pre[UPR] += delta
+            e.late_pre[LWR] += delta
+
+    elif 'early' == target:
+        if e.early[LWR] < 0.0:
+            e.early[EXP] -= e.early[LWR]
+            e.early[UPR] -= e.early[LWR]
+            e.early[LWR] = 0.0
+
+        _sanitize_ordering(e.early, label, 'early', target)
+
+    elif 'late' == target:
+        # Invariant is preserved only for expected value
+        if e.early[EXP] - e.late[EXP] > e.late[ERR] + e.early[ERR]:
+            raise RuntimeError(
+                f"{label} has abnormal expected late time "
+                f"({e.late[EXP]} < {e.early[EXP]})"
+            )
+
+        if e.late[EXP] < e.early[EXP]:
+            delta = e.early[EXP] - e.late[EXP]
+            e.late[EXP] += delta
+            e.late[UPR] += delta
+            e.late[LWR] += delta
+
+        _sanitize_ordering(e.late, label, 'late', target)
+
+    return
+#==============================================================================
+def _choice_early(old, new):
+    """
+    Forward-pass wrapper around :func:`_choice`.
+
+    Selects between ``old`` and ``new`` early-time estimates using
+    ``delta = new[EXP] - old[EXP]`` (the new estimate is "better" when
+    it is larger).
+
+    Parameters
+    ----------
+    old : numpy.ndarray
+        Existing early-time estimate ``[EXP, VAR, LWR, UPR, ERR]``.
+    new : numpy.ndarray
+        Candidate early-time estimate ``[EXP, VAR, LWR, UPR, ERR]``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Selected (or mixed) estimate. See :func:`_choice`.
+    """
+    return _choice(old, new, new[EXP] - old[EXP])
+
+#==============================================================================
+def _choice_late(old, new):
+    """
+    Backward-pass wrapper around :func:`_choice`.
+
+    Selects between ``old`` and ``new`` late-time estimates using
+    ``delta = old[EXP] - new[EXP]`` (the new estimate is "better" when
+    it is smaller).
+
+    Parameters
+    ----------
+    old : numpy.ndarray
+        Existing late-time estimate ``[EXP, VAR, LWR, UPR, ERR]``.
+    new : numpy.ndarray
+        Candidate late-time estimate ``[EXP, VAR, LWR, UPR, ERR]``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Selected (or mixed) estimate. See :func:`_choice`.
+    """
+    return _choice(old, new, old[EXP] - new[EXP])
+
+#==============================================================================
+def _delta_early(a):
+    """
+    Forward-pass delta for an activity.
+
+    Parameters
+    ----------
+    a : ArrowActivity
+        Activity whose effort is used as the delta.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``a.expected`` -- the raw resource effort component array.
+    """
+    return a.expected
+
+#==============================================================================
+def _delta_late(a):
+    """
+    Backward-pass delta for an activity.
+
+    Parameters
+    ----------
+    a : ArrowActivity
+        Activity whose effort is used as the delta.
+
+    Returns
+    -------
+    numpy.ndarray
+        :func:`_negative` of ``a.expected``, so that the signed
+        backward-pass arithmetic yields a non-negative duration.
+    """
+    return _negative(a.expected)
+
+#==============================================================================
 class ActivityOnArrowModel:
     """
     Main class for CPM/PERT network analysis with resource-aware
@@ -2524,6 +2914,115 @@ class ActivityOnArrowModel:
                 a.reserve[LWR] -= a.reserve[EXP]
                 a.reserve[EXP] = 0.0
 
+
+    #==========================================================================
+    def _duration_vec(self, effort, activity, base_time, target):
+        """
+        Compute a duration component vector with variance
+        propagation for PERT analysis.
+
+        Used by the preliminary (``_pre``) passes. The callback is
+        invoked three times -- for ``effort[EXP]``, ``effort[UPR]``,
+        and ``effort[LWR]`` -- all with the **same** ``base_time``
+        (``base_time[EXP]``). Using a single base time is what
+        guarantees ``dur[LWR] <= dur[EXP] <= dur[UPR]``.
+
+        Parameters
+        ----------
+        effort : numpy.ndarray
+            Resource effort component array
+            ``[EXP, VAR, LWR, UPR, ERR]``
+        activity : ArrowActivity
+            Activity object for context
+        base_time : numpy.ndarray
+            Base time component array
+            ``[EXP, VAR, LWR, UPR, ERR]``
+        target : str
+            Target scenario identifier
+
+        Returns
+        -------
+        numpy.ndarray
+            Duration component array
+            ``[EXP, VAR, LWR, UPR, ERR]``
+
+        Notes
+        -----
+        - If the model uses the default duration callback, the
+          effort array is returned as a copy.
+        - Otherwise, the callback is invoked for ``effort[EXP]``,
+          ``effort[UPR]``, and ``effort[LWR]``. The error bound is
+          set to ``EPS * max(|dur[UPR]|, |dur[LWR]|,
+          |dur[UPR] - dur[LWR]|)``.
+        - For PERT models (``self.is_pert`` is true) with non-zero
+          effort variance, and only when
+          ``sqrt(effort[VAR]) > effort[ERR]`` **and**
+          ``effort[VAR] > sqrt(EPS) * gamma_nom``, an MPERT-style
+          mode correction is applied: if ``dur[EXP]`` is too close
+          to ``dur[LWR]`` it is pushed inside by ``2 * dur[ERR]``;
+          if it is too close to ``dur[UPR]``, ``dur[UPR]`` is grown
+          so that the mean stays strictly inside; then ``dur[VAR]``
+          is recomputed as
+          ``(dur[EXP] - dur[LWR]) * (dur[UPR] - dur[EXP]) /
+          (gamma + 3.0)`` (an algebraically equivalent form of the
+          beta-distribution variance formula, given
+          ``alpha = mu * (gamma + 2)`` and
+          ``beta = (1 - mu) * (gamma + 2)``, where
+          ``mu = (dur[EXP] - dur[LWR]) / (dur[UPR] - dur[LWR])``).
+          Otherwise the activity is treated as deterministic and
+          ``dur[UPR] = dur[LWR] = dur[EXP]``.
+        - If the activity is deterministic, ``dur[UPR]`` and
+          ``dur[LWR]`` are collapsed to ``dur[EXP]``.
+        """
+        # Optimize for default duration function
+        if _default_duration == self._duration:
+            return effort.copy()
+
+        dur = np.zeros((5,), dtype=float)
+
+        # Compute duration value and error bound
+        # effort[EXP] is float: positive for forward pass, negative for backward pass
+        dur[EXP] = self._duration(effort[EXP], activity, base_time[EXP], target)
+        # Yes, we use one time base here to guarantee that dur[LWR] <= dur[EXP] <= dur[UPR]
+        dur[UPR] = self._duration(effort[UPR], activity, base_time[EXP], target)
+        dur[LWR] = self._duration(effort[LWR], activity, base_time[EXP], target)
+
+        # Error bound
+        dur[ERR] = EPS * max(abs(dur[UPR]),  abs(dur[LWR]),  abs(dur[UPR] - dur[LWR]))
+
+        gamma_nom = (effort[EXP] - effort[LWR]) * (effort[UPR] - effort[EXP])
+
+        if (np.sqrt(effort[VAR]) <= effort[ERR] or
+            effort[VAR] <= np.sqrt(EPS) * gamma_nom or
+            not self.is_pert):
+            # Deterministic or fake activity
+            # VAR is zero already
+            dur[UPR] = dur[EXP]
+            dur[LWR] = dur[EXP]
+            return dur
+
+        # Model is PERT and activity is not deterministic.
+        # Make sure that mode is in (dur[LWR], dur[UPR]),
+        # use MPERT math here
+        gamma = gamma_nom / effort[VAR] - 3.0
+
+        # Condition for mode
+        if gamma < 6.0 * EPS:
+            gamma = 6.0 * EPS
+
+        # Now values corrections
+        thr = dur[LWR] + (dur[UPR] - dur[LWR]) / (gamma + 2.0)
+        if dur[EXP] <= thr:
+            dur[EXP] = thr + 2.0 * dur[ERR]
+
+        if dur[EXP] >= dur[UPR] - (dur[UPR] - dur[LWR]) / (gamma + 2.0):
+            dur[UPR] = ((gamma + 2.0) * dur[EXP] - dur[LWR]) / (gamma + 1.0) + 2.0 * dur[ERR]
+
+        dur[VAR] = (dur[EXP] - dur[LWR]) * (dur[UPR] - dur[EXP]) / (gamma + 3.0)
+
+        return dur
+
+
     #==========================================================================
     def _compute_target(self, target=None):
         """
@@ -2634,390 +3133,6 @@ class ActivityOnArrowModel:
         """
 
         #======================================================================
-        def _choice_early(old, new):
-            return _choice(old, new, new[EXP] - old[EXP])
-
-        #======================================================================
-        def _choice_late(old, new):
-            return _choice(old, new, old[EXP] - new[EXP])
-
-        #======================================================================
-        def _delta_early(a):
-            return a.expected
-
-        #======================================================================
-        def _delta_late(a):
-            return _negative(a.expected)
-
-        #======================================================================
-        def _duration_vec(effort, activity, base_time, target):
-            """
-            Compute a duration component vector with variance
-            propagation for PERT analysis.
-
-            Used by the preliminary (``_pre``) passes. The callback is
-            invoked three times -- for ``effort[EXP]``, ``effort[UPR]``,
-            and ``effort[LWR]`` -- all with the **same** ``base_time``
-            (``base_time[EXP]``). Using a single base time is what
-            guarantees ``dur[LWR] <= dur[EXP] <= dur[UPR]``.
-
-            Parameters
-            ----------
-            effort : numpy.ndarray
-                Resource effort component array
-                ``[EXP, VAR, LWR, UPR, ERR]``
-            activity : ArrowActivity
-                Activity object for context
-            base_time : numpy.ndarray
-                Base time component array
-                ``[EXP, VAR, LWR, UPR, ERR]``
-            target : str
-                Target scenario identifier
-
-            Returns
-            -------
-            numpy.ndarray
-                Duration component array
-                ``[EXP, VAR, LWR, UPR, ERR]``
-
-            Notes
-            -----
-            - If the model uses the default duration callback, the
-              effort array is returned as a copy.
-            - Otherwise, the callback is invoked for ``effort[EXP]``,
-              ``effort[UPR]``, and ``effort[LWR]``. The error bound is
-              set to ``EPS * max(|dur[UPR]|, |dur[LWR]|,
-              |dur[UPR] - dur[LWR]|)``.
-            - For PERT models (``self.is_pert`` is true) with non-zero
-              effort variance, and only when
-              ``sqrt(effort[VAR]) > effort[ERR]`` **and**
-              ``effort[VAR] > sqrt(EPS) * gamma_nom``, an MPERT-style
-              mode correction is applied: if ``dur[EXP]`` is too close
-              to ``dur[LWR]`` it is pushed inside by ``2 * dur[ERR]``;
-              if it is too close to ``dur[UPR]``, ``dur[UPR]`` is grown
-              so that the mean stays strictly inside; then ``dur[VAR]``
-              is recomputed as
-              ``(dur[EXP] - dur[LWR]) * (dur[UPR] - dur[EXP]) /
-              (gamma + 3.0)`` (an algebraically equivalent form of the
-              beta-distribution variance formula, given
-              ``alpha = mu * (gamma + 2)`` and
-              ``beta = (1 - mu) * (gamma + 2)``, where
-              ``mu = (dur[EXP] - dur[LWR]) / (dur[UPR] - dur[LWR])``).
-              Otherwise the activity is treated as deterministic and
-              ``dur[UPR] = dur[LWR] = dur[EXP]``.
-            - If the activity is deterministic, ``dur[UPR]`` and
-              ``dur[LWR]`` are collapsed to ``dur[EXP]``.
-            """
-            # Optimize for default duration function
-            if _default_duration == self._duration:
-                return effort.copy()
-
-            dur = np.zeros((5,), dtype=float)
-
-            # Compute duration value and error bound
-            # effort[EXP] is float: positive for forward pass, negative for backward pass
-            dur[EXP] = self._duration(effort[EXP], activity, base_time[EXP], target)
-            # Yes, we use one time base here to guarantee that dur[LWR] <= dur[EXP] <= dur[UPR]
-            dur[UPR] = self._duration(effort[UPR], activity, base_time[EXP], target)
-            dur[LWR] = self._duration(effort[LWR], activity, base_time[EXP], target)
-
-            # Error bound
-            dur[ERR] = EPS * max(abs(dur[UPR]),  abs(dur[LWR]),  abs(dur[UPR] - dur[LWR]))
-
-            gamma_nom = (effort[EXP] - effort[LWR]) * (effort[UPR] - effort[EXP])
-
-            if (np.sqrt(effort[VAR]) <= effort[ERR] or
-                effort[VAR] <= np.sqrt(EPS) * gamma_nom or
-                not self.is_pert):
-                # Deterministic or fake activity
-                # VAR is zero already
-                dur[UPR] = dur[EXP]
-                dur[LWR] = dur[EXP]
-                return dur
-
-            # Model is PERT and activity is not deterministic.
-            # Make sure that mode is in (dur[LWR], dur[UPR]),
-            # use MPERT math here
-            gamma = gamma_nom / effort[VAR] - 3.0
-
-            # Condition for mode
-            if gamma < 6.0 * EPS:
-                gamma = 6.0 * EPS
-
-            # Now values corrections
-            thr = dur[LWR] + (dur[UPR] - dur[LWR]) / (gamma + 2.0)
-            if dur[EXP] <= thr:
-                dur[EXP] = thr + 2.0 * dur[ERR]
-
-            if dur[EXP] >= dur[UPR] - (dur[UPR] - dur[LWR]) / (gamma + 2.0):
-                dur[UPR] = ((gamma + 2.0) * dur[EXP] - dur[LWR]) / (gamma + 1.0) + 2.0 * dur[ERR]
-
-            dur[VAR] = (dur[EXP] - dur[LWR]) * (dur[UPR] - dur[EXP]) / (gamma + 3.0)
-
-            return dur
-
-        #======================================================================
-        def _sanitize_act(a, target):
-            """
-            Sanitize activity time parameters after update.
-
-            Parameters
-            ----------
-            a : ArrowActivity
-                Activity to sanitize
-            target : str
-                Which parameter set was just computed. Recognized values:
-                ``'early_pre'``, ``'late_pre'``, ``'early'``, ``'late'``.
-                Any other value is ignored.
-
-            Raises
-            ------
-            RuntimeError
-                If any enforced invariant is violated beyond the
-                accumulated error bound. See
-                :meth:`ActivityOnArrowModel._compute_target` for the
-                full list.
-
-            Notes
-            -----
-            - On early passes (``'early_pre'`` / ``'early'``):
-
-              1. If ``early_start[LWR] < 0``, all three components of
-                 ``early_start`` are shifted up by ``-early_start[LWR]``
-                 (so that ``early_start[LWR] == 0``).
-              2. The invariant ``early_end[c] >= early_start[c]`` is
-                 checked for ``c in {EXP, UPR, LWR}``; violations beyond
-                 the accumulated error bound raise :exc:`RuntimeError`.
-              3. If ``early_end[EXP] < early_start[EXP]`` (within the
-                 error bound), all three components of ``early_end``
-                 are shifted upward by the ``EXP``-component deficit.
-              4. The consistency of ``early_start[EXP]`` with
-                 ``early_start[LWR]`` / ``early_start[UPR]`` is checked:
-                 if ``early_start[EXP]`` lies outside ``[LWR, UPR]`` by
-                 more than the error bound, :exc:`RuntimeError` is
-                 raised; otherwise ``early_start[EXP]`` is clamped into
-                 that range. The same check / clamp is applied to
-                 ``early_end``.
-
-            - On late passes (``'late_pre'`` / ``'late'``):
-
-              1. If ``late_start[EXP] < early_start[EXP]`` by more than
-                 the error bound, :exc:`RuntimeError` is raised; within
-                 the bound, all three components of ``late_start`` are
-                 shifted upward by the ``EXP``-component deficit.
-              2. If ``late_end[EXP] < late_start[EXP]`` by more than
-                 the error bound, :exc:`RuntimeError` is raised; within
-                 the bound, all three components of ``late_end`` are
-                 shifted upward by the ``EXP``-component deficit.
-              3. The consistency of ``late_start[EXP]`` with
-                 ``late_start[LWR]`` / ``late_start[UPR]`` is checked
-                 (same raise / clamp logic as for the early passes).
-                 The same check / clamp is applied to ``late_end``.
-            """
-            # Time params lower limit
-
-            if target in ['early_pre', 'early']:
-                # Decouple activities from events
-                a.early_start = a.early_start.copy()
-                a.early_end   = a.early_end.copy()
-
-                if a.early_start[LWR] < 0.0:
-                    a.early_start[EXP] -= a.early_start[LWR]
-                    a.early_start[UPR] -= a.early_start[LWR]
-                    a.early_start[LWR] = 0.0
-
-                if a.early_start[EXP] - a.early_end[EXP] >  a.early_start[ERR] + a.early_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected end time ({a.early_end[EXP]} < {a.early_start[EXP]})")
-
-                if a.early_start[UPR] - a.early_end[UPR] >  a.early_start[ERR] + a.early_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} upper end time ({a.early_end[UPR]} < {a.early_start[UPR]})")
-
-                if a.early_start[LWR] - a.early_end[LWR] >  a.early_start[ERR] + a.early_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} lower end time ({a.early_end[LWR]} < {a.early_start[LWR]})")
-
-                if a.early_end[EXP] < a.early_start[EXP]:
-                    delta = a.early_start[EXP] - a.early_end[EXP]
-                    a.early_end[EXP] += delta
-                    a.early_end[UPR] += delta
-                    a.early_end[LWR] += delta
-
-                if a.early_start[EXP] - a.early_start[UPR] > a.early_start[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected early start time ({a.early_start[EXP]} > {a.early_start[UPR]})")
-
-                if a.early_start[LWR] - a.early_start[EXP] > a.early_start[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected early start time ({a.early_start[EXP]} < {a.early_start[LWR]})")
-
-                if a.early_start[EXP] > a.early_start[UPR]:
-                    a.early_start[EXP] = a.early_start[UPR]
-
-                if a.early_start[EXP] < a.early_start[LWR]:
-                    a.early_start[EXP] = a.early_start[LWR]
-
-                if a.early_end[EXP] - a.early_end[UPR] > a.early_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected early end time ({a.early_end[EXP]} > {a.early_end[UPR]})")
-
-                if a.early_end[LWR] - a.early_end[EXP] > a.early_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected early end time ({a.early_end[EXP]} < {a.early_end[LWR]})")
-
-                if a.early_end[EXP] > a.early_end[UPR]:
-                    a.early_end[EXP] = a.early_end[UPR]
-
-                if a.early_end[EXP] < a.early_end[LWR]:
-                    a.early_end[EXP] = a.early_end[LWR]
-
-            elif target in ['late_pre', 'late']:
-                # Decouple activities from events
-                a.late_start = a.late_start.copy()
-                a.late_end   = a.late_end.copy()
-
-                # Invariant is preserved only for expected value
-                if a.early_start[EXP] - a.late_start[EXP] >  a.early_start[ERR] + a.late_start[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected start time ({a.late_start[EXP]} < {a.early_start[EXP]})")
-
-                if a.late_start[EXP] < a.early_start[EXP]:
-                    delta = a.early_start[EXP] - a.late_start[EXP]
-                    a.late_start[EXP] += delta
-                    a.late_start[UPR] += delta
-                    a.late_start[LWR] += delta
-
-                # Invariant is preserved only for expected value
-                if a.late_start[EXP] - a.late_end[EXP] >  a.late_start[ERR] + a.late_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected end time ({a.late_end[EXP]} < {a.late_start[EXP]})")
-
-                if a.late_end[EXP] < a.late_start[EXP]:
-                    delta = a.late_start[EXP] - a.late_end[EXP]
-                    a.late_end[EXP] += delta
-                    a.late_end[UPR] += delta
-                    a.late_end[LWR] += delta
-
-                if a.late_start[EXP] - a.late_start[UPR] > a.late_start[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected late start time ({a.late_start[EXP]} > {a.late_start[UPR]})")
-
-                if a.late_start[LWR] - a.late_start[EXP] > a.late_start[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected late start time ({a.late_start[EXP]} < {a.late_start[LWR]})")
-
-                if a.late_start[EXP] > a.late_start[UPR]:
-                    a.late_start[EXP] = a.late_start[UPR]
-
-                if a.late_start[EXP] < a.late_start[LWR]:
-                    a.late_start[EXP] = a.late_start[LWR]
-
-                if a.late_end[EXP] - a.late_end[UPR] > a.late_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected late end time ({a.late_start[EXP]} > {a.late_start[UPR]})")
-
-                if a.late_end[LWR] - a.late_end[EXP] > a.late_end[ERR]:
-                    raise RuntimeError(f"Activity {a.letter} has abnormal {target} expected late end time ({a.late_start[EXP]} < {a.late_start[LWR]})")
-
-                if a.late_end[EXP] > a.late_end[UPR]:
-                    a.late_end[EXP] = a.late_end[UPR]
-
-                if a.late_end[EXP] < a.late_end[LWR]:
-                    a.late_end[EXP] = a.late_end[LWR]
-
-            return
-
-        #======================================================================
-        def _sanitize_evt(e, target):
-            """
-            Sanitize event time parameters after processing.
-
-            Parameters
-            ----------
-            e : Event
-                Event to sanitize
-            target : str
-                Which parameter set was just computed. Recognized values:
-                ``'early_pre'``, ``'late_pre'``, ``'early'``, ``'late'``.
-                Any other value is ignored.
-
-            Raises
-            ------
-            RuntimeError
-                On the late passes, if ``late[EXP]`` falls below
-                ``early[EXP]`` by more than the accumulated error bound.
-                This indicates a structural inconsistency in the network
-                (e.g., a misbehaving ``duration`` callback).
-
-            Notes
-            -----
-            - On ``'early_pre'``: if ``early_pre[LWR] < 0``, all three
-              components are shifted up by ``-early_pre[LWR]``.
-            - On ``'late_pre'``: the ``EXP`` invariant
-              ``late_pre[EXP] >= early_pre[EXP]`` is checked; violations
-              within the error bound are clamped by shifting all three
-              components of ``late_pre`` upward by the ``EXP`` deficit.
-            - On ``'early'`` (final): in addition to the ``LWR >= 0``
-              clamp, the consistency of ``early[EXP]`` with
-              ``early[LWR]`` / ``early[UPR]`` is checked (raise beyond
-              the error bound, clamp within it).
-            - On ``'late'`` (final): the ``EXP`` invariant
-              ``late[EXP] >= early[EXP]`` is checked (raise beyond the
-              error bound, clamp within it). In addition, the
-              consistency of ``late[EXP]`` with ``late[LWR]`` /
-              ``late[UPR]`` is checked (raise beyond the error bound,
-              clamp within it).
-            """
-            if 'early_pre' == target:
-                if e.early_pre[LWR] < 0.0:
-                    e.early_pre[EXP] -= e.early_pre[LWR]
-                    e.early_pre[UPR] -= e.early_pre[LWR]
-                    e.early_pre[LWR] = 0.0
-
-            elif 'late_pre' == target:
-                # Invariant is preserved only for expected value
-                if e.early_pre[EXP] - e.late_pre[EXP] >  e.late_pre[ERR] + e.early_pre[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.late_pre[EXP]} < {e.early_pre[EXP]})")
-
-                if e.late_pre[EXP] < e.early_pre[EXP]:
-                    delta = e.early_pre[EXP] - e.late_pre[EXP]
-                    e.late_pre[EXP] += delta
-                    e.late_pre[UPR] += delta
-                    e.late_pre[LWR] += delta
-
-            elif 'early' == target:
-                if e.early[LWR] < 0.0:
-                    e.early[EXP] -= e.early[LWR]
-                    e.early[UPR] -= e.early[LWR]
-                    e.early[LWR] = 0.0
-
-                if e.early[EXP] - e.early[UPR] > e.early[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.early[EXP]} > {e.early[UPR]})")
-
-                if e.early[LWR] - e.early[EXP] > e.early[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.early[EXP]} < {e.early[LWR]})")
-
-                if e.early[EXP] > e.early[UPR]:
-                    e.early[EXP] = e.early[UPR]
-
-                if e.early[EXP] < e.early[LWR]:
-                    e.early[EXP] = e.early[LWR]
-
-            elif 'late' == target:
-                # Invariant is preserved only for expected value
-                if e.early[EXP] - e.late[EXP] >  e.late[ERR] + e.early[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal expected late time ({e.late[EXP]} < {e.early[EXP]})")
-
-                if e.late[EXP] < e.early[EXP]:
-                    delta = e.early[EXP] - e.late[EXP]
-                    e.late[EXP] += delta
-                    e.late[UPR] += delta
-                    e.late[LWR] += delta
-
-                if e.late[EXP] - e.late[UPR] > e.late[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.late[EXP]} > {e.late[UPR]})")
-
-                if e.late[LWR] - e.late[EXP] > e.late[ERR]:
-                    raise RuntimeError(f"Event {e.id} has abnormal late expected preliminary time ({e.late[EXP]} < {e.late[LWR]})")
-
-                if e.late[EXP] > e.late[UPR]:
-                    e.late[EXP] = e.late[UPR]
-
-                if e.late[EXP] < e.late[LWR]:
-                    e.late[EXP] = e.late[LWR]
-
-            return
-
-        #======================================================================
         if 'stage' == target:
             act_base      = None
             act_new       = None
@@ -3036,7 +3151,7 @@ class ActivityOnArrowModel:
             rev           = '_in_activities'
             choice        = _choice_early
             delta         = _delta_early
-            process_delta = _duration_vec
+            process_delta = self._duration_vec
 
         elif 'late_pre' == target:
             act_base      = 'late_end'
@@ -3046,7 +3161,7 @@ class ActivityOnArrowModel:
             rev           = '_out_activities'
             choice        = _choice_late
             delta         = _delta_late
-            process_delta = _duration_vec
+            process_delta = self._duration_vec
 
         elif 'early' == target:
             act_base      = 'early_start'
@@ -3549,38 +3664,6 @@ if __name__ == '__main__':
     print("\n=== Advanced Example: Resource-Aware Scheduling ===")
 
     def resource_aware_duration(effort, activity, base_time, target):
-        """
-        Custom duration callback function for resource-aware scheduling.
-
-        This function demonstrates how to model resource constraints including:
-        - Team size allocation
-        - Productivity factors
-        - Resource availability based on time
-
-        Parameters
-        ----------
-        effort : float
-            Resource effort estimate:
-
-            - Positive number or zero for forward pass
-            - Negative number or zero for backward pass
-        activity : ArrowActivity
-            Activity object containing resource data
-        base_time : float
-            Base time for availability calculations during network
-            traversal -- the ``EXP`` component of the source event's
-            base time. For the internal ``EXP`` / ``UPR`` / ``LWR`` calls
-            this is the same scalar. The callback is invoked only during
-            the preliminary passes, so ``base_time`` is never ``None``.
-        target : str
-            Target scenario identifier (can be used for scenario-specific
-            logic). One of ``'early_pre'`` or ``'late_pre'``.
-
-        Returns
-        -------
-        float
-            Actual duration with the same sign as ``effort``.
-        """
         team = activity.data.get('team_size', 1)
         prod = activity.data.get('productivity', 1.0)
 
